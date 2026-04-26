@@ -127,6 +127,24 @@
         return true;
     }
 
+    function removeByName(targetName) {
+        if (!targetName) return false;
+        var changed = false;
+        for (var i = menuEntries.length - 1; i >= 0; i--) {
+            if (menuEntries[i] && menuEntries[i].name === targetName) {
+                menuEntries.splice(i, 1);
+                changed = true;
+            }
+        }
+        if (changed && initialized) rebuild();
+        return changed;
+    }
+
+    function replaceByName(targetName, spec) {
+        removeByName(targetName);
+        return add(spec);
+    }
+
     function setStatus(text) {
         statusText = text || '';
         if (statusItem) {
@@ -137,7 +155,12 @@
 
     S.kernel.ui = {
         init:      init,
-        menu:      { add: add, rebuild: rebuild },
+        menu:      {
+            add:           add,
+            removeByName:  removeByName,
+            replaceByName: replaceByName,
+            rebuild:       rebuild
+        },
         status:    { set: setStatus, get: function () { return statusText; } }
     };
 
