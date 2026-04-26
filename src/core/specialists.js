@@ -400,12 +400,43 @@
     }
 
     // --- Dispatch (low-level passthrough to dispatch.js) ---
+    //
+    // Server packet: SendServerAction(95, taskId, 0, 0, dStartSpecialistTaskVO)
+    //   - taskId    = "task category" int. For explorers and geologists the
+    //                 host's user-config (mainSettings.explDefTask /
+    //                 geoDefTask) stores this directly. 0 = treasure search
+    //                 / deposit search; non-zero = adventure searches and
+    //                 specials.
+    //   - subTaskId = variant within the category. For explorers: short=0,
+    //                 medium=1, long=2, evenLonger=3, prolonged=6. For
+    //                 geologists: deposit-type index.
+    //
+    // Modules pass either Steward.{ExplorerTask,GeologistTask} enum values
+    // (in which case we map to their raw subTaskId and assume taskId=0) or
+    // explicit (taskId, subTaskId) integers.
 
-    function send(spec, taskType, params, responder) {
-        var raw = taskType;
-        if (typeof EXPLORER_TASK_RAW[taskType] !== 'undefined') raw = EXPLORER_TASK_RAW[taskType];
-        else if (typeof GEOLOGIST_TASK_RAW[taskType] !== 'undefined') raw = GEOLOGIST_TASK_RAW[taskType];
-        return S.core.specialists.dispatch.send(spec, raw, params, responder);
+    function send(spec, taskOrEnum, subTaskIdOpt, responder) {
+        var taskId = 0;
+        var subTaskId = 0;
+        if (typeof taskOrEnum === 'string') {
+            // Enum value — look up the raw int.
+            if (typeof EXPLORER_TASK_RAW[taskOrEnum] !== 'undefined') {
+                subTaskId = EXPLORER_TASK_RAW[taskOrEnum];
+            } else if (typeof GEOLOGIST_TASK_RAW[taskOrEnum] !== 'undefined') {
+                subTaskId = GEOLOGIST_TASK_RAW[taskOrEnum];
+            } else {
+                S.kernel.warn('specialists', 'send: unknown enum', taskOrEnum);
+                return false;
+            }
+        } else if (typeof taskOrEnum === 'number') {
+            // Caller passed taskId directly; subTaskId from the second arg.
+            taskId = taskOrEnum;
+            subTaskId = (typeof subTaskIdOpt === 'number') ? subTaskIdOpt : 0;
+        } else {
+            S.kernel.warn('specialists', 'send: taskOrEnum must be Steward.{Explorer,Geologist}Task or a number');
+            return false;
+        }
+        return S.core.specialists.dispatch.send(spec, taskId, subTaskId, responder);
     }
 
     function recall(spec, responder) {
