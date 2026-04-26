@@ -51,6 +51,17 @@
     EXPLORER_TASK_RAW[S.ExplorerTask.AdventureLong]  = 5;
     EXPLORER_TASK_RAW[S.ExplorerTask.Prolonged]      = 6;
 
+    // Inverse map: raw int from mainSettings.explDefTask → ExplorerTask enum.
+    var RAW_TO_EXPLORER_TASK = [
+        S.ExplorerTask.Short,
+        S.ExplorerTask.Medium,
+        S.ExplorerTask.Long,
+        S.ExplorerTask.EvenLonger,
+        S.ExplorerTask.AdventureShort,
+        S.ExplorerTask.AdventureLong,
+        S.ExplorerTask.Prolonged
+    ];
+
     var GEOLOGIST_TASK_RAW = {};
     GEOLOGIST_TASK_RAW[S.GeologistTask.Search] = 0;
 
@@ -279,56 +290,92 @@
 
     // --- Recommendations ---
 
+    function rawToExplorerTask(raw) {
+        if (typeof raw !== 'number') return null;
+        return RAW_TO_EXPLORER_TASK[raw] || null;
+    }
+
     function pickTask(explorer) {
-        // Default policy: pick the explorer task that maximizes items/hour.
-        // When no event data is available, fall back to ExplorerTask.Short
-        // (highest items/hour in the no-event baseline per autoTSO analysis).
-        // Note: explorer-specific skills are honored once the P2 spike lands;
-        // signature accepts the explorer now so call sites are stable.
+        // Precedence (see docs/CORE_USAGE.md "Rule 5"):
+        //   1. mainSettings.explDefTaskByType[<name>] — per-spec host override
+        //   2. event-aware optimization (treasure events)
+        //   3. mainSettings.explDefTask                — host's global default
+        //   4. ExplorerTask.Short                      — hard-coded baseline
         var defaultTask = S.ExplorerTask.Short;
         if (!explorer) return defaultTask;
+
+        // 1. Per-spec host override.
+        if (S.kernel.host) {
+            var fromHostByName = rawToExplorerTask(S.kernel.host.explDefTaskByName(specName(explorer)));
+            if (fromHostByName) return fromHostByName;
+        }
+
+        // 2. Event-aware optimization.
         try {
             var active = S.core.events.active();
-            if (!active.length) return defaultTask;
-            // Prefer the first treasure-category active event.
-            var eventCode = null;
-            for (var i = 0; i < active.length; i++) {
-                if (active[i].category === 'treasure') { eventCode = active[i].code; break; }
+            if (active.length) {
+                var eventCode = null;
+                for (var i = 0; i < active.length; i++) {
+                    if (active[i].category === 'treasure') { eventCode = active[i].code; break; }
+                }
+                if (eventCode) {
+                    var values = S.core.events.treasureValues(eventCode);
+                    if (values && values.length) {
+                        // values[k] = expected items per task k. Pick max(values/hours).
+                        // Approximate hours per task per autoTSO/docs/explorers.md.
+                        var defaultHours = [1.2, 2.4, 4.8, 9.6, 14.4];
+                        var bestIdx = 0;
+                        var bestRate = -1;
+                        for (var k = 0; k < values.length && k < defaultHours.length; k++) {
+                            var rate = values[k] / defaultHours[k];
+                            if (rate > bestRate) { bestRate = rate; bestIdx = k; }
+                        }
+                        var taskByIdx = [
+                            S.ExplorerTask.Short,
+                            S.ExplorerTask.Medium,
+                            S.ExplorerTask.Long,
+                            S.ExplorerTask.EvenLonger,
+                            S.ExplorerTask.Prolonged
+                        ];
+                        if (taskByIdx[bestIdx]) return taskByIdx[bestIdx];
+                    }
+                }
             }
-            if (!eventCode) return defaultTask;
-            var values = S.core.events.treasureValues(eventCode);
-            if (!values || !values.length) return defaultTask;
-            // values[k] = expected items per task k. Pick max(values[k] / duration[k]).
-            // Without live duration data we approximate with autoTSO's defaults
-            // (Short=1.2, Medium=2.4, Long=4.8, EvenLonger=9.6, Prolonged=14.4 hours).
-            var defaultHours = [1.2, 2.4, 4.8, 9.6, 14.4];
-            var bestIdx = 0;
-            var bestRate = -1;
-            for (var k = 0; k < values.length && k < defaultHours.length; k++) {
-                var rate = values[k] / defaultHours[k];
-                if (rate > bestRate) { bestRate = rate; bestIdx = k; }
-            }
-            var taskByIdx = [
-                S.ExplorerTask.Short,
-                S.ExplorerTask.Medium,
-                S.ExplorerTask.Long,
-                S.ExplorerTask.EvenLonger,
-                S.ExplorerTask.Prolonged
-            ];
-            return taskByIdx[bestIdx] || defaultTask;
         } catch (e) {
-            S.kernel.warn('specialists', 'pickTask threw:', e);
-            return defaultTask;
+            S.kernel.warn('specialists', 'pickTask event eval threw:', e);
         }
+
+        // 3. Host global default.
+        if (S.kernel.host) {
+            var fromHostGlobal = rawToExplorerTask(S.kernel.host.explDefTaskGlobal());
+            if (fromHostGlobal) return fromHostGlobal;
+        }
+
+        // 4. Hard-coded baseline.
+        return defaultTask;
     }
 
     function pickDeposits(geologist) {
         // Returns an ordered list of deposit type names the geologist should
-        // prioritize. With no event data, returns []; modules should fall
-        // back to their own configured defaults. Per-geologist skills feed
-        // into ranking once the P2 spike lands.
+        // prioritize. Precedence:
+        //   1. mainSettings.geoDefTaskByType[<name>] — per-spec host override
+        //   2. event-aware deposit modifiers
+        //   3. mainSettings.geoDefTask              — host's global default
+        //   4. []                                    — caller falls back to own config
+        //
+        // The host stores defaults as a single deposit-type index (not a list)
+        // so when only the host default applies we return a one-element array.
+        // Per-geologist skill weighting plugs in here once the P2 spike lands.
         var out = [];
         if (!geologist) return out;
+
+        // 1. Per-spec host override (returns a single index → wrap as one-elem list).
+        if (S.kernel.host) {
+            var perName = S.kernel.host.geoDefTaskByName(specName(geologist));
+            if (typeof perName === 'number') return ['' + perName];
+        }
+
+        // 2. Event-aware deposit modifiers.
         try {
             var active = S.core.events.active();
             for (var i = 0; i < active.length; i++) {
@@ -338,9 +385,17 @@
                 var keys = Object.keys(data.depositModifier);
                 for (var k = 0; k < keys.length; k++) out.push(keys[k]);
             }
+            if (out.length > 0) return out;
         } catch (e) {
-            S.kernel.warn('specialists', 'pickDeposits threw:', e);
+            S.kernel.warn('specialists', 'pickDeposits event eval threw:', e);
         }
+
+        // 3. Host global default.
+        if (S.kernel.host) {
+            var global = S.kernel.host.geoDefTaskGlobal();
+            if (typeof global === 'number') return ['' + global];
+        }
+
         return out;
     }
 

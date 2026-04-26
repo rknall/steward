@@ -116,9 +116,14 @@ var task     = Steward.core.specialists.pickTask(explorer);
 var deposits = Steward.core.specialists.pickDeposits(geologist);
 ```
 
-These methods are event-aware. They consult `Steward.core.events.*` internally so your module doesn't need to. When a new event ships, the recommendation logic updates in one place.
+These methods consult, in order:
 
-If you're tempted to compute your own preferred task or deposit, check whether the desired behaviour is "the canonical answer plus a constraint" — if so, filter the result of `pickTask` rather than recomputing it.
+1. **Host per-spec overrides** — `mainSettings.explDefTaskByType[name]` / `geoDefTaskByType[name]`. If the user has configured a specific explorer/geologist's preferred task in the host UI, Steward respects it.
+2. **Event-aware optimization** — for treasure events, picks the task with the best items-per-hour rate. For deposit-affecting events, returns the prioritized deposit list.
+3. **Host global default** — `mainSettings.explDefTask` / `geoDefTask`.
+4. **Hard-coded baseline** — `ExplorerTask.Short` / empty list.
+
+If you're tempted to compute your own preferred task, check whether the desired behaviour is "the canonical answer plus a constraint" — if so, filter the result of `pickTask` rather than recomputing it. Modules add their own override at most as the *last* word, never bypassing host preferences entirely.
 
 ## Rule 6: dispatch composition is module concern
 

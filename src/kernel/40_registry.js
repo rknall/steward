@@ -42,12 +42,24 @@
             return false;
         }
 
+        // Experimental gate — modules flagged experimental only register when
+        // the host has mainSettings.experimental enabled. This matches the
+        // host convention (see HOST_INTEGRATION.md).
+        if (spec.experimental === true) {
+            if (!S.kernel.host || !S.kernel.host.experimental()) {
+                S.kernel.log('registry', 'skipping experimental module', spec.id,
+                             '(mainSettings.experimental is off)');
+                return false;
+            }
+        }
+
         var entry = {
-            id:       spec.id,
-            priority: spec.priority,
-            isReady:  spec.isReady,
-            plan:     spec.plan,
-            boot:     isFunction(spec.boot) ? spec.boot : null
+            id:           spec.id,
+            priority:     spec.priority,
+            isReady:      spec.isReady,
+            plan:         spec.plan,
+            boot:         isFunction(spec.boot) ? spec.boot : null,
+            experimental: spec.experimental === true
         };
         modules.push(entry);
         byId[spec.id] = entry;

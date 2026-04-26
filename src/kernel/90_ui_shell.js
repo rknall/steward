@@ -82,12 +82,33 @@
         return 'Active — ' + moduleSuffix;
     }
 
+    function attachContainer() {
+        // Adaptive placement (Q4 in P5_PLAN.md):
+        //   - mainSettings.menuStyle === 'grouped'  → top-level next to host groups
+        //   - otherwise (linear/flat layout)        → nest under the host's "Tools" submenu
+        var rootMenu = window.nativeWindow.menu;
+        var style = (S.kernel.host && S.kernel.host.menuStyle) ? S.kernel.host.menuStyle() : 'grouped';
+        if (style === 'grouped') return { container: rootMenu, mode: 'top-level' };
+        try {
+            var toolsItem = rootMenu.getItemByName ? rootMenu.getItemByName('Tools') : null;
+            if (toolsItem && toolsItem.submenu) {
+                return { container: toolsItem.submenu, mode: 'tools' };
+            }
+        } catch (e) { /* fall through */ }
+        // Tools submenu not found — fall back to top-level.
+        return { container: rootMenu, mode: 'top-level' };
+    }
+
     function rebuild() {
         if (!nativeMenuAvailable()) return false;
         try {
-            var rootMenu = window.nativeWindow.menu;
-            removeIfPresent(rootMenu, 'StewardRoot');
-            removeIfPresent(rootMenu, 'StewardStatus');
+            var attach = attachContainer();
+            var container = attach.container;
+            removeIfPresent(container, 'StewardRoot');
+            removeIfPresent(container, 'StewardStatus');
+            // If mode flipped between rebuilds, also clean up the *other* container
+            // so we don't leave orphan entries behind.
+            if (attach.mode === 'tools') removeIfPresent(window.nativeWindow.menu, 'StewardRoot');
 
             var root = new air.NativeMenuItem('~Steward~');
             root.name = 'StewardRoot';
@@ -117,7 +138,8 @@
             }
 
             root.submenu = sub;
-            rootMenu.addItem(root);
+            container.addItem(root);
+            S.kernel.log('ui', 'menu rebuilt — mode:', attach.mode);
             return true;
         } catch (e) {
             S.kernel.error('ui', 'rebuild failed:', e);
