@@ -139,7 +139,7 @@
 
             root.submenu = sub;
             container.addItem(root);
-            S.kernel.log('ui', 'menu rebuilt — mode:', attach.mode);
+            S.kernel.debug('ui', 'menu rebuilt — mode:', attach.mode);
             return true;
         } catch (e) {
             S.kernel.error('ui', 'rebuild failed:', e);

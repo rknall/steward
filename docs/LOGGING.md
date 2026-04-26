@@ -7,14 +7,27 @@ Steward provides a single, category-based logger that emits to both the in-clien
 ## API
 
 ```js
+Steward.kernel.debug(category, ...values)       // DEBUG-level (off by default)
 Steward.kernel.log(category, ...values)         // INFO-level
 Steward.kernel.warn(category, ...values)        // WARN-level
 Steward.kernel.error(category, ...values)       // ERROR-level
 
 Steward.kernel.log.isEnabled(category)          // gate expensive log construction
+Steward.kernel.debug.isEnabled(category)        // also checks the debug master switch
 ```
 
 `category` is an arbitrary string, conventionally the module ID (`'collect'`, `'scheduler'`, `'buildings'`). Multiple values are joined with single spaces.
+
+### When to use which level
+
+| Level   | Use for                                                             | Example                                          |
+|---------|---------------------------------------------------------------------|--------------------------------------------------|
+| `debug` | Per-tick / per-action chatter that's only useful while diagnosing.  | scheduler tick, ui menu rebuilds, per-action collect lines |
+| `log`   | One-shot or rate-limited events meaningful at runtime.              | "module registered", "boot complete", "queued N actions"  |
+| `warn`  | Recoverable surprises — game API quirks, malformed input.           | "buildings.list threw, returning empty"          |
+| `error` | Things that broke; user action may be needed.                       | "settings.json read failed", "module plan threw" |
+
+DEBUG is dropped silently when the master switch is off, even if the category is enabled.
 
 ### Why pass values varargly?
 
@@ -33,6 +46,7 @@ Settings live under `Steward.kernel.settings.read('logger')` (mapped to `'stewar
 | Key            | Default | Meaning                                                         |
 |----------------|---------|-----------------------------------------------------------------|
 | `enabled`      | `true`  | Master switch. `false` disables both console and file output.   |
+| `debugEnabled` | `false` | When `true`, DEBUG-level lines are emitted; otherwise dropped.  |
 | `categories`   | `{}`    | Per-category enable map. A missing key defaults to `true`.      |
 | `fileEnabled`  | `true`  | Whether to also write to disk.                                  |
 | `maxFileSizeKB`| `5000`  | Rotate the file when it grows past this size. `0` = no rotate.  |

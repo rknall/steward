@@ -85,7 +85,7 @@
         if (!state.running) return;
         state.tickCount++;
         var ctx = buildContext();
-        S.kernel.log('scheduler', 'tick', state.tickCount, 'modules:', S.kernel.registry.count());
+        S.kernel.debug('scheduler', 'tick', state.tickCount, 'modules:', S.kernel.registry.count());
 
         for (var i = 0; i < S.kernel.PRIORITY_ORDER.length; i++) {
             walkTier(S.kernel.PRIORITY_ORDER[i], ctx);

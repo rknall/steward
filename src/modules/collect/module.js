@@ -92,7 +92,7 @@
                     game.gi.SelectBuilding(building);
                 }
                 var name = bld.name(building);
-                S.kernel.log('collect', 'collecting', name, 'at', grid);
+                S.kernel.debug('collect', 'collecting', name, 'at', grid);
                 if (typeof globalFlash !== 'undefined' && globalFlash && globalFlash.gui &&
                     typeof globalFlash.gui.UpdateGuiOnZoneLoad === 'function') {
                     globalFlash.gui.UpdateGuiOnZoneLoad();

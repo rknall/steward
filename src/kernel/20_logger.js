@@ -16,6 +16,7 @@
 (function (S) {
 
     var LEVEL = {
+        DEBUG: 'DEBUG',
         LOG:   'LOG',
         WARN:  'WARN',
         ERROR: 'ERROR'
@@ -23,6 +24,7 @@
 
     var state = {
         enabled:        true,
+        debugEnabled:   false,    // DEBUG-level lines are dropped unless this is true
         fileEnabled:    false,    // off until settings load + storage dir resolved
         categories:     {},       // {} means "all enabled"
         maxFileSizeKB:  S.kernel.LIMITS.LOG_FILE_MAX_KB_DEFAULT,
@@ -144,12 +146,16 @@
 
     function emit(level, args) {
         var category = args[0] || 'kernel';
+        // DEBUG-level is gated by an explicit master switch — these messages
+        // are dropped silently when debugEnabled is false (default).
+        if (level === LEVEL.DEBUG && !state.debugEnabled) return;
         if (!shouldEmit(category)) return;
         var line = format(level, category, joinArgs(args, 1));
         emitToConsole(level, line);
         emitToFile(line);
     }
 
+    function debug() { emit(LEVEL.DEBUG, arguments); }
     function log()   { emit(LEVEL.LOG,   arguments); }
     function warn()  { emit(LEVEL.WARN,  arguments); }
     function error() { emit(LEVEL.ERROR, arguments); }
@@ -158,15 +164,21 @@
         return shouldEmit(category);
     };
 
+    debug.isEnabled = function (category) {
+        return state.debugEnabled && shouldEmit(category);
+    };
+
     log.configure = function (cfg) {
         if (!cfg) return;
         if (typeof cfg.enabled === 'boolean')        state.enabled       = cfg.enabled;
+        if (typeof cfg.debugEnabled === 'boolean')   state.debugEnabled  = cfg.debugEnabled;
         if (typeof cfg.fileEnabled === 'boolean')    state.fileEnabled   = cfg.fileEnabled;
         if (typeof cfg.maxFileSizeKB === 'number')   state.maxFileSizeKB = cfg.maxFileSizeKB;
         if (typeof cfg.keepRotated === 'number')     state.keepRotated   = cfg.keepRotated;
         if (cfg.categories && typeof cfg.categories === 'object') state.categories = cfg.categories;
     };
 
+    S.kernel.debug = debug;
     S.kernel.log   = log;
     S.kernel.warn  = warn;
     S.kernel.error = error;
