@@ -1,0 +1,159 @@
+{
+  "env": {
+    "browser": true,
+    "jquery": true
+  },
+  "globals": {
+    "Steward": "writable",
+    "air": "readonly",
+    "game": "readonly",
+    "swmmo": "readonly",
+    "loca": "readonly",
+    "assets": "readonly",
+    "debug": "readonly",
+    "globalFlash": "readonly",
+    "createModalWindow": "readonly",
+    "createTableRow": "readonly",
+    "createSwitch": "readonly",
+    "getImage": "readonly",
+    "getImageTag": "readonly",
+    "getText": "readonly",
+    "Modal": "readonly",
+    "MenuItem": "readonly"
+  },
+  "parserOptions": {
+    "ecmaVersion": 6,
+    "sourceType": "script"
+  },
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": "warn",
+    "no-var": "off",
+    "prefer-const": "off",
+    "no-const-assign": "error",
+    "eqeqeq": ["warn", "always"],
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "VariableDeclaration[kind='let']",
+        "message": "`let` is not supported in Adobe AIR 32. Use `var` (or top-level `const`)."
+      },
+      {
+        "selector": "ArrowFunctionExpression",
+        "message": "Arrow functions are not supported in Adobe AIR 32. Use `function () { ... }`."
+      },
+      {
+        "selector": "TemplateLiteral",
+        "message": "Template literals are not supported in Adobe AIR 32. Use string concatenation."
+      },
+      {
+        "selector": "TaggedTemplateExpression",
+        "message": "Tagged templates are not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "SpreadElement",
+        "message": "Spread (`...`) is not supported in Adobe AIR 32. Use Array.prototype.slice / Function.prototype.apply."
+      },
+      {
+        "selector": "RestElement",
+        "message": "Rest parameters (`...args`) are not supported in Adobe AIR 32. Use `arguments`."
+      },
+      {
+        "selector": "ObjectPattern",
+        "message": "Destructuring is not supported in Adobe AIR 32. Use explicit property access."
+      },
+      {
+        "selector": "ArrayPattern",
+        "message": "Destructuring is not supported in Adobe AIR 32. Use explicit index access."
+      },
+      {
+        "selector": "ClassDeclaration",
+        "message": "`class` is not supported in Adobe AIR 32. Use prototype-based constructors."
+      },
+      {
+        "selector": "ClassExpression",
+        "message": "`class` is not supported in Adobe AIR 32. Use prototype-based constructors."
+      },
+      {
+        "selector": "ImportDeclaration",
+        "message": "ES modules are not supported in Adobe AIR 32. Use IIFE attaching to the `Steward` namespace."
+      },
+      {
+        "selector": "ExportNamedDeclaration",
+        "message": "ES modules are not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "ExportDefaultDeclaration",
+        "message": "ES modules are not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "ForOfStatement",
+        "message": "`for...of` is not supported in Adobe AIR 32. Use a numeric `for` loop or `$.each`."
+      },
+      {
+        "selector": "MemberExpression[property.name='includes']",
+        "message": "`.includes()` is not supported in Adobe AIR 32. Use `.indexOf(x) > -1`."
+      },
+      {
+        "selector": "MemberExpression[property.name='startsWith']",
+        "message": "`.startsWith()` is not supported in Adobe AIR 32. Use `.indexOf(x) === 0`."
+      },
+      {
+        "selector": "MemberExpression[property.name='endsWith']",
+        "message": "`.endsWith()` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "MemberExpression[property.name='find']",
+        "message": "`.find()` is not supported in Adobe AIR 32. Use a `for` loop or `.filter()[0]`."
+      },
+      {
+        "selector": "MemberExpression[property.name='findIndex']",
+        "message": "`.findIndex()` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "MemberExpression[property.name='padStart']",
+        "message": "`.padStart()` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "MemberExpression[property.name='padEnd']",
+        "message": "`.padEnd()` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "MemberExpression[property.name='repeat']",
+        "message": "`String.prototype.repeat()` is not reliably supported in Adobe AIR 32."
+      },
+      {
+        "selector": "NewExpression[callee.name='Set']",
+        "message": "`Set` is not supported in Adobe AIR 32. Use a plain object as a key map."
+      },
+      {
+        "selector": "NewExpression[callee.name='Map']",
+        "message": "`Map` is not supported in Adobe AIR 32. Use a plain object."
+      },
+      {
+        "selector": "NewExpression[callee.name='WeakSet']",
+        "message": "`WeakSet` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "NewExpression[callee.name='WeakMap']",
+        "message": "`WeakMap` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "NewExpression[callee.name='Promise']",
+        "message": "`Promise` is not supported in Adobe AIR 32. Use callbacks/responders."
+      },
+      {
+        "selector": "AwaitExpression",
+        "message": "`await` is not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "FunctionDeclaration[async=true]",
+        "message": "`async` functions are not supported in Adobe AIR 32."
+      },
+      {
+        "selector": "FunctionExpression[async=true]",
+        "message": "`async` functions are not supported in Adobe AIR 32."
+      }
+    ]
+  }
+}

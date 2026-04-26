@@ -1,0 +1,35 @@
+{
+  "name": "steward",
+  "version": "0.0.0",
+  "description": "Modular automation framework for The Settlers Online — kernel, core library, and pluggable task modules. Adobe AIR userscript.",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "author": "Roland Knall",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rknall/steward.git"
+  },
+  "keywords": [
+    "settlers-online",
+    "automation",
+    "adobe-air",
+    "userscript"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "lint": "node scripts/lint-air.js",
+    "lint:fix": "node scripts/lint-air.js --fix",
+    "test": "echo 'No tests yet — pass' && exit 0",
+    "prepare": "husky install"
+  },
+  "lint-staged": {
+    "src/**/*.js": [
+      "node scripts/lint-air.js"
+    ]
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0"
+  }
+}
