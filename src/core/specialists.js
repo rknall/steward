@@ -44,16 +44,30 @@
     S.GeologistTask.Search = 'TaskGeologistSearch';                 // raw 0
 
     // Map enum → raw integer the server expects.
-    var EXPLORER_TASK_RAW = {};
-    EXPLORER_TASK_RAW[S.ExplorerTask.Short]          = 0;
-    EXPLORER_TASK_RAW[S.ExplorerTask.Medium]         = 1;
-    EXPLORER_TASK_RAW[S.ExplorerTask.Long]           = 2;
-    EXPLORER_TASK_RAW[S.ExplorerTask.EvenLonger]     = 3;
-    EXPLORER_TASK_RAW[S.ExplorerTask.AdventureShort] = 4;
-    EXPLORER_TASK_RAW[S.ExplorerTask.AdventureLong]  = 5;
-    EXPLORER_TASK_RAW[S.ExplorerTask.Prolonged]      = 6;
+    // Map enum → { taskId, subTaskId } for the dispatch packet.
+    //
+    // The host's SendServerAction(95, taskId, 0, 0, dStartSpecialistTaskVO)
+    // expects taskId to identify the *task family* and the dVO's subTaskID
+    // to pick the variant. Confirmed via the live spike — working explorer
+    // tasks return GetTask().GetType()=1 and GetSubType()={0,1,2,3,6}.
+    //
+    //   - Explorer treasure searches: taskId=1
+    //   - Geologist deposit search:    taskId=0
+    //
+    // autoTSO/user_auto.js:743-750 confirms: sendExplorer passes taskId=1
+    // (via finalTask[0]); sendGeologist passes taskId=0 (literal).
+    var EXPLORER_TASK_PACKET = {};
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Short]          = { taskId: 1, subTaskId: 0 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Medium]         = { taskId: 1, subTaskId: 1 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Long]           = { taskId: 1, subTaskId: 2 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.EvenLonger]     = { taskId: 1, subTaskId: 3 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureShort] = { taskId: 1, subTaskId: 4 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureLong]  = { taskId: 1, subTaskId: 5 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Prolonged]      = { taskId: 1, subTaskId: 6 };
 
     // Inverse map: raw int from mainSettings.explDefTask → ExplorerTask enum.
+    // The host stores defaults as the subTaskID directly, so this is keyed
+    // by subTaskId (not by packet shape).
     var RAW_TO_EXPLORER_TASK = [
         S.ExplorerTask.Short,
         S.ExplorerTask.Medium,
@@ -64,8 +78,10 @@
         S.ExplorerTask.Prolonged
     ];
 
-    var GEOLOGIST_TASK_RAW = {};
-    GEOLOGIST_TASK_RAW[S.GeologistTask.Search] = 0;
+    var GEOLOGIST_TASK_PACKET = {};
+    // Geologists: taskId=0, subTaskId is the deposit-type index supplied
+    // by the caller (since one geologist enum represents many deposits).
+    GEOLOGIST_TASK_PACKET[S.GeologistTask.Search] = { taskId: 0, subTaskId: 0 };
 
     // Specialist type taxonomy.
     //
@@ -485,18 +501,26 @@
             if (active.length) {
                 var eventCode = null;
                 for (var i = 0; i < active.length; i++) {
-                    if (active[i].category === 'treasure') { eventCode = active[i].code; break; }
+                    if (active[i].category === 'treasure' || (active[i].categories && active[i].categories.treasure)) {
+                        eventCode = active[i].code; break;
+                    }
                 }
                 if (eventCode) {
                     var values = S.core.events.treasureValues(eventCode);
                     if (values && values.length) {
+                        // Apply level-dependent multiplier (Anniversary boost).
+                        var levelMult = (typeof S.core.events.levelMultiplier === 'function')
+                            ? S.core.events.levelMultiplier(eventCode) : 1;
                         // values[k] = expected items per task k. Pick max(values/hours).
                         // Approximate hours per task per autoTSO/docs/explorers.md.
+                        // Skill-aware duration math is deferred — modules that
+                        // need it should consult core.specialists.skills(spec)
+                        // directly. The defaults below match the no-skill case.
                         var defaultHours = [1.2, 2.4, 4.8, 9.6, 14.4];
                         var bestIdx = 0;
                         var bestRate = -1;
                         for (var k = 0; k < values.length && k < defaultHours.length; k++) {
-                            var rate = values[k] / defaultHours[k];
+                            var rate = (values[k] * levelMult) / defaultHours[k];
                             if (rate > bestRate) { bestRate = rate; bestIdx = k; }
                         }
                         var taskByIdx = [
@@ -585,27 +609,30 @@
     // explicit (taskId, subTaskId) integers.
 
     function send(spec, taskOrEnum, subTaskIdOpt, responder) {
-        var taskId = 0;
-        var subTaskId = 0;
         if (typeof taskOrEnum === 'string') {
-            // Enum value — look up the raw int.
-            if (typeof EXPLORER_TASK_RAW[taskOrEnum] !== 'undefined') {
-                subTaskId = EXPLORER_TASK_RAW[taskOrEnum];
-            } else if (typeof GEOLOGIST_TASK_RAW[taskOrEnum] !== 'undefined') {
-                subTaskId = GEOLOGIST_TASK_RAW[taskOrEnum];
-            } else {
-                S.kernel.warn('specialists', 'send: unknown enum', taskOrEnum);
-                return false;
+            // Enum value — translate via the per-family packet map.
+            var explPkt = EXPLORER_TASK_PACKET[taskOrEnum];
+            if (explPkt) {
+                return S.core.specialists.dispatch.send(spec, explPkt.taskId, explPkt.subTaskId, responder);
             }
-        } else if (typeof taskOrEnum === 'number') {
-            // Caller passed taskId directly; subTaskId from the second arg.
-            taskId = taskOrEnum;
-            subTaskId = (typeof subTaskIdOpt === 'number') ? subTaskIdOpt : 0;
-        } else {
-            S.kernel.warn('specialists', 'send: taskOrEnum must be Steward.{Explorer,Geologist}Task or a number');
+            var geoPkt = GEOLOGIST_TASK_PACKET[taskOrEnum];
+            if (geoPkt) {
+                // For geologist enums, subTaskIdOpt overrides the default
+                // subTaskId — that's how the caller specifies the deposit-
+                // type index they want the geologist to search for.
+                var subTaskId = (typeof subTaskIdOpt === 'number') ? subTaskIdOpt : geoPkt.subTaskId;
+                return S.core.specialists.dispatch.send(spec, geoPkt.taskId, subTaskId, responder);
+            }
+            S.kernel.warn('specialists', 'send: unknown enum', taskOrEnum);
             return false;
         }
-        return S.core.specialists.dispatch.send(spec, taskId, subTaskId, responder);
+        if (typeof taskOrEnum === 'number') {
+            // Caller passed taskId directly; subTaskId from the second arg.
+            var sub = (typeof subTaskIdOpt === 'number') ? subTaskIdOpt : 0;
+            return S.core.specialists.dispatch.send(spec, taskOrEnum, sub, responder);
+        }
+        S.kernel.warn('specialists', 'send: taskOrEnum must be Steward.{Explorer,Geologist}Task or a number');
+        return false;
     }
 
     function recall(spec, responder) {

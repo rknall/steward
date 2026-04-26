@@ -22,6 +22,11 @@
 
 (function (S) {
 
+    // Module-private state. Persists across ticks but not across reboots.
+    var state = {
+        lastUnmatchedSig: null
+    };
+
     function readSettings() {
         return (S.modules.collect && S.modules.collect.readSettings)
             ? S.modules.collect.readSettings()
@@ -37,11 +42,35 @@
         return false;
     }
 
-    function isPureCollectible(b, patterns) {
-        if (!b) return false;
-        var bld = S.core.buildings;
-        if (!bld.isCollectible(b)) return false;
-        return nameMatchesAny(bld.name(b), patterns);
+    // Build the effective pattern list for the current tick.
+    //
+    // Active events contribute two strings to the pattern set, both via
+    // substring match:
+    //   1. the event base code (Easter, XMAS, Valentine, HW, …)
+    //   2. the event RESOURCE name (StripedEggs, ChristmasResource,
+    //      ValentinesFlower, …) — confirmed empirically: Easter's
+    //      collectible is named 'BuildingStripedEggs' (not 'BuildingEaster*').
+    //      The building name carries the resource, not the event code.
+    //
+    // Both are included because (a) future events might use either pattern,
+    // (b) one might catch generic decorations the other misses, and the
+    // host's getBuildingIsCollectible filter narrows the result to actual
+    // collectibles regardless.
+    function effectivePatterns(s) {
+        var pats = (s.namePatterns || []).slice();
+        try {
+            if (S.core.events && typeof S.core.events.active === 'function') {
+                var ev = S.core.events.active();
+                for (var i = 0; i < ev.length; i++) {
+                    if (ev[i].code && pats.indexOf(ev[i].code) === -1) pats.push(ev[i].code);
+                    if (typeof S.core.events.eventResource === 'function') {
+                        var res = S.core.events.eventResource(ev[i].code);
+                        if (res && pats.indexOf(res) === -1) pats.push(res);
+                    }
+                }
+            }
+        } catch (e) { /* fall through with the configured list */ }
+        return pats;
     }
 
     function isReady(ctx) {
@@ -54,17 +83,47 @@
 
     function plan() {
         var s = readSettings();
+        var patterns = effectivePatterns(s);
         var bld = S.core.buildings;
         bld.invalidate();
         var src = bld.list();
         var enqueued = 0;
+        var collectibleCount = 0;     // host says "this is a collectible"
+        var unmatchedSamples = [];    // up to MAX_SAMPLES distinct names for the warning
+        var seenUnmatched = {};
+        var MAX_SAMPLES = 8;
+
         for (var i = 0; i < src.length; i++) {
-            if (!isPureCollectible(src[i], s.namePatterns)) continue;
+            if (!bld.isCollectible(src[i])) continue;
+            collectibleCount++;
+            var name = bld.name(src[i]);
+            if (!nameMatchesAny(name, patterns)) {
+                if (!seenUnmatched[name] && unmatchedSamples.length < MAX_SAMPLES) {
+                    seenUnmatched[name] = true;
+                    unmatchedSamples.push(name);
+                }
+                continue;
+            }
             S.kernel.queue.add('collect', [bld.grid(src[i])]);
             enqueued++;
         }
         if (enqueued > 0) {
-            S.kernel.log('collect', 'enqueued', enqueued, 'collectible(s)');
+            S.kernel.log('collect', 'enqueued', enqueued, 'collectible(s) of',
+                         collectibleCount, 'host-flagged (patterns:', patterns.join(',') + ')');
+        } else if (collectibleCount > 0) {
+            // Collectibles exist but none match. Logging at log-level only
+            // ONCE per distinct unmatched-set so a stale-state map doesn't
+            // spam the log every tick. Subsequent ticks log at debug.
+            var sig = patterns.join('|') + '|' + unmatchedSamples.join(',');
+            var firstTime = (state.lastUnmatchedSig !== sig);
+            state.lastUnmatchedSig = sig;
+            var msg = ['host has', collectibleCount,
+                       'collectible(s) on map but none match patterns:',
+                       patterns.join(',') || '(empty)',
+                       '— unmatched samples:',
+                       unmatchedSamples.length ? unmatchedSamples.join(', ') : '(none)'];
+            if (firstTime) S.kernel.log.apply(null, ['collect'].concat(msg));
+            else            S.kernel.debug.apply(null, ['collect'].concat(msg));
         }
         // No cooldown — the scheduler's busy contract handles re-entry: plan()
         // will not be called again until every action above has executed.

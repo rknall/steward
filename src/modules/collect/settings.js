@@ -17,16 +17,22 @@
         //   1. game.def('Collections::CollectionsManager').getBuildingIsCollectible(name) === true
         //      (the host's broad "is harvestable" check — true for collectibles AND
         //      terrain/mines/charcoal piles)
-        //   2. its name matches one of these patterns (substring match)
+        //   2. its name matches one of these patterns (substring match) OR
+        //      one of the active-event base codes (auto-derived in plan()).
         //
-        // The default 'Collectible' substring catches Easter eggs, footballs,
-        // quest-driven DummyBuildingCollectible_* items, etc. Add more
-        // patterns when an event ships pickup items that don't carry the
-        // 'Collectible' name (e.g. 'Starfall' for the Starfall event).
+        // The default 'Collectible' substring catches DummyBuildingCollectible_*
+        // quest items and similar. Active events automatically extend the list:
+        // when Easter is live, names containing 'Easter' are picked up
+        // (EasterEgg2024, etc.); same for XMAS, Valentine, HW, Soccer,
+        // Anniversary. No user action needed for new events as long as
+        // Steward.core.events.data has the base code.
         //
-        // Use the "Discover collectibles" menu item to log every candidate
-        // on the current map; pick patterns from that output.
-        namePatterns: ['Collectible', 'Starfall']
+        // Use "Discover collectibles" to log candidates if something is
+        // still missed.
+        //
+        // Note: 'Starfall' is intentionally NOT listed — that family lives
+        // in a separate module (planned).
+        namePatterns: ['Collectible']
     };
 
 }(Steward));

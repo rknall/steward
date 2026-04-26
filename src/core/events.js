@@ -1,12 +1,15 @@
 /*
  * Active events and their per-task modifiers.
  *
- * core/specialists.pickTask and pickDeposits consult these so modules don't
- * need event-awareness themselves. The data layer is in core/events/data.js;
- * this file is the API.
+ * Live event detection mirrors autoTSO (user_auto.js:4416-4425):
+ *   - game.gi.mEventManager.GetActiveEventNames() returns strings like
+ *     'XMASContent2025', 'Valentine_Shop', 'HWContent_2024'.
+ *   - Match against base event codes (XMAS, Valentine, Easter, Soccer,
+ *     Anniversary, HW) by substring. One base event may have multiple
+ *     sub-events live at once (e.g. _Content + _Shop).
  *
- * v0.1 ships with no live event data. active() returns []; the rest of the
- * surface returns sensible defaults until data lands.
+ * core/specialists.pickTask consults active() and treasureValues() so
+ * modules don't need event-awareness themselves.
  */
 
 (function (S) {
@@ -15,38 +18,101 @@
         return (S.core.events.data && S.core.events.data.events) || {};
     }
 
-    function active() {
-        var out = [];
+    function liveEventNames() {
+        try {
+            if (typeof game !== 'undefined' && game && game.gi && game.gi.mEventManager &&
+                typeof game.gi.mEventManager.GetActiveEventNames === 'function') {
+                var names = game.gi.mEventManager.GetActiveEventNames();
+                if (!names) return [];
+                // The host returns a Flash vector; iterate defensively.
+                var out = [];
+                var len = (typeof names.length === 'number') ? names.length : 0;
+                for (var i = 0; i < len; i++) {
+                    if (typeof names[i] === 'string') out.push(names[i]);
+                }
+                return out;
+            }
+        } catch (e) {
+            S.kernel.warn('events', 'GetActiveEventNames threw:', e);
+        }
+        return [];
+    }
+
+    function eventEndTime(rawName) {
+        try {
+            if (typeof game !== 'undefined' && game && game.gi && game.gi.mEventManager &&
+                typeof game.gi.mEventManager.GetEventStopDate === 'function') {
+                return game.gi.mEventManager.GetEventStopDate(rawName);
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
+    // Match a live event name against our base codes via substring (mirrors
+    // autoTSO at user_auto.js:4421). Returns the base code or null.
+    function matchBaseCode(rawEventName) {
+        if (!rawEventName) return null;
         var t = table();
-        var now = Date.now();
         var keys = Object.keys(t);
         for (var i = 0; i < keys.length; i++) {
-            var ev = t[keys[i]];
-            if (!ev) continue;
-            // If start/end aren't specified, treat as "always active".
-            var startOk = !ev.startTime || ev.startTime <= now;
-            var endOk   = !ev.endTime   || ev.endTime   >= now;
-            if (startOk && endOk) {
-                out.push({
-                    code:      keys[i],
-                    name:      ev.name || keys[i],
-                    category:  ev.category || null,
-                    startTime: ev.startTime || null,
-                    endTime:   ev.endTime   || null
-                });
+            if (rawEventName.indexOf(keys[i]) !== -1) return keys[i];
+        }
+        return null;
+    }
+
+    // Return active events as { code, name, category, rawNames[], endTime }.
+    // Multiple raw events may collapse to one base code; their suffixes
+    // (_Content, _Shop, …) become category tags so callers can filter.
+    function active() {
+        var live = liveEventNames();
+        if (!live.length) return [];
+        var byCode = {};
+        for (var i = 0; i < live.length; i++) {
+            var raw = live[i];
+            var code = matchBaseCode(raw);
+            if (!code) continue;
+            if (!byCode[code]) {
+                byCode[code] = {
+                    code:       code,
+                    name:       (table()[code] && table()[code].name) || code,
+                    rawNames:   [],
+                    categories: {},
+                    endTime:    null
+                };
             }
+            byCode[code].rawNames.push(raw);
+            // Category guess from suffix.
+            if (raw.indexOf('_Shop') !== -1)         byCode[code].categories.shop    = true;
+            else if (raw.indexOf('Content') !== -1)  byCode[code].categories.treasure = true;
+            else                                      byCode[code].categories.other   = true;
+            // Track the latest end time across sub-events.
+            var et = eventEndTime(raw);
+            if (et && (!byCode[code].endTime || et > byCode[code].endTime)) {
+                byCode[code].endTime = et;
+            }
+        }
+        // Flatten categories object → list of strings, plus a flat
+        // 'category' field that's the first ('treasure' wins over 'shop'
+        // wins over 'other') so simple consumers can keep using it.
+        var out = [];
+        var codes = Object.keys(byCode);
+        for (var k = 0; k < codes.length; k++) {
+            var ev = byCode[codes[k]];
+            ev.categoryList = Object.keys(ev.categories);
+            ev.category = ev.categories.treasure ? 'treasure'
+                        : ev.categories.shop     ? 'shop'
+                        : (ev.categoryList[0] || null);
+            out.push(ev);
         }
         return out;
     }
 
     function isActive(code) {
-        var t = table();
-        if (!t[code]) return false;
-        var now = Date.now();
-        var ev = t[code];
-        if (ev.startTime && ev.startTime > now) return false;
-        if (ev.endTime   && ev.endTime   < now) return false;
-        return true;
+        var a = active();
+        for (var i = 0; i < a.length; i++) {
+            if (a[i].code === code) return true;
+        }
+        return false;
     }
 
     function treasureValues(code) {
@@ -56,10 +122,9 @@
     }
 
     function depositModifier(code, depositType) {
-        var ev = table()[code];
-        if (!ev || !ev.depositModifier) return 1;
-        var v = ev.depositModifier[depositType];
-        return typeof v === 'number' ? v : 1;
+        var mods = (S.core.events.data && S.core.events.data.depositModifiers) || {};
+        if (mods[code] && typeof mods[code][depositType] === 'number') return mods[code][depositType];
+        return 1;
     }
 
     function byCategory(category) {
@@ -67,11 +132,45 @@
         var out = [];
         for (var i = 0; i < all.length; i++) {
             if (all[i].category === category) out.push(all[i]);
+            else if (all[i].categories && all[i].categories[category]) out.push(all[i]);
         }
         return out;
     }
 
-    // Initialize the namespace if data.js loaded first.
+    // Resource (currency) the event drops. Anniversary varies by player
+    // level, so we resolve it here rather than baking the level into data.
+    function eventResource(code) {
+        var ev = table()[code];
+        if (!ev) return null;
+        if (ev.resource) return ev.resource;
+        if (ev.resourceLowLevel && ev.resourceHighLevel) {
+            try {
+                var lvl = (typeof game !== 'undefined' && game.gi && game.gi.mHomePlayer &&
+                           typeof game.gi.mHomePlayer.GetPlayerLevel === 'function')
+                            ? game.gi.mHomePlayer.GetPlayerLevel() : 0;
+                return lvl >= (ev.resourceLevelThreshold || 0) ? ev.resourceHighLevel : ev.resourceLowLevel;
+            } catch (e) {
+                return ev.resourceLowLevel;
+            }
+        }
+        return null;
+    }
+
+    // The level-dependent treasure-value multiplier for events that have
+    // one (Anniversary). Returns 1 when no multiplier applies.
+    function levelMultiplier(code) {
+        var ev = table()[code];
+        if (!ev || typeof ev.lowLevelMultiplier !== 'number') return 1;
+        try {
+            var lvl = (typeof game !== 'undefined' && game.gi && game.gi.mHomePlayer &&
+                       typeof game.gi.mHomePlayer.GetPlayerLevel === 'function')
+                        ? game.gi.mHomePlayer.GetPlayerLevel() : 0;
+            return lvl < (ev.lowLevelThreshold || 0) ? ev.lowLevelMultiplier : 1;
+        } catch (e) {
+            return 1;
+        }
+    }
+
     if (!S.core.events) S.core.events = {};
 
     S.core.events.active           = active;
@@ -79,5 +178,10 @@
     S.core.events.treasureValues   = treasureValues;
     S.core.events.depositModifier  = depositModifier;
     S.core.events.byCategory       = byCategory;
+    S.core.events.eventResource    = eventResource;
+    S.core.events.levelMultiplier  = levelMultiplier;
+    // Lower-level helpers exposed for diagnostics / future modules.
+    S.core.events.liveEventNames   = liveEventNames;
+    S.core.events.matchBaseCode    = matchBaseCode;
 
 }(Steward));

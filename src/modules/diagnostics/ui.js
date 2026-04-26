@@ -39,6 +39,31 @@
                 }
             }
         } catch (e) { S.kernel.error('diag', 'settings dump threw:', e); }
+
+        // Live events — affect pickTask precedence in templates_explorers,
+        // pickDeposits in templates_geologists, and any future event-aware
+        // module. Surface them up-front so it's clear what the kernel sees.
+        S.kernel.log('diag', '--- live events ---');
+        try {
+            if (S.core.events && S.core.events.liveEventNames) {
+                var raw = S.core.events.liveEventNames();
+                S.kernel.log('diag', 'GetActiveEventNames:', raw.length ? raw.join(', ') : '(none)');
+                var ev = S.core.events.active();
+                if (ev.length === 0) {
+                    S.kernel.log('diag', 'matched against Steward.core.events.data: (none)');
+                } else {
+                    for (var k = 0; k < ev.length; k++) {
+                        var values = S.core.events.treasureValues(ev[k].code);
+                        S.kernel.log('diag', '  matched:', ev[k].code,
+                                     '— categories:', (ev[k].categoryList || []).join(',') || '(none)',
+                                     '— treasureValues:',
+                                     (values && values.length) ? values.join(',') : '(none)',
+                                     '— rawNames:', (ev[k].rawNames || []).join(','));
+                    }
+                }
+            }
+        } catch (e) { S.kernel.error('diag', 'events dump threw:', e); }
+
         notify('Host snapshot dumped to log.');
     }
 

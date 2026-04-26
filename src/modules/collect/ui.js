@@ -17,9 +17,18 @@
 
     var MENU_ENTRY_NAME = 'StewardCollectMenu';
 
+    // Merge stored settings with defaults so missing keys (e.g. after a
+    // settings-shape change between releases) get sensible values rather
+    // than silently disabling the module. The merge is shallow — top-level
+    // keys only — which matches collect's flat settings shape.
     function readSettings() {
-        var s = S.kernel.settings.read('collect');
-        return s || S.modules.collect.defaultSettings;
+        var stored = S.kernel.settings.read('collect') || {};
+        var defaults = S.modules.collect.defaultSettings || {};
+        var merged = {};
+        var key;
+        for (key in defaults) merged[key] = defaults[key];
+        for (key in stored)   merged[key] = stored[key];
+        return merged;
     }
 
     function patternsLabel(s) {
