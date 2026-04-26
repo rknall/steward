@@ -1,0 +1,74 @@
+// Biome configuration for Steward.
+//
+// Steward source code targets Adobe AIR 32, which has an outdated JavaScript
+// engine (ES5+ + top-level `const`). Biome's default rule set encourages
+// modern-JS rewrites (arrow functions, template literals, `for...of`, spread,
+// destructuring) — every one of those crashes the TSO client at parse time.
+//
+// ESLint with the project's AIR-aware ruleset (`.eslintrc.json`) is the
+// authoritative source of truth for source linting. This Biome config exists
+// only to prevent the VS Code Biome extension from emitting noise that
+// contradicts the AIR rules. Each disabled rule below has an ESLint analogue
+// that enforces the *opposite* direction.
+//
+// See: docs/COMPATIBILITY.md
+{
+    "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+    "files": {
+        "ignore": [
+            "node_modules/**",
+            "build/**",
+            ".husky/**",
+            "package-lock.json"
+        ]
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "complexity": {
+                // AIR 32 has no arrow functions. ESLint enforces:
+                //   no-restricted-syntax: ArrowFunctionExpression → error
+                "useArrowFunction": "off",
+                // forEach is the *preferred* iteration helper here; for...of
+                // is banned in AIR 32. ESLint enforces:
+                //   no-restricted-syntax: ForOfStatement → error
+                "noForEach": "off"
+            },
+            "style": {
+                // AIR 32 has no template literals. ESLint enforces:
+                //   no-restricted-syntax: TemplateLiteral → error
+                "useTemplate": "off",
+                // We deliberately use `var` for function-scope hoisting and to
+                // stay compatible with the `let` ban. ESLint allows `var`
+                // (no-var: off) and bans `let`.
+                "useConst": "off",
+                "noVar": "off",
+                // Rest parameters (...args) are banned in AIR 32. We rely on
+                // the `arguments` object instead. ESLint enforces:
+                //   no-restricted-syntax: RestElement → error
+                "noArguments": "off",
+                // Default exports are not relevant — Steward has no module
+                // system; ESLint bans ImportDeclaration / ExportDeclaration.
+                "useExportType": "off",
+                "useImportType": "off"
+            },
+            "performance": {
+                // Suggesting Array.from / spread / etc. — many of those are
+                // AIR-incompatible. Defer to ESLint per-construct bans.
+                "noDelete": "off"
+            }
+        }
+    },
+    "formatter": {
+        // The repo formats by hand to match the IIFE / kernel-prefix
+        // conventions in docs/ARCHITECTURE.md. Disable Biome's auto-format
+        // for source files; it's still available on demand for JSON/YAML.
+        "enabled": false
+    },
+    "javascript": {
+        "formatter": {
+            "enabled": false
+        }
+    }
+}

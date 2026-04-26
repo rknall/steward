@@ -158,6 +158,14 @@ npm run lint     # AIR ruleset over src/
 
 The pre-commit hook runs the same lint over staged files. Push without lint passing and CI will fail before any artifact is produced.
 
+### Why ESLint and not Biome
+
+ESLint is the **authoritative** source-of-truth for AIR-compatibility checks because its `no-restricted-syntax` rule lets us ban specific AST node types (`ArrowFunctionExpression`, `TemplateLiteral`, `RestElement`, `Set`/`Map`/`Promise` constructors, etc.). The full list is in `.eslintrc.json`.
+
+Biome's defaults *recommend the opposite* — `useArrowFunction`, `useTemplate`, `useConst`, `noVar`, `noArguments` would all rewrite AIR-compatible code into AIR-crashing code. The repository ships a `biome.jsonc` that disables every Biome rule that conflicts with the AIR-32 ruleset, so the VS Code Biome extension stops emitting contradictory warnings. **Do not enable those rules** — each one points the wrong way for this runtime.
+
+Biome's formatter is also disabled for source files; the IIFE / kernel-prefix conventions are formatted by hand to match `docs/ARCHITECTURE.md`.
+
 ## Why does any of this matter?
 
 The Adobe AIR 32 runtime is from 2019 and is no longer updated. It does not get the JavaScript engine improvements that modern browsers received. Worse, its failure mode for unsupported syntax is not a thrown `SyntaxError` — the engine often fails to parse a whole file, taking the surrounding userscript ecosystem down with it. **One stray `let` can crash the client on launch.** Stick to the patterns above and let ESLint catch what you miss.
