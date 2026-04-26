@@ -15,10 +15,12 @@
 (function (S) {
 
     // --- Enums populated here so they're available the moment this file runs.
-    S.SpecialistType.General   = 'SpecialistGeneral';
-    S.SpecialistType.Carrier   = 'SpecialistCarrier';
-    S.SpecialistType.Explorer  = 'SpecialistExplorer';
-    S.SpecialistType.Geologist = 'SpecialistGeologist';
+    S.SpecialistType.General        = 'SpecialistGeneral';
+    S.SpecialistType.Carrier        = 'SpecialistCarrier';
+    S.SpecialistType.Admiral        = 'SpecialistAdmiral';
+    S.SpecialistType.AdmiralCarrier = 'SpecialistAdmiralCarrier';
+    S.SpecialistType.Explorer       = 'SpecialistExplorer';
+    S.SpecialistType.Geologist      = 'SpecialistGeologist';
 
     S.SpecialistStatus.Idle        = 'StatusIdle';
     S.SpecialistStatus.Working     = 'StatusWorking';
@@ -65,11 +67,56 @@
     var GEOLOGIST_TASK_RAW = {};
     GEOLOGIST_TASK_RAW[S.GeologistTask.Search] = 0;
 
-    // Raw host SPECIALIST_TYPE constants — used only for first-pass dispatch.
-    var RAW_GENERAL_OR_CARRIER = 0;
-    var RAW_EXPLORER           = 1;
-    var RAW_GEOLOGIST          = 2;
-    var GENERAL_CAPACITY_CAP   = 330;     // >330 implies Carrier (P2-spike)
+    // Specialist type taxonomy.
+    //
+    // The host's GetType() returns many integers — beyond {0=General,
+    // 1=Explorer, 2=Geologist} there are specials like Marshal (18),
+    // Courageous Explorer (32), Admiral, etc. The instance method
+    // GetBaseType() partially normalizes (Courageous Explorer → 1) but not
+    // for all variants (Marshal → 18, NOT 0).
+    //
+    // Canonical normalization: ask the *type definition* for its base type:
+    //   game.def('Specialists::cSpecialist').GetSpecialistDescriptionForType(typeNum).getBaseType()
+    //
+    // Confirmed mechanism via tso_client/.../4-specialists.js:73-77 and
+    // 8-shortcuts.js:228 (`armySPECIALIST_TYPE.IsGeneral(item.GetType())`).
+    //
+    // Carrier detection: a Carrier is a General whose specialist description
+    // returns isTransportGeneral() === true. Confirmed via
+    // autoTSO/user_auto.js:6688 (`a.GetSpecialistDescription().isTransportGeneral()`).
+
+    var BASE_GENERAL   = 0;
+    var BASE_EXPLORER  = 1;
+    var BASE_GEOLOGIST = 2;
+
+    var armySpecTypeEnum = null;            // cached host enum (Enums::SPECIALIST_TYPE)
+    var cSpecialistClass = null;            // cached host class (Specialists::cSpecialist)
+
+    function getArmySpecTypeEnum() {
+        if (armySpecTypeEnum !== null) return armySpecTypeEnum;
+        try {
+            if (typeof swmmo !== 'undefined' && swmmo && typeof swmmo.getDefinitionByName === 'function') {
+                armySpecTypeEnum = swmmo.getDefinitionByName('Enums::SPECIALIST_TYPE') || false;
+            } else if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
+                armySpecTypeEnum = game.def('Enums::SPECIALIST_TYPE') || false;
+            } else {
+                armySpecTypeEnum = false;
+            }
+        } catch (e) { armySpecTypeEnum = false; }
+        return armySpecTypeEnum || null;
+    }
+
+    function getCSpecialist() {
+        if (cSpecialistClass !== null) return cSpecialistClass;
+        try {
+            if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
+                cSpecialistClass = game.def('Specialists::cSpecialist') || false;
+            } else {
+                cSpecialistClass = false;
+            }
+        } catch (e) { cSpecialistClass = false; }
+        return cSpecialistClass || null;
+    }
 
     function rawType(spec) {
         if (!spec) return null;
@@ -79,53 +126,153 @@
         return null;
     }
 
-    function troopCapacity(spec) {
-        if (!spec) return 0;
+    function specDescription(spec) {
+        if (!spec) return null;
         try {
-            if (typeof spec.GetMaxTroops === 'function')   return spec.GetMaxTroops();
-            if (typeof spec.getMaxTroops === 'function')   return spec.getMaxTroops();
-            if (typeof spec.GetTroopLimit === 'function')  return spec.GetTroopLimit();
+            if (typeof spec.GetSpecialistDescription === 'function') {
+                return spec.GetSpecialistDescription();
+            }
         } catch (e) { /* fall through */ }
-        return 0;
+        // Fallback: look up via the static class given the type id.
+        try {
+            var cls = getCSpecialist();
+            var rt = rawType(spec);
+            if (cls && rt !== null && typeof cls.GetSpecialistDescriptionForType === 'function') {
+                return cls.GetSpecialistDescriptionForType(rt);
+            }
+        } catch (e2) { /* fall through */ }
+        return null;
+    }
+
+    function baseTypeOf(typeNum) {
+        if (typeof typeNum !== 'number') return null;
+        // Fast path: the standard three already match their base.
+        if (typeNum === BASE_GENERAL)   return BASE_GENERAL;
+        if (typeNum === BASE_EXPLORER)  return BASE_EXPLORER;
+        if (typeNum === BASE_GEOLOGIST) return BASE_GEOLOGIST;
+        // Static lookup for everything else.
+        try {
+            var cls = getCSpecialist();
+            if (cls && typeof cls.GetSpecialistDescriptionForType === 'function') {
+                var def = cls.GetSpecialistDescriptionForType(typeNum);
+                if (def && typeof def.getBaseType === 'function') return def.getBaseType();
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
+    function isCarrierByDescription(spec) {
+        var desc = specDescription(spec);
+        if (!desc) return false;
+        try {
+            if (typeof desc.isTransportGeneral === 'function') return !!desc.isTransportGeneral();
+        } catch (e) { /* fall through */ }
+        return false;
+    }
+
+    // The host exposes two related predicates we rely on:
+    //   IsGeneral(rt)            — base General family (type 0 and friends)
+    //   IsGeneralOrAdmiral(rt)   — also includes Admiral types (18, 19, …)
+    //
+    // The Admiral class is TSO's expedition-only combat class. Like
+    // Generals, it splits into two flavours via isTransportGeneral():
+    //   - attacker (e.g. Marshal,            type 18)
+    //   - transport (e.g. Expedition Supplier, type 19)
+    //
+    // Helpers:
+    //   isInGeneralFamily(spec)  → true for plain Generals (and Carriers built atop them)
+    //   isInAdmiralFamily(spec)  → true for Admirals (and AdmiralCarriers built atop them)
+    //   isFighterOrTransport(spec) → either family — useful as the umbrella check.
+
+    function isInGeneralFamily(spec) {
+        var rt = rawType(spec);
+        if (rt === null) return false;
+        var enum_ = getArmySpecTypeEnum();
+        if (enum_ && typeof enum_.IsGeneral === 'function') {
+            try { return !!enum_.IsGeneral(rt); }
+            catch (e) { /* fall through to base-type heuristic */ }
+        }
+        return baseTypeOf(rt) === BASE_GENERAL;
+    }
+
+    function isInAdmiralFamily(spec) {
+        var rt = rawType(spec);
+        if (rt === null) return false;
+        // Admiral = "GeneralOrAdmiral" minus "General". Best signal we have
+        // without a dedicated IsAdmiral predicate (which the host doesn't
+        // expose under that name).
+        var enum_ = getArmySpecTypeEnum();
+        if (enum_ && typeof enum_.IsGeneralOrAdmiral === 'function') {
+            try { if (!enum_.IsGeneralOrAdmiral(rt)) return false; }
+            catch (e) { return false; }
+        } else {
+            return false;
+        }
+        return !isInGeneralFamily(spec);
+    }
+
+    function isFighterOrTransport(spec) {
+        return isInGeneralFamily(spec) || isInAdmiralFamily(spec);
     }
 
     function canAttack(spec) {
-        if (!spec) return false;
-        // Try a capability flag first; the field name is uncertain (P2-spike).
-        try {
-            if (typeof spec.canAttack === 'boolean')     return spec.canAttack;
-            if (typeof spec.mCanAttack === 'boolean')    return spec.mCanAttack;
-            if (typeof spec.GetCanAttack === 'function') return !!spec.GetCanAttack();
-        } catch (e) { /* fall through */ }
-        // Capacity-threshold fallback: a general is capped at 330 troops, a
-        // carrier exceeds that. If we can read capacity, use it; otherwise
-        // assume "yes, attacker" as the conservative default.
-        var cap = troopCapacity(spec);
-        if (cap > 0) return cap <= GENERAL_CAPACITY_CAP;
-        return true;
+        // Generals and Admirals attack; their carrier-flavour cousins don't.
+        if (!isFighterOrTransport(spec)) return false;
+        return !isCarrierByDescription(spec);
+    }
+
+    function troopCapacity(spec) {
+        // No reliable instance-level getter found in the spike. The
+        // description's getMaxTroopCount or similar may exist; try a few.
+        if (!spec) return 0;
+        var desc = specDescription(spec);
+        if (desc) {
+            try {
+                if (typeof desc.getMaxTroopCount === 'function') return desc.getMaxTroopCount();
+                if (typeof desc.GetMaxTroopCount === 'function') return desc.GetMaxTroopCount();
+                if (typeof desc.maxTroops_int    === 'number')   return desc.maxTroops_int;
+            } catch (e) { /* fall through */ }
+        }
+        return 0;
     }
 
     function classify(spec) {
         var rt = rawType(spec);
-        if (rt === RAW_EXPLORER)  return S.SpecialistType.Explorer;
-        if (rt === RAW_GEOLOGIST) return S.SpecialistType.Geologist;
-        if (rt === RAW_GENERAL_OR_CARRIER) {
-            return canAttack(spec) ? S.SpecialistType.General : S.SpecialistType.Carrier;
+        if (rt === null) return null;
+
+        var base = baseTypeOf(rt);
+        if (base === BASE_EXPLORER)  return S.SpecialistType.Explorer;
+        if (base === BASE_GEOLOGIST) return S.SpecialistType.Geologist;
+
+        // Two combat-class families, each with attacker / carrier flavour.
+        var transport = isCarrierByDescription(spec);
+        if (isInGeneralFamily(spec)) {
+            return transport ? S.SpecialistType.Carrier : S.SpecialistType.General;
+        }
+        if (isInAdmiralFamily(spec)) {
+            return transport ? S.SpecialistType.AdmiralCarrier : S.SpecialistType.Admiral;
         }
         return null;
     }
 
-    function isGeneral(spec)   { return classify(spec) === S.SpecialistType.General; }
-    function isCarrier(spec)   { return classify(spec) === S.SpecialistType.Carrier; }
-    function isExplorer(spec)  { return classify(spec) === S.SpecialistType.Explorer; }
-    function isGeologist(spec) { return classify(spec) === S.SpecialistType.Geologist; }
+    function isGeneral(spec)        { return classify(spec) === S.SpecialistType.General; }
+    function isCarrier(spec)        { return classify(spec) === S.SpecialistType.Carrier; }
+    function isAdmiral(spec)        { return classify(spec) === S.SpecialistType.Admiral; }
+    function isAdmiralCarrier(spec) { return classify(spec) === S.SpecialistType.AdmiralCarrier; }
+    function isExplorer(spec)       { return classify(spec) === S.SpecialistType.Explorer; }
+    function isGeologist(spec)      { return classify(spec) === S.SpecialistType.Geologist; }
 
     function specName(spec) {
         if (!spec) return '';
-        try {
-            if (typeof spec.getName === 'function') return spec.getName(false) || '';
-            if (typeof spec.GetName === 'function') return spec.GetName() || '';
-        } catch (e) { return ''; }
+        // ArgumentError #1063 (wrong number of arguments) varies by
+        // specialist subtype: some take getName(), others getName(false).
+        // Try both, in order of "no args" first since that's the more common
+        // shape per the live spike output.
+        if (!spec) return '';
+        try { if (typeof spec.getName === 'function') return spec.getName() || ''; } catch (e) { /* try next */ }
+        try { if (typeof spec.getName === 'function') return spec.getName(false) || ''; } catch (e) { /* try next */ }
+        try { if (typeof spec.GetName === 'function') return spec.GetName() || ''; } catch (e) { /* try next */ }
+        try { if (typeof spec.GetName === 'function') return spec.GetName(false) || ''; } catch (e) { /* fall through */ }
         return '';
     }
 
@@ -136,28 +283,48 @@
     }
 
     function hasTask(spec) {
+        // Confirmed via the spike: GetTask() returns null for idle specialists
+        // and a Flash task object (which JSON-stringifies to "{}") for busy
+        // ones. Truthiness check is sufficient.
         var t = specTask(spec);
-        if (!t) return false;
-        try {
-            // Most task objects expose a sub-type / type accessor; presence
-            // implies the specialist is busy.
-            if (typeof t.GetSubType === 'function')  { t.GetSubType(); return true; }
-            if (typeof t.GetType    === 'function')  { t.GetType();    return true; }
-        } catch (e) { /* fall through */ }
         return !!t;
+    }
+
+    // IsInUse() is the cross-type "busy" flag. Generals expose
+    // GetGeneralState() with -1 = idle-traveling/working, 0 = idle, plus
+    // values for various activity sub-states. We use IsInUse first because
+    // the spike showed it returns true for working explorers (where
+    // GetGeneralState returns -1 even when idle).
+    function isInUse(spec) {
+        if (!spec) return false;
+        try { if (typeof spec.IsInUse === 'function') return !!spec.IsInUse(); }
+        catch (e) { /* fall through */ }
+        return false;
     }
 
     function status(spec) {
         if (!spec) return S.SpecialistStatus.Unavailable;
-        if (!hasTask(spec)) return S.SpecialistStatus.Idle;
-        // We don't yet have a clean way to distinguish Working vs Traveling
-        // vs Returning from the host — collapse all "busy" states to Working
-        // until the spike confirms the right field. (P2-spike.)
+        // Idle: no task AND not in use.
+        if (!hasTask(spec) && !isInUse(spec)) return S.SpecialistStatus.Idle;
+        // The spike showed Working specs all collapse to one bucket from
+        // these getters — GetTask().GetType / GetSubType give activity
+        // shape but not Working/Traveling/Returning distinctions reliably.
+        // Refine when we have a returning specialist to inspect.
         return S.SpecialistStatus.Working;
     }
 
-    function isAttacking(spec)   { return isGeneral(spec)   && status(spec) === S.SpecialistStatus.Working; }
-    function isHauling(spec)     { return isCarrier(spec)   && status(spec) === S.SpecialistStatus.Working; }
+    function isAttacking(spec)   {
+        // Both Generals and Admirals attack. We collapse the two for this query
+        // since modules generally don't care about the family — only the role.
+        var c = classify(spec);
+        if (c !== S.SpecialistType.General && c !== S.SpecialistType.Admiral) return false;
+        return status(spec) === S.SpecialistStatus.Working;
+    }
+    function isHauling(spec)     {
+        var c = classify(spec);
+        if (c !== S.SpecialistType.Carrier && c !== S.SpecialistType.AdmiralCarrier) return false;
+        return status(spec) === S.SpecialistStatus.Working;
+    }
     function isExploring(spec)   { return isExplorer(spec)  && status(spec) === S.SpecialistStatus.Working; }
     function isProspecting(spec) { return isGeologist(spec) && status(spec) === S.SpecialistStatus.Working; }
 
@@ -201,10 +368,12 @@
         return null;
     }
 
-    function generals(opts)   { return byType(S.SpecialistType.General,   opts); }
-    function carriers(opts)   { return byType(S.SpecialistType.Carrier,   opts); }
-    function explorers(opts)  { return byType(S.SpecialistType.Explorer,  opts); }
-    function geologists(opts) { return byType(S.SpecialistType.Geologist, opts); }
+    function generals(opts)         { return byType(S.SpecialistType.General,        opts); }
+    function carriers(opts)         { return byType(S.SpecialistType.Carrier,        opts); }
+    function admirals(opts)         { return byType(S.SpecialistType.Admiral,        opts); }
+    function admiralCarriers(opts)  { return byType(S.SpecialistType.AdmiralCarrier, opts); }
+    function explorers(opts)        { return byType(S.SpecialistType.Explorer,       opts); }
+    function geologists(opts)       { return byType(S.SpecialistType.Geologist,      opts); }
 
     function available(type, opts) {
         var src = byType(type, opts);
@@ -450,6 +619,8 @@
     S.core.specialists.byName           = byName;
     S.core.specialists.generals         = generals;
     S.core.specialists.carriers         = carriers;
+    S.core.specialists.admirals         = admirals;
+    S.core.specialists.admiralCarriers  = admiralCarriers;
     S.core.specialists.explorers        = explorers;
     S.core.specialists.geologists       = geologists;
 
@@ -458,6 +629,8 @@
     S.core.specialists.troopCapacity    = troopCapacity;
     S.core.specialists.isGeneral        = isGeneral;
     S.core.specialists.isCarrier        = isCarrier;
+    S.core.specialists.isAdmiral        = isAdmiral;
+    S.core.specialists.isAdmiralCarrier = isAdmiralCarrier;
     S.core.specialists.isExplorer       = isExplorer;
     S.core.specialists.isGeologist      = isGeologist;
     S.core.specialists.hasArmy          = hasArmy;

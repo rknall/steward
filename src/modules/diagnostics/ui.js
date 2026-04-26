@@ -69,24 +69,56 @@
             var all = c.all();
             S.kernel.log('diag', 'total:', all.length);
 
-            // Group: first general we find, first carrier, first explorer (idle),
-            // first explorer (busy), first geologist (idle), first geologist (busy).
-            var picked = {};
+            // 1) Distribution: how many of each (GetType, classify, status)?
+            //    Surfaces every type the host returns — including specials
+            //    like Marshal (18), Courageous Explorer (32), Admiral, etc.
+            var byTriple = {};        // 'type|classify|status' → count
+            var byRawType = {};       //  raw GetType → count
+            var firstByRaw = {};      //  raw GetType → first seen specialist
             for (var i = 0; i < all.length; i++) {
                 var s = all[i];
+                var raw = '?';
+                try { raw = (typeof s.GetType === 'function') ? s.GetType() : '?'; } catch (e) { raw = 'threw'; }
+                byRawType[raw] = (byRawType[raw] || 0) + 1;
+                if (!firstByRaw[raw]) firstByRaw[raw] = s;
                 var cls = c.classify(s);
                 var st = c.status(s);
-                var key = cls + ':' + st;
-                if (!picked[key]) picked[key] = s;
+                var key = raw + '|' + cls + '|' + st;
+                byTriple[key] = (byTriple[key] || 0) + 1;
             }
 
-            var pickedKeys = Object.keys(picked);
-            S.kernel.log('diag', 'unique class:status pairs:', pickedKeys.length);
+            S.kernel.log('diag', 'distribution by (GetType | classify | status):');
+            var tripleKeys = Object.keys(byTriple).sort();
+            for (var t = 0; t < tripleKeys.length; t++) {
+                S.kernel.log('diag', '  ' + tripleKeys[t] + '  →  ' + byTriple[tripleKeys[t]]);
+            }
 
-            for (var k = 0; k < pickedKeys.length; k++) {
-                var label = pickedKeys[k];
-                var spec = picked[label];
-                d.logLines('diag', d.describe(spec, 'specialist [' + label + '] name=' + (c.name(spec) || '?')));
+            // 2) Dump one specimen per RAW GetType so we see Marshal,
+            //    Courageous Explorer, etc., not just one per classify-result.
+            S.kernel.log('diag', '--- one specimen per GetType ---');
+            var rawKeys = Object.keys(firstByRaw).sort(function (a, b) { return Number(a) - Number(b); });
+            for (var r = 0; r < rawKeys.length; r++) {
+                var rt = rawKeys[r];
+                var spec = firstByRaw[rt];
+                var cls2 = c.classify(spec);
+                var st2 = c.status(spec);
+                var nm = '';
+                try { nm = c.name(spec); } catch (e) { nm = '(name threw)'; }
+                d.logLines('diag', d.describe(spec,
+                    'specialist GetType=' + rt + ' classify=' + cls2 +
+                    ' status=' + st2 + ' name=' + (nm || '?')));
+
+                // Also dump the description object — that's where carrier
+                // detection and capacity live.
+                try {
+                    if (typeof spec.GetSpecialistDescription === 'function') {
+                        var desc = spec.GetSpecialistDescription();
+                        if (desc) {
+                            d.logLines('diag', d.describe(desc, 'description for GetType=' + rt));
+                        }
+                    }
+                } catch (e) { S.kernel.warn('diag', 'description dump threw:', e); }
+
                 S.kernel.log('diag', '');
             }
         } catch (e) {

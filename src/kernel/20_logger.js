@@ -25,7 +25,7 @@
     var state = {
         enabled:        true,
         debugEnabled:   false,    // DEBUG-level lines are dropped unless this is true
-        fileEnabled:    false,    // off until settings load + storage dir resolved
+        fileEnabled:    true,     // write to disk by default; configure() can flip off
         categories:     {},       // {} means "all enabled"
         maxFileSizeKB:  S.kernel.LIMITS.LOG_FILE_MAX_KB_DEFAULT,
         keepRotated:    S.kernel.LIMITS.LOG_KEEP_ROTATED_DEFAULT,
@@ -80,19 +80,75 @@
         } catch (e) { /* never propagate */ }
     }
 
+    // air.File.createDirectory() does NOT recurse on Adobe AIR — calling
+    // it on a/b/c when a/ doesn't exist throws. We walk down the path so
+    // each segment is created on demand. Also surfaces the failure point
+    // explicitly to the console sink (file logging is the failure target,
+    // so we can't rely on emitToFile here).
+    function createDirectoryRecursive(dir) {
+        if (!dir) return false;
+        if (dir.exists) return true;
+        try {
+            var parent = dir.parent;
+            if (parent && !parent.exists) {
+                if (!createDirectoryRecursive(parent)) return false;
+            }
+            dir.createDirectory();
+            return dir.exists;
+        } catch (e) {
+            emitToConsole(LEVEL.ERROR,
+                '[ERROR] [' + timestamp() + '] [logger] createDirectory failed for ' +
+                (dir && dir.nativePath ? dir.nativePath : '?') + ': ' + e);
+            return false;
+        }
+    }
+
     function ensureLogFile() {
         if (state.logFile) return state.logFile;
         if (typeof air === 'undefined' || !air.File) return null;
+        // Primary: applicationStorageDirectory/steward/logs/console.log.
+        // This is AIR's per-app writable location. On Windows it lives at
+        //   C:\Users\<user>\AppData\Roaming\<bundle-id>\Local Store\steward\logs\
+        // applicationDirectory is NOT used because AIR classifies any File
+        // obtained via applicationDirectory.resolvePath(...) as "application
+        // content" and rejects writes with SecurityError: fileWriteResource.
+        // (autoTSO bypasses this by round-tripping through .nativePath into
+        // `new air.File(path)` — we don't need that trick here.)
         try {
             var dir = air.File.applicationStorageDirectory.resolvePath('steward/logs');
-            if (!dir.exists) dir.createDirectory();
-            state.logDir  = dir;
-            state.logFile = dir.resolvePath('console.log');
-            return state.logFile;
+            if (createDirectoryRecursive(dir)) {
+                state.logDir  = dir;
+                state.logFile = dir.resolvePath('console.log');
+                emitToConsole(LEVEL.LOG,
+                    '[LOG] [' + timestamp() + '] [logger] writing to ' +
+                    state.logFile.nativePath);
+                return state.logFile;
+            }
         } catch (e) {
-            state.fileEnabled = false;
-            return null;
+            emitToConsole(LEVEL.ERROR,
+                '[ERROR] [' + timestamp() + '] [logger] storage dir resolve threw: ' + e);
         }
+        // Last-ditch fallback to documentsDirectory only fires if the storage
+        // tree is somehow unavailable. In practice this should never happen
+        // on a healthy AIR runtime.
+        try {
+            var alt = air.File.documentsDirectory.resolvePath('steward/logs');
+            if (createDirectoryRecursive(alt)) {
+                state.logDir  = alt;
+                state.logFile = alt.resolvePath('console.log');
+                emitToConsole(LEVEL.WARN,
+                    '[WARN] [' + timestamp() + '] [logger] storage dir unavailable, using documents fallback ' +
+                    state.logFile.nativePath);
+                return state.logFile;
+            }
+        } catch (e) {
+            emitToConsole(LEVEL.ERROR,
+                '[ERROR] [' + timestamp() + '] [logger] documents fallback threw: ' + e);
+        }
+        emitToConsole(LEVEL.ERROR,
+            '[ERROR] [' + timestamp() + '] [logger] no writable log location — file output disabled');
+        state.fileEnabled = false;
+        return null;
     }
 
     function rotateIfNeeded() {

@@ -71,13 +71,16 @@
         }
     }
 
+    // Some host getters take exactly one argument (e.g. getName(false)) while
+    // others take none — calling with the wrong arity throws ArgumentError #1063.
+    // Try without args first, then with `false`. Returns either the value
+    // (formatted) or null if the call wasn't even attempted.
     function callerOf(obj, methodName) {
-        try {
-            if (typeof obj[methodName] !== 'function') return null;
-            var v = obj[methodName]();
-            return shortValue(v);
-        } catch (e) {
-            return '[threw: ' + e + ']';
+        if (typeof obj[methodName] !== 'function') return null;
+        try { return shortValue(obj[methodName]()); }
+        catch (e1) {
+            try { return shortValue(obj[methodName](false)); }
+            catch (e2) { return '[threw: ' + e1 + ']'; }
         }
     }
 
@@ -103,23 +106,35 @@
         }
         keys.sort();
 
+        var methodNames = [];
         for (var i = 0; i < keys.length; i++) {
             var key = keys[i];
             var val;
             try { val = obj[key]; } catch (e) { val = '[threw: ' + e + ']'; }
-            // Skip pure functions in the property dump (we hit common ones below).
-            if (typeof val === 'function') continue;
+            if (typeof val === 'function') {
+                // Collect method names so we can list them as a hint.
+                methodNames.push(key);
+                continue;
+            }
             lines.push('  ' + key + '  [' + classify(val) + ']  ' + shortValue(val));
+        }
+        if (methodNames.length) {
+            // Some objects (notably Specialist descriptions) expose ONLY
+            // methods. Listing the names tells us what's callable without
+            // having to guess. Curated calls below probe the common ones.
+            lines.push('  (methods: ' + methodNames.join(', ') + ')');
         }
 
         // 2. Curated getter probes — these are functions, but the values they
         //    return are the interesting bits.
         var getters = [
-            'GetType', 'GetBaseType', 'getName', 'GetName',
+            'GetType', 'GetBaseType', 'getBaseType', 'getName', 'GetName',
             'getPlayerID', 'GetPlayerID',
             'GetTask', 'GetUniqueID',
             'GetMaxTroops', 'getMaxTroops', 'GetTroopLimit',
+            'getMaxTroopCount', 'GetMaxTroopCount',
             'GetCanAttack', 'canAttack',
+            'isTransportGeneral',
             'GetGeneralState', 'GetState',
             'isTravelling', 'isTravellingAway', 'IsInUse',
             'HasUnits', 'GetGarrisonGridIdx',

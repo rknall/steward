@@ -26,18 +26,20 @@ air.File.documentsDirectory                         // user docs
 air.File.userDirectory
 ```
 
-Steward writes settings through the host's `settings` global (see [`HOST_INTEGRATION.md`](analysis/HOST_INTEGRATION.md)) and writes logs to a `steward/logs/` subfolder of `applicationStorageDirectory`:
+Steward writes settings through the host's `settings` global (see [`HOST_INTEGRATION.md`](analysis/HOST_INTEGRATION.md)) and writes logs into the host's `auto/logs/` directory (same place autoTSO writes — TSO-Portable's `applicationDirectory` is writable):
 
 ```js
 // Settings — delegate to the host:
 var s = settings.read(null, 'steward.collect');
 settings.store({ enabled: false }, 'steward.collect');
 
-// Logs — Steward owns this path:
+// Logs — Steward writes to the standard AIR writable location:
 var logDir = air.File.applicationStorageDirectory.resolvePath('steward/logs');
-if (!logDir.exists) logDir.createDirectory();
+if (!logDir.exists) logDir.createDirectory();   // NOTE: not recursive!
 var logFile = logDir.resolvePath('console.log');
 ```
+
+`applicationDirectory` (where `client.swf` lives) is read-only on most AIR distributions and throws `SecurityError: fileWriteResource` on write. autoTSO's `auto/logs/` works only because the portable distribution pre-creates that directory; from a clean AIR install you cannot create new paths there. Steward uses `applicationStorageDirectory` to avoid the dependency. Directory creation in Steward's logger is recursive — `air.File.createDirectory()` is *not* recursive on its own, so a one-step walk is used to create `steward/` then `steward/logs/`.
 
 ### Reading
 
