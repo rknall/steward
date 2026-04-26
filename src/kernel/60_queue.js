@@ -47,9 +47,28 @@
         return true;
     }
 
+    function isHostModalVisible() {
+        try {
+            // Bootstrap modals (used by host's Modal class and userscripts) carry
+            // role="dialog". We treat any visible one as a "user has a window
+            // open" signal and defer to avoid taking it away from them.
+            if (typeof $ !== 'undefined' && $.fn && $.fn.length !== undefined) {
+                return $('div[role="dialog"]:visible').length > 0;
+            }
+        } catch (e) { /* fall through */ }
+        return false;
+    }
+
     function runOne() {
         if (queue.length === 0) {
             draining = false;
+            return;
+        }
+        // Modal guard — defer (do NOT consume) while a host modal is visible.
+        // The user has a window open; firing SelectBuilding / similar would
+        // close it. Re-poll on a short cadence; resume the moment they close.
+        if (isHostModalVisible()) {
+            setTimeout(runOne, S.kernel.TIMEOUTS.QUEUE_MODAL_RECHECK_MS);
             return;
         }
         var entry = queue.shift();

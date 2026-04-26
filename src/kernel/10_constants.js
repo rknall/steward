@@ -10,9 +10,11 @@
     S.kernel.TIMEOUTS = {
         TICK_INTERVAL_MS:        10000,    // Steward.scheduler default tick interval
         QUEUE_ACTION_GAP_MS:     1500,     // default delay between queued actions
+        QUEUE_MODAL_RECHECK_MS:  2000,     // re-poll cadence while a host modal is open
         BOOT_DEFER_MS:           100,      // how long after script load we wait before boot()
         UI_INIT_RETRY_MS:        1000,     // retry interval if window.nativeWindow not yet available
         UI_INIT_MAX_ATTEMPTS:    30,       // give up after this many retries (~30s)
+        STATUS_UPDATE_MS:        5000,     // cadence for refreshing the in-menu status label
         SETTINGS_SAVE_DEBOUNCE_MS: 500     // throttle disk writes when many writes hit at once
     };
 

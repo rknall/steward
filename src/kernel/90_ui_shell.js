@@ -5,6 +5,10 @@
  * (window.nativeWindow.menu, populated with air.NativeMenuItem instances).
  * Modules can attach entries via Steward.kernel.ui.menu.add({...}).
  *
+ * The first item under the Steward submenu is a clickable Active/Paused
+ * toggle that controls the master scheduler. Pause persists across client
+ * restarts via the 'kernel' settings namespace.
+ *
  * The host menu may not be available on first paint; init() retries up to
  * UI_INIT_MAX_ATTEMPTS times at UI_INIT_RETRY_MS intervals before giving up.
  */
@@ -14,8 +18,10 @@
     var menuEntries = [];                  // [{ label, name, enabled, onSelect, items, type }]
     var statusText = 'Steward online';
     var statusItem = null;
+    var pauseItem = null;
     var initAttempts = 0;
     var initialized = false;
+    var paused = false;
 
     function nativeMenuAvailable() {
         try {
@@ -64,6 +70,18 @@
         return item;
     }
 
+    function pauseLabel() {
+        return paused ? 'Steward: ✕ Paused' : 'Steward: ✓ Active';
+    }
+
+    function statusLabel() {
+        var n = 0;
+        try { n = S.kernel.registry.count(); } catch (e) { /* ignore */ }
+        var moduleSuffix = n + ' module' + (n === 1 ? '' : 's');
+        if (paused) return 'Paused — ' + moduleSuffix;
+        return 'Active — ' + moduleSuffix;
+    }
+
     function rebuild() {
         if (!nativeMenuAvailable()) return false;
         try {
@@ -76,12 +94,22 @@
 
             var sub = new air.NativeMenu();
 
+            // Pause/resume toggle (clickable, first entry).
+            pauseItem = new air.NativeMenuItem(pauseLabel());
+            pauseItem.name = 'StewardPause';
+            pauseItem.enabled = true;
+            try { pauseItem.addEventListener(air.Event.SELECT, togglePause); }
+            catch (e) { S.kernel.warn('ui', 'pause toggle wiring failed:', e); }
+            sub.addItem(pauseItem);
+
+            try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* separator */ }
+
             // Status (disabled, just text).
-            statusItem = new air.NativeMenuItem(statusText);
+            statusItem = new air.NativeMenuItem(statusText || statusLabel());
             statusItem.name = 'StewardStatus';
             statusItem.enabled = false;
             sub.addItem(statusItem);
-            try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* separator may not be supported */ }
+            try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* separator */ }
 
             for (var i = 0; i < menuEntries.length; i++) {
                 var native = makeNativeItem(menuEntries[i]);
@@ -153,6 +181,54 @@
         }
     }
 
+    function refreshStatus() {
+        try {
+            setStatus(statusLabel());
+            if (pauseItem) {
+                try { pauseItem.label = pauseLabel(); }
+                catch (e) { /* invalidated; next rebuild will fix */ }
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function persistPaused() {
+        try {
+            var s = S.kernel.settings.read('kernel') || {};
+            s.paused = paused;
+            S.kernel.settings.write('kernel', s);
+        } catch (e) {
+            S.kernel.warn('ui', 'failed to persist paused state:', e);
+        }
+    }
+
+    function applyPause() {
+        try {
+            if (paused) {
+                if (S.kernel.scheduler && S.kernel.scheduler.stop) S.kernel.scheduler.stop();
+                if (S.kernel.queue && S.kernel.queue.reset) S.kernel.queue.reset();
+            } else {
+                if (S.kernel.scheduler && S.kernel.scheduler.start) S.kernel.scheduler.start();
+            }
+        } catch (e) {
+            S.kernel.error('ui', 'applyPause threw:', e);
+        }
+    }
+
+    function setPaused(value, opts) {
+        var next = value === true;
+        if (next === paused) return;
+        paused = next;
+        opts = opts || {};
+        S.kernel.log('ui', paused ? 'paused' : 'resumed');
+        applyPause();
+        if (opts.persist !== false) persistPaused();
+        refreshStatus();
+    }
+
+    function togglePause() { setPaused(!paused); }
+
+    function isPaused() { return paused; }
+
     S.kernel.ui = {
         init:      init,
         menu:      {
@@ -161,17 +237,27 @@
             replaceByName: replaceByName,
             rebuild:       rebuild
         },
-        status:    { set: setStatus, get: function () { return statusText; } }
+        status:    {
+            set:     setStatus,
+            get:     function () { return statusText; },
+            refresh: refreshStatus
+        },
+        // Master pause control (also surfaced in the in-menu toggle).
+        pause:     function () { setPaused(true); },
+        resume:    function () { setPaused(false); },
+        toggle:    togglePause,
+        isPaused:  isPaused,
+        // Lifecycle uses this to seed initial state from settings without
+        // triggering a scheduler start (which lifecycle does itself).
+        seedPaused: function (value) {
+            paused = value === true;
+            refreshStatus();
+        }
     };
 
-    // The shell auto-installs a default status updater so even with zero
-    // modules the menu shows "Steward online — N modules" once a tick has run.
-    var statusUpdater = setInterval(function () {
-        try {
-            var n = S.kernel.registry.count();
-            setStatus('Steward online — ' + n + ' module' + (n === 1 ? '' : 's'));
-        } catch (e) { /* ignore */ }
-    }, 5000);
+    // The shell auto-installs a default status updater so the menu reflects
+    // module count and pause state without anyone explicitly poking it.
+    var statusUpdater = setInterval(refreshStatus, S.kernel.TIMEOUTS.STATUS_UPDATE_MS);
 
     S.kernel.ui.stopStatusUpdater = function () {
         if (statusUpdater) {

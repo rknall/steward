@@ -28,6 +28,11 @@
         if (s && S.kernel.scheduler.configure) S.kernel.scheduler.configure(s);
     }
 
+    function readPausedFlag() {
+        var s = S.kernel.settings.read('kernel');
+        return !!(s && s.paused);
+    }
+
     function runModuleBoots() {
         var mods = S.kernel.registry.list();
         for (var i = 0; i < mods.length; i++) {
@@ -56,19 +61,32 @@
 
         runModuleBoots();
 
+        // Honour persisted master-pause state. Seed the UI's flag *before*
+        // ui.init() so the menu's pause toggle renders with the right label,
+        // then conditionally start the scheduler.
+        var startPaused = readPausedFlag();
+        if (startPaused && S.kernel.ui && typeof S.kernel.ui.seedPaused === 'function') {
+            S.kernel.ui.seedPaused(true);
+        }
+
         try {
             if (S.kernel.ui && S.kernel.ui.init) S.kernel.ui.init();
         } catch (e) {
             S.kernel.error('lifecycle', 'ui.init threw:', e);
         }
 
-        try {
-            S.kernel.scheduler.start();
-        } catch (e) {
-            S.kernel.error('lifecycle', 'scheduler.start threw:', e);
+        if (startPaused) {
+            S.kernel.log('lifecycle', 'boot honouring persisted pause — scheduler not started');
+        } else {
+            try {
+                S.kernel.scheduler.start();
+            } catch (e) {
+                S.kernel.error('lifecycle', 'scheduler.start threw:', e);
+            }
         }
 
-        S.kernel.log('lifecycle', 'boot complete — modules:', S.kernel.registry.count());
+        S.kernel.log('lifecycle', 'boot complete — modules:', S.kernel.registry.count(),
+                     '— state:', startPaused ? 'paused' : 'active');
     }
 
     function shutdown() {
