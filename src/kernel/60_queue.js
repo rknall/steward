@@ -36,15 +36,42 @@
             S.kernel.warn('queue', 'add: unknown action', name, '— dropping');
             return false;
         }
+        // moduleId is the id of the module currently inside its plan() / boot()
+        // call. Tracked by the scheduler / lifecycle via S.kernel._currentModule.
+        // Standalone calls (e.g. from event handlers) get null.
+        var moduleId = S.kernel._currentModule || null;
         queue.push({
-            name:   name,
-            params: params || [],
-            delay:  typeof delay === 'number' ? delay : S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS
+            name:     name,
+            params:   params || [],
+            delay:    typeof delay === 'number' ? delay : S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS,
+            moduleId: moduleId
         });
         if (queue.length > S.kernel.LIMITS.QUEUE_DEPTH_WARN) {
             S.kernel.warn('queue', 'depth=' + queue.length, 'exceeds threshold');
         }
         return true;
+    }
+
+    function cancelByModule(targetModuleId) {
+        if (!targetModuleId) return 0;
+        var kept = [];
+        var removed = 0;
+        for (var i = 0; i < queue.length; i++) {
+            if (queue[i].moduleId === targetModuleId) removed++;
+            else kept.push(queue[i]);
+        }
+        queue = kept;
+        if (removed > 0) S.kernel.log('queue', 'cancelled', removed, 'pending action(s) for module', targetModuleId);
+        return removed;
+    }
+
+    function depthByModule(targetModuleId) {
+        if (!targetModuleId) return 0;
+        var n = 0;
+        for (var i = 0; i < queue.length; i++) {
+            if (queue[i].moduleId === targetModuleId) n++;
+        }
+        return n;
     }
 
     function isHostModalVisible() {
@@ -96,11 +123,13 @@
     }
 
     S.kernel.queue = {
-        action: action,
-        add:    add,
-        drain:  drain,
-        depth:  depth,
-        reset:  reset
+        action:         action,
+        add:            add,
+        drain:          drain,
+        depth:          depth,
+        reset:          reset,
+        cancelByModule: cancelByModule,
+        depthByModule:  depthByModule
     };
 
 }(Steward));

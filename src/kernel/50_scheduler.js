@@ -51,11 +51,16 @@
     }
 
     function safePlan(mod, ctx) {
+        // Set the kernel-internal "current module" pointer so queue.add can
+        // tag enqueued actions with this module's id. This is single-threaded
+        // JS — no concurrency to worry about.
+        S.kernel._currentModule = mod.id;
         try {
             mod.plan(ctx);
         } catch (e) {
             S.kernel.error('scheduler', mod.id, 'plan threw:', e);
         }
+        S.kernel._currentModule = null;
     }
 
     function walkTier(priority, ctx) {

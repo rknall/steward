@@ -38,12 +38,16 @@
         for (var i = 0; i < mods.length; i++) {
             var m = mods[i];
             if (!m.boot) continue;
+            // Tag any queue.add calls inside boot() with this module's id
+            // so cancelByModule can clean them up later.
+            S.kernel._currentModule = m.id;
             try {
                 m.boot();
                 S.kernel.log('lifecycle', 'boot hook ran for', m.id);
             } catch (e) {
                 S.kernel.error('lifecycle', m.id, 'boot threw:', e);
             }
+            S.kernel._currentModule = null;
         }
     }
 

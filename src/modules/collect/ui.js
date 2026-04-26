@@ -51,6 +51,16 @@
         s[key] = !s[key];
         S.kernel.settings.write('collect', s);
         S.kernel.log('collect', 'toggled', key, '→', s[key]);
+
+        // If the user just disabled the master switch (or both feature flags
+        // are off), drop any pending collect actions immediately. Otherwise
+        // they'd keep firing for ~45 s while the queue drained.
+        if (key === 'enabled' || (!s.enabled || (!s.pickups && !s.lootBoxes))) {
+            if (S.kernel.queue && S.kernel.queue.cancelByModule) {
+                S.kernel.queue.cancelByModule('collect');
+            }
+        }
+
         renderMenu();
     }
 

@@ -98,6 +98,23 @@ Steward.kernel.queue.action('collect', function (params) {
 
 The queue drains FIFO with a default 1500 ms inter-action gap (overridable per action via `delay`). Actions never run faster than the kernel tick.
 
+### Module tagging and cancellation
+
+Every action enqueued from inside a module's `plan()` or `boot()` is automatically tagged with that module's `id` (the kernel sets a "current module" pointer around the call so `queue.add` can read it).
+
+This makes per-module cancellation safe and cheap:
+
+```js
+Steward.kernel.queue.cancelByModule('collect');   // drops every pending entry tagged 'collect'
+Steward.kernel.queue.depthByModule('collect');    // diagnostic
+```
+
+The `collect` module uses this when the user toggles its master switch off — pending actions disappear in milliseconds instead of draining for ~45 s. Modules should mirror the pattern when they have an "off" switch with pending side effects.
+
+### Modal-aware execution
+
+Each action is gated by a host-modal check before it fires (`60_queue.js:isHostModalVisible`). If any `div[role="dialog"]:visible` is on the page when the queue tries to run the next entry, the entry is **deferred** (not dropped) — the queue re-polls every `QUEUE_MODAL_RECHECK_MS` (2 s) and resumes the moment the user closes their window. This prevents Steward from yanking a window the user just opened.
+
 ## Starvation, fairness, and back-pressure
 
 - **Starvation:** prevented by the per-tier round-robin cursor. A misbehaving `Normal` module enqueueing 50 actions per tick still does not starve other `Normal` modules — they get first-look on the next tick.

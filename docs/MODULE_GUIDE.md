@@ -166,6 +166,16 @@ Steward.kernel.queue.action('collect', function (params) {
 
 The kernel paces action execution; one `plan` call can enqueue dozens, the queue drains FIFO.
 
+### Cancelling on disable
+
+When your module exposes an "off" switch, drop pending queued actions immediately so users don't see your work continue for tens of seconds after they disable you:
+
+```js
+S.kernel.queue.cancelByModule('your-module-id');
+```
+
+Actions enqueued from inside your `plan()` or `boot()` are automatically tagged with your module's id — you don't pass it explicitly. See `SCHEDULER.md` for the full contract.
+
 ## Logging
 
 ```js
