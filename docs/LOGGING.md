@@ -28,7 +28,7 @@ if (Steward.kernel.log.isEnabled('buildings')) {
 
 ## Configuration
 
-Settings live under `Steward.kernel.settings.read('logger')`:
+Settings live under `Steward.kernel.settings.read('logger')` (mapped to `'steward.logger'` in the host's settings file):
 
 | Key            | Default | Meaning                                                         |
 |----------------|---------|-----------------------------------------------------------------|
@@ -51,6 +51,8 @@ Steward.kernel.settings.write('logger', s);
 ```
 <applicationStorageDirectory>/steward/logs/console.log
 ```
+
+Logs are independent of settings — they live in the writable storage dir Steward owns. Settings are delegated to the host (`applicationDirectory/<settingsFile>`); see `analysis/HOST_INTEGRATION.md`.
 
 When the file exceeds `maxFileSizeKB`, it is renamed in-place:
 

@@ -18,8 +18,17 @@
     "getImage": "readonly",
     "getImageTag": "readonly",
     "getText": "readonly",
+    "extendBaseLang": "readonly",
     "Modal": "readonly",
-    "MenuItem": "readonly"
+    "MenuItem": "readonly",
+    "menu": "readonly",
+    "settings": "readonly",
+    "mainSettings": "readonly",
+    "enabledScripts": "readonly",
+    "TimedQueue": "readonly",
+    "utils": "readonly",
+    "showAlert": "readonly",
+    "showGameAlert": "readonly"
   },
   "parserOptions": {
     "ecmaVersion": 6,

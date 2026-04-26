@@ -1,97 +1,116 @@
 /*
  * Steward settings store.
  *
- * Single JSON file at <applicationStorageDirectory>/steward/settings.json.
- * Per-module namespaces — modules read/write under their own id and never
- * touch other modules' data.
+ * Adapter over the host TSO client's `settings` object (defined in
+ * tso_client/client/files/content/scripts/0-common.js). The host owns:
  *
- * In-memory cache populated on load(); writes update cache + flush to disk.
+ *   - the on-disk JSON file at applicationDirectory/<settingsFile>
+ *     (where settingsFile is set per profile in the host's index.html so
+ *     users running multiple game accounts get separate settings files).
+ *   - the in-memory cache.
+ *   - the dropbox sync (optional, host-driven).
+ *
+ * Steward stores under host modules named `'steward.<id>'`:
+ *
+ *   read('collect')           ↔ settings.read(null, 'steward.collect')
+ *   write('collect', obj)     ↔ settings.store(obj, 'steward.collect')
+ *
+ * Why delegate? Three reasons:
+ *   1. Per-profile separation (matches autoTSO and other userscripts).
+ *   2. Free dropbox sync — modules under host settings ship with the rest.
+ *   3. Single place users inspect settings, instead of two parallel files.
  */
 
 (function (S) {
 
-    var data = {};                  // { moduleId: { ... }, ... }
-    var loaded = false;
-    var saveTimer = null;
+    var NS_PREFIX = 'steward.';
 
-    function fileRef() {
-        if (typeof air === 'undefined' || !air.File) return null;
+    function namespaced(moduleId) {
+        if (!moduleId) return null;
+        return NS_PREFIX + moduleId;
+    }
+
+    function hostSettings() {
         try {
-            var dir = air.File.applicationStorageDirectory.resolvePath('steward');
-            if (!dir.exists) dir.createDirectory();
-            return dir.resolvePath('settings.json');
-        } catch (e) {
-            S.kernel.error('settings', 'failed to resolve settings dir:', e);
-            return null;
-        }
+            if (typeof settings !== 'undefined' && settings && typeof settings.read === 'function' &&
+                typeof settings.store === 'function') {
+                return settings;
+            }
+        } catch (e) { /* fall through */ }
+        return null;
     }
 
     function load() {
-        loaded = true;
-        var f = fileRef();
-        if (!f || !f.exists) return;
-        try {
-            var stream = new air.FileStream();
-            stream.open(f, air.FileMode.READ);
-            var content = stream.readUTFBytes(f.size);
-            stream.close();
-            if (content && content.length > 0) {
-                var parsed = JSON.parse(content);
-                if (parsed && typeof parsed === 'object') data = parsed;
-            }
-        } catch (e) {
-            S.kernel.error('settings', 'failed to read settings.json:', e);
+        // Host already loaded settings during 0-common.js init. We trust it.
+        // This function is kept for API parity with the previous store.
+        if (!hostSettings()) {
+            S.kernel.warn('settings', 'host `settings` global not present — modules will see empty data');
         }
     }
 
     function save() {
-        var f = fileRef();
-        if (!f) return false;
+        // Host's settings.store already persists synchronously; nothing to do.
+        return true;
+    }
+
+    function flush() {
+        return true;
+    }
+
+    function read(moduleId) {
+        var ns = namespaced(moduleId);
+        if (!ns) return null;
+        var host = hostSettings();
+        if (!host) return null;
         try {
-            var stream = new air.FileStream();
-            stream.open(f, air.FileMode.WRITE);
-            stream.writeUTFBytes(JSON.stringify(data, null, 2));
-            stream.close();
+            // settings.read(null, module) returns the whole module object
+            // (or null if the module has no entries yet).
+            var v = host.read(null, ns);
+            return v || null;
+        } catch (e) {
+            S.kernel.error('settings', 'host read threw for', ns, ':', e);
+            return null;
+        }
+    }
+
+    function write(moduleId, value) {
+        var ns = namespaced(moduleId);
+        if (!ns) return false;
+        var host = hostSettings();
+        if (!host) {
+            S.kernel.warn('settings', 'host `settings` global not present — write to', ns, 'dropped');
+            return false;
+        }
+        try {
+            // settings.store does a deep $.extend then save(). Passing the
+            // full module object replaces the namespace cleanly.
+            host.store(value, ns);
             return true;
         } catch (e) {
-            S.kernel.error('settings', 'failed to write settings.json:', e);
+            S.kernel.error('settings', 'host store threw for', ns, ':', e);
             return false;
         }
     }
 
-    function scheduleSave() {
-        if (saveTimer !== null) clearTimeout(saveTimer);
-        saveTimer = setTimeout(function () {
-            saveTimer = null;
-            save();
-        }, S.kernel.TIMEOUTS.SETTINGS_SAVE_DEBOUNCE_MS);
-    }
-
-    function read(moduleId) {
-        if (!loaded) load();
-        if (!moduleId) return null;
-        return data[moduleId] || null;
-    }
-
-    function write(moduleId, value) {
-        if (!loaded) load();
-        if (!moduleId) return false;
-        data[moduleId] = value;
-        scheduleSave();
-        return true;
-    }
-
     function all() {
-        if (!loaded) load();
-        return data;
-    }
-
-    function flush() {
-        if (saveTimer !== null) {
-            clearTimeout(saveTimer);
-            saveTimer = null;
+        // Returns { 'steward.kernel': {...}, 'steward.collect': {...}, ... }
+        // built from the host's full settings map. Filter to our namespaces.
+        var out = {};
+        var host = hostSettings();
+        if (!host || !host.settings) return out;
+        try {
+            var allHost = host.settings;
+            var keys = Object.keys(allHost);
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                if (k.indexOf(NS_PREFIX) === 0) {
+                    out[k.substring(NS_PREFIX.length)] = allHost[k];
+                }
+            }
+        } catch (e) {
+            S.kernel.warn('settings', 'all() failed:', e);
         }
-        return save();
+        return out;
     }
 
     S.kernel.settings = {

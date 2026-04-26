@@ -26,14 +26,17 @@ air.File.documentsDirectory                         // user docs
 air.File.userDirectory
 ```
 
-Steward writes everything to a `steward/` subfolder of `applicationStorageDirectory`:
+Steward writes settings through the host's `settings` global (see [`HOST_INTEGRATION.md`](analysis/HOST_INTEGRATION.md)) and writes logs to a `steward/logs/` subfolder of `applicationStorageDirectory`:
 
 ```js
-var dir = air.File.applicationStorageDirectory.resolvePath('steward');
-if (!dir.exists) dir.createDirectory();
+// Settings — delegate to the host:
+var s = settings.read(null, 'steward.collect');
+settings.store({ enabled: false }, 'steward.collect');
 
-var settingsFile = dir.resolvePath('settings.json');
-var logFile      = dir.resolvePath('logs/console.log');
+// Logs — Steward owns this path:
+var logDir = air.File.applicationStorageDirectory.resolvePath('steward/logs');
+if (!logDir.exists) logDir.createDirectory();
+var logFile = logDir.resolvePath('console.log');
 ```
 
 ### Reading

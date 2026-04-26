@@ -68,6 +68,17 @@ if (skill.modifier === Steward.SkillModifier.SearchTime) { /* ... */ }
 
 The values are prefixed strings (`'SpecialistCarrier'`, not `'CARRIER'`) precisely so they're self-explanatory if they ever leak into a log or settings file. Don't undo that by hard-coding them.
 
+## Rule 2.5: settings live in the host's namespace
+
+Steward delegates settings persistence to the host's `settings` object. Every read/write goes through `Steward.kernel.settings.{read,write}` — modules never call `settings.store(...)` directly. Internally the kernel namespaces under `'steward.<module>'` so:
+
+```js
+Steward.kernel.settings.write('collect', { enabled: true });
+// → host: settings.store({enabled: true}, 'steward.collect')
+```
+
+Why: per-profile separation (one settings file per game account, set in host index.html), free dropbox sync, single place to inspect.
+
 ## Rule 3: respect the cache contract
 
 `Steward.core.buildings.list()` is cached per scheduler tick. The cache is cleared at the start of every tick — within a single tick, repeated calls are cheap and consistent.
