@@ -1,21 +1,26 @@
 /*
  * Collect module.
  *
- * Steward's first end-to-end automation. Walks the home zone for ready
- * collectibles (mystery boxes, harvested deposits, etc.) and special
- * time-limited buildings (FlyingHouse, GiftChristmasTree, …), enqueueing a
- * collect action for each ready target.
+ * Walks the current zone for "pure collectibles" (Easter eggs, footballs,
+ * quest collectibles, event drops) and enqueues a SelectBuilding action for
+ * each. Honoured by the kernel's modal guard (waits while the user has a
+ * window open) and the busy contract (plan() will not be called again until
+ * the previous cycle's actions have all completed).
  *
- * Mirrors autoTSO's aBuildings.collectibles.{check,collect,lootables}
- * (autoTSO/user_auto.js:5022-5108) but routed through the Steward kernel.
+ * Detection: a building is considered a pure collectible iff
+ *   1. CollectionsManager.getBuildingIsCollectible(name) === true   (host API), AND
+ *   2. its name matches one of settings.namePatterns (substring match)
+ *
+ * Without the name-pattern filter, the host API matches terrain rocks,
+ * depleted mines, charcoal piles and other map-clutter — which is what the
+ * F4 "pickup all" shortcut sweeps when the user explicitly invokes it. We
+ * gate it tighter so the periodic scheduler tick stays useful.
+ *
+ * Use Steward → Collect → "Discover collectibles" to log every candidate on
+ * the current map and tune the pattern list.
  */
 
 (function (S) {
-
-    var state = {
-        cooldownUntil: 0,
-        lastQueued:    0
-    };
 
     function readSettings() {
         return (S.modules.collect && S.modules.collect.readSettings)
@@ -23,97 +28,48 @@
             : S.modules.collect.defaultSettings;
     }
 
-    // --- Collectible detection (autoTSO/user_auto.js:5022-5054) ---
-
-    function isReadyCollectible(b) {
-        if (!b) return false;
-        var bld = S.core.buildings;
-        // Always-collectible (mystery boxes etc.)
-        if (bld.isCollectible(b)) return true;
-        // Selectable, attackable foreign building with no army left
-        if (bld.isAttackable(b) && bld.isMine(b) === false && !bld.hasArmy(b)) {
-            try {
-                if (b.mIsSelectable) return true;
-            } catch (e) { /* ignore */ }
+    function nameMatchesAny(n, patterns) {
+        if (!n || !patterns || !patterns.length) return false;
+        for (var i = 0; i < patterns.length; i++) {
+            if (typeof patterns[i] !== 'string' || !patterns[i].length) continue;
+            if (n.indexOf(patterns[i]) > -1) return true;
         }
         return false;
     }
 
-    function collectPickups() {
-        var src = S.core.buildings.list();
-        var enqueued = 0;
-        for (var i = 0; i < src.length; i++) {
-            var b = src[i];
-            if (!isReadyCollectible(b)) continue;
-            S.kernel.queue.add('collect', [S.core.buildings.grid(b), false]);
-            enqueued++;
-        }
-        return enqueued;
+    function isPureCollectible(b, patterns) {
+        if (!b) return false;
+        var bld = S.core.buildings;
+        if (!bld.isCollectible(b)) return false;
+        return nameMatchesAny(bld.name(b), patterns);
     }
-
-    // --- Lootables list (autoTSO/user_auto.js:5055-5073) ---
-
-    function questExists(name) {
-        try {
-            if (typeof game === 'undefined' || !game.quests) return false;
-            if (typeof game.quests.getQuest !== 'function') return false;
-            return !!game.quests.getQuest(name);
-        } catch (e) { return false; }
-    }
-
-    function collectLootables() {
-        var lootables = (S.modules.collect && S.modules.collect.LOOTABLES) || {};
-        var enqueued = 0;
-        var keys = Object.keys(lootables);
-        for (var i = 0; i < keys.length; i++) {
-            var buildingName = keys[i];
-            var questTag = lootables[buildingName];
-            var matches = S.core.buildings.byName(buildingName);
-            if (!matches.length) continue;
-
-            // Quest 'BuiBonus_<tag>_Timer_Loop' or 'BuiBonus_<tag>_Timer'
-            // exists while the building is on cooldown — absence implies ready.
-            var q1 = 'BuiBonus_' + questTag + '_Timer_Loop';
-            var q2 = 'BuiBonus_' + questTag + '_Timer';
-            if (questExists(q1) || questExists(q2)) continue;
-
-            for (var j = 0; j < matches.length; j++) {
-                S.kernel.queue.add('collect', [S.core.buildings.grid(matches[j]), true]);
-                enqueued++;
-            }
-        }
-        return enqueued;
-    }
-
-    // --- Module spec ---
 
     function isReady(ctx) {
         var s = readSettings();
         if (!s || !s.enabled) return false;
         if (!ctx.zone || !ctx.zone.isHome) return false;
-        if (ctx.now < state.cooldownUntil) return false;
-        if (!s.pickups && !s.lootBoxes) return false;
+        if (!s.namePatterns || !s.namePatterns.length) return false;
         return true;
     }
 
-    function plan(ctx) {
+    function plan() {
         var s = readSettings();
-        var total = 0;
-
-        // Refresh the buildings snapshot at the top of plan to catch zone
-        // changes since the last tick (per CORE_USAGE.md cache contract).
-        S.core.buildings.invalidate();
-
-        if (s.pickups)    total += collectPickups();
-        if (s.lootBoxes)  total += collectLootables();
-
-        if (total > 0) {
-            S.kernel.log('collect', 'queued', total, 'collect actions');
-            state.lastQueued = total;
+        var bld = S.core.buildings;
+        bld.invalidate();
+        var src = bld.list();
+        var enqueued = 0;
+        for (var i = 0; i < src.length; i++) {
+            if (!isPureCollectible(src[i], s.namePatterns)) continue;
+            S.kernel.queue.add('collect', [bld.grid(src[i])]);
+            enqueued++;
         }
-
-        var cd = typeof s.cooldownMs === 'number' ? s.cooldownMs : 30000;
-        state.cooldownUntil = ctx.now + cd;
+        if (enqueued > 0) {
+            S.kernel.log('collect', 'enqueued', enqueued, 'collectible(s)');
+        }
+        // No cooldown — the scheduler's busy contract handles re-entry: plan()
+        // will not be called again until every action above has executed.
+        // When the queue is empty (no collectibles on map), plan() is cheap to
+        // re-run on the next tick.
     }
 
     function boot() {
@@ -125,19 +81,18 @@
         // Register the queue action that performs the actual collect.
         S.kernel.queue.action('collect', function (params) {
             var grid = params[0];
-            var isLootBox = !!params[1];
+            var bld = S.core.buildings;
             try {
-                var building = S.core.buildings.byGrid(grid);
+                var building = bld.byGrid(grid);
                 if (!building) {
-                    S.kernel.warn('collect', 'building at grid', grid, 'not found (already collected?)');
+                    // Building already collected (or zone changed). Quietly drop.
                     return;
                 }
                 if (typeof game !== 'undefined' && game.gi && typeof game.gi.SelectBuilding === 'function') {
                     game.gi.SelectBuilding(building);
                 }
-                var name = S.core.buildings.name(building);
-                S.kernel.log('collect', 'collecting', isLootBox ? 'loot box' : 'pickup', name, 'at', grid);
-                // Refresh the host UI so the building's state updates.
+                var name = bld.name(building);
+                S.kernel.log('collect', 'collecting', name, 'at', grid);
                 if (typeof globalFlash !== 'undefined' && globalFlash && globalFlash.gui &&
                     typeof globalFlash.gui.UpdateGuiOnZoneLoad === 'function') {
                     globalFlash.gui.UpdateGuiOnZoneLoad();
@@ -145,9 +100,9 @@
             } catch (e) {
                 S.kernel.error('collect', 'collect action threw:', e);
             }
-            // Buildings disappear or change state on collect — invalidate the cache
-            // so the next plan() sees the new world.
-            S.core.buildings.invalidate();
+            // The collected building disappears or changes state; refresh so
+            // the next plan() (after the queue empties) sees the new world.
+            bld.invalidate();
         });
 
         // Render the in-game menu entry.

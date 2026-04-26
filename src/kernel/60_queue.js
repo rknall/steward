@@ -11,9 +11,10 @@
 
 (function (S) {
 
-    var actions = {};    // { name: fn(params) }
-    var queue = [];      // [{ name, params, delay }]
+    var actions = {};                  // { name: fn(params) }
+    var queue = [];                    // [{ name, params, delay, moduleId }]
     var draining = false;
+    var currentlyRunningModule = null; // moduleId of the action currently executing
 
     function action(name, fn) {
         if (!name || typeof name !== 'string') {
@@ -74,6 +75,18 @@
         return n;
     }
 
+    // A module is "busy" while it has any pending or in-flight queue work.
+    // The scheduler consults this before invoking plan() — a busy module is
+    // skipped so it can't pile new actions on top of unfinished ones. See
+    // docs/SCHEDULER.md "Module busy contract".
+    function isModuleBusy(targetModuleId) {
+        if (!targetModuleId) return false;
+        if (currentlyRunningModule === targetModuleId) return true;
+        return depthByModule(targetModuleId) > 0;
+    }
+
+    function runningModule() { return currentlyRunningModule; }
+
     function isHostModalVisible() {
         try {
             // Bootstrap modals (used by host's Modal class and userscripts) carry
@@ -99,11 +112,13 @@
             return;
         }
         var entry = queue.shift();
+        currentlyRunningModule = entry.moduleId || null;
         try {
             actions[entry.name](entry.params);
         } catch (e) {
             S.kernel.error('queue', entry.name, 'threw:', e);
         }
+        currentlyRunningModule = null;
         // Schedule next after this action's delay.
         setTimeout(runOne, entry.delay);
     }
@@ -120,6 +135,9 @@
     function reset() {
         queue = [];
         draining = false;
+        // Note: currentlyRunningModule is intentionally NOT cleared here.
+        // If reset() is called while an action is mid-execution, that action
+        // will finish and clear the flag itself.
     }
 
     S.kernel.queue = {
@@ -129,7 +147,9 @@
         depth:          depth,
         reset:          reset,
         cancelByModule: cancelByModule,
-        depthByModule:  depthByModule
+        depthByModule:  depthByModule,
+        isModuleBusy:   isModuleBusy,
+        runningModule:  runningModule
     };
 
 }(Steward));

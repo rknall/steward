@@ -115,6 +115,36 @@ The `collect` module uses this when the user toggles its master switch off — p
 
 Each action is gated by a host-modal check before it fires (`60_queue.js:isHostModalVisible`). If any `div[role="dialog"]:visible` is on the page when the queue tries to run the next entry, the entry is **deferred** (not dropped) — the queue re-polls every `QUEUE_MODAL_RECHECK_MS` (2 s) and resumes the moment the user closes their window. This prevents Steward from yanking a window the user just opened.
 
+## Module busy contract
+
+**A module is "busy" while it has any pending or in-flight queue work. The scheduler does not call `plan()` on a busy module.**
+
+This means each `plan()` call is *transactional*: the module declares its intent for the current cycle, and that intent is allowed to complete before the module is asked again. Concretely:
+
+- A module's `plan()` enqueues N actions tagged with its id.
+- The scheduler skips that module on subsequent ticks until `queue.depthByModule(id) === 0` AND the action that's currently in-flight is not from that module.
+- When the queue drains (or `cancelByModule(id)` is called), the module becomes available again. Next tick, `isReady` is re-checked, then `plan()` runs.
+
+Why this matters:
+
+- **Modal pause + busy contract**: user opens a window → drainage pauses → module stays busy → no new `plan()` calls accumulate on top of the pending work. Queue size is bounded by the module's *per-cycle* count.
+- **Long-running operations** (an adventure, a production order placed): not represented in the queue once the *kick-off action* fires. The module's own `isReady` returns false while the operation is in flight (e.g. checking `aSession.adventure.name` in autoTSO terms). The busy contract handles the queue side; module logic handles the game-state side.
+- **Cancellation is clean**: `queue.cancelByModule(id)` empties the module's pending entries → busy=false → next tick, `isReady` decides whether to start fresh.
+
+Implementation:
+
+```js
+// 60_queue.js
+S.kernel.queue.isModuleBusy(id);    // pending OR in-flight
+S.kernel.queue.depthByModule(id);   // pending count only
+S.kernel.queue.runningModule();     // moduleId of currently-executing action, or null
+
+// 50_scheduler.js walkTier
+if (S.kernel.queue.isModuleBusy(mod.id)) continue;
+```
+
+This contract supersedes any "auto-cancel-before-plan" idea — the same outcome is achieved more cleanly by simply not calling `plan()` until the previous cycle is done.
+
 ## Starvation, fairness, and back-pressure
 
 - **Starvation:** prevented by the per-tier round-robin cursor. A misbehaving `Normal` module enqueueing 50 actions per tick still does not starve other `Normal` modules — they get first-look on the next tick.

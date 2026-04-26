@@ -176,6 +176,16 @@ S.kernel.queue.cancelByModule('your-module-id');
 
 Actions enqueued from inside your `plan()` or `boot()` are automatically tagged with your module's id — you don't pass it explicitly. See `SCHEDULER.md` for the full contract.
 
+### Plan is transactional — write it that way
+
+`plan()` runs once per cycle. Once it returns, the kernel will **not** call it again until every action it enqueued has completed (or been cancelled). Implications:
+
+- **Don't worry about re-entry.** You can safely scan game state and enqueue everything you found; the busy contract guarantees no second invocation racing with the first.
+- **Long-running game operations** that aren't fully represented in the queue (an adventure mid-flight, a production order placed) need additional gating in `isReady`. Return `false` while the operation is in progress; return `true` when it completes or is cancelled.
+- **Don't enqueue a "watcher" that re-enqueues itself forever.** The natural cycle is: scan → enqueue → drain → become idle → next tick re-evaluates `isReady`. If you need periodic checks during a long operation, that's `isReady`'s job, not the queue's.
+
+See `SCHEDULER.md` "Module busy contract" for the full mechanism.
+
 ## Logging
 
 ```js

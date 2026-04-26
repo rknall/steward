@@ -1,12 +1,14 @@
 /*
  * Settings UI for the collect module.
  *
- * v0.1 keeps it minimal: a "Collect" submenu under the Steward root with three
- * toggle entries. Clicking a toggle flips the corresponding setting and
- * re-registers the menu entry so the label reflects the new state.
+ * Three menu items under "Steward → Collect":
+ *   - Enabled toggle (master switch)
+ *   - Patterns: <comma-separated list>  (read-only label, edit via settings.json)
+ *   - Discover collectibles             (one-shot scan that logs candidates)
  *
- * A modal-based settings dialog can replace this later — `createModalWindow` /
- * `createSwitch` from the host client are documented in docs/TSO_API.md.
+ * The patterns list is intentionally read-only in the menu — typing into
+ * native menu items is awkward; the list lives in steward.collect.namePatterns
+ * in the host settings file.
  */
 
 (function (S) {
@@ -20,17 +22,10 @@
         return s || S.modules.collect.defaultSettings;
     }
 
-    function writeSetting(key, value) {
-        var s = readSettings();
-        s[key] = value;
-        S.kernel.settings.write('collect', s);
-    }
-
-    function toggleEntry(label, key, currentValue) {
-        return {
-            label:    (currentValue ? '✓ ' : '✕ ') + label,
-            onSelect: function () { toggle(key); }
-        };
+    function patternsLabel(s) {
+        var ps = (s.namePatterns && s.namePatterns.length) ? s.namePatterns : [];
+        if (!ps.length) return 'Patterns: (none — module disabled effectively)';
+        return 'Patterns: ' + ps.join(', ');
     }
 
     function buildSpec() {
@@ -39,9 +34,19 @@
             name:  MENU_ENTRY_NAME,
             label: 'Collect',
             items: [
-                toggleEntry('Enabled',    'enabled',   !!s.enabled),
-                toggleEntry('Pickups',    'pickups',   !!s.pickups),
-                toggleEntry('Loot boxes', 'lootBoxes', !!s.lootBoxes)
+                {
+                    label:    (s.enabled ? '✓ ' : '✕ ') + 'Enabled',
+                    onSelect: function () { toggle('enabled'); }
+                },
+                {
+                    label:    patternsLabel(s),
+                    enabled:  false                         // info-only
+                },
+                { type: 'separator' },
+                {
+                    label:    'Discover collectibles (log)',
+                    onSelect: discover
+                }
             ]
         };
     }
@@ -52,16 +57,64 @@
         S.kernel.settings.write('collect', s);
         S.kernel.log('collect', 'toggled', key, '→', s[key]);
 
-        // If the user just disabled the master switch (or both feature flags
-        // are off), drop any pending collect actions immediately. Otherwise
-        // they'd keep firing for ~45 s while the queue drained.
-        if (key === 'enabled' || (!s.enabled || (!s.pickups && !s.lootBoxes))) {
+        // If the user disabled the module, drop any pending collect actions
+        // immediately. Per the busy contract this also unblocks plan() once
+        // the user re-enables (no orphan actions hanging around).
+        if (key === 'enabled' && !s.enabled) {
             if (S.kernel.queue && S.kernel.queue.cancelByModule) {
                 S.kernel.queue.cancelByModule('collect');
             }
         }
 
         renderMenu();
+    }
+
+    // One-shot: walk every building on the current zone and log whether the
+    // host's CollectionsManager flagged it collectible, plus whether each of
+    // the user's configured patterns matches. Output goes through the
+    // standard logger (category 'collect:discover') so it lands in
+    // <appStorage>/steward/logs/console.log.
+    function discover() {
+        try {
+            var s = readSettings();
+            var bld = S.core.buildings;
+            bld.invalidate();
+            var src = bld.list();
+            var matched = 0;
+            var unmatched = 0;
+
+            S.kernel.log('collect:discover', '--- discovery start ---',
+                         'patterns:', (s.namePatterns || []).join(','));
+
+            for (var i = 0; i < src.length; i++) {
+                var b = src[i];
+                if (!bld.isCollectible(b)) continue;
+                var n = bld.name(b);
+                var hits = [];
+                var ps = s.namePatterns || [];
+                for (var k = 0; k < ps.length; k++) {
+                    if (n && n.indexOf(ps[k]) > -1) hits.push(ps[k]);
+                }
+                if (hits.length) matched++; else unmatched++;
+                S.kernel.log('collect:discover',
+                    (hits.length ? '✓' : '·'),
+                    n, 'grid=' + bld.grid(b),
+                    'matches:', hits.length ? hits.join(',') : '(none)');
+            }
+
+            S.kernel.log('collect:discover',
+                '--- discovery end --- matched:', matched,
+                'unmatched:', unmatched, 'total scanned:', matched + unmatched);
+
+            try {
+                if (typeof showGameAlert === 'function') {
+                    showGameAlert('Steward: discovered ' + matched + ' matching, ' +
+                                  unmatched + ' unmatched. See console.');
+                }
+            } catch (e) { /* alert is best-effort */ }
+        } catch (e) {
+            S.kernel.error('collect:discover', 'threw:', e);
+        }
     }
 
     function renderMenu() {
@@ -71,6 +124,6 @@
 
     S.modules.collect.renderMenu   = renderMenu;
     S.modules.collect.readSettings = readSettings;
-    S.modules.collect.writeSetting = writeSetting;
+    S.modules.collect.discover     = discover;
 
 }(Steward));

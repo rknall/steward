@@ -71,6 +71,11 @@
         for (var offset = 0; offset < inTier.length; offset++) {
             var idx = (cursor + offset) % inTier.length;
             var mod = inTier[idx];
+            // Module busy contract: skip plan() while the module has pending
+            // or in-flight queue work. Prevents accumulation when drainage is
+            // slower than tick rate (e.g. user has a host modal open).
+            // See docs/SCHEDULER.md "Module busy contract".
+            if (S.kernel.queue.isModuleBusy(mod.id)) continue;
             if (safeIsReady(mod, ctx)) safePlan(mod, ctx);
         }
         state.cursors[priority] = (cursor + 1) % inTier.length;
