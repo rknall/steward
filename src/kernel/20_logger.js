@@ -3,8 +3,18 @@
  *
  * One entry point: Steward.kernel.log(category, ...values). Writes to:
  *   1. The host JS console (air.Introspector.Console if present, or debug()).
- *   2. A rotating file under <applicationStorageDirectory>/steward/logs/console.log
- *      when settings.fileEnabled is true.
+ *   2. A rotating file at <client install>/steward/logs/console.log
+ *      (next to the AIR client binaries — predictable / easy to find).
+ *
+ * Path resolution: AIR's `applicationDirectory.resolvePath(...)` returns a
+ * File classified as read-only application content; writing to it raises
+ * `SecurityError: fileWriteResource`. We round-trip through `.nativePath`
+ * and `new air.File(path)` to drop the classification — the same trick
+ * autoTSO uses (user_auto.js:163) and the host's own user-script manager
+ * (0-manager.js:131). Confirmed on the live AIR runtime via probe at
+ * _temp/diagnostics/user_steward_pathprobe.js. Falls back to
+ * applicationStorageDirectory and then documentsDirectory if the
+ * round-trip somehow fails (read-only install layout, etc.).
  *
  * The logger boots in a "console only, all categories enabled" mode. Once
  * Steward.kernel.settings.load() runs, configure() picks up persisted prefs.
@@ -103,24 +113,58 @@
         }
     }
 
+    // Round-trip a relative path under applicationDirectory through
+    // .nativePath so the resulting File is unclassified by AIR (writable
+    // instead of read-only application content). Returns null on any
+    // failure.
+    function applicationDirRoundTrip(relPath) {
+        try {
+            var resolved = air.File.applicationDirectory.resolvePath(relPath);
+            if (!resolved || !resolved.nativePath) return null;
+            return new air.File(resolved.nativePath);
+        } catch (e) {
+            emitToConsole(LEVEL.WARN,
+                '[WARN] [' + timestamp() + '] [logger] round-trip resolve threw for ' +
+                relPath + ': ' + e);
+            return null;
+        }
+    }
+
     function ensureLogFile() {
         if (state.logFile) return state.logFile;
         if (typeof air === 'undefined' || !air.File) return null;
-        // Primary: applicationStorageDirectory/steward/logs/console.log.
-        // This is AIR's per-app writable location. On Windows it lives at
-        //   C:\Users\<user>\AppData\Roaming\<bundle-id>\Local Store\steward\logs\
-        // applicationDirectory is NOT used because AIR classifies any File
-        // obtained via applicationDirectory.resolvePath(...) as "application
-        // content" and rejects writes with SecurityError: fileWriteResource.
-        // (autoTSO bypasses this by round-tripping through .nativePath into
-        // `new air.File(path)` — we don't need that trick here.)
+
+        // Primary: <client install>/steward/logs/console.log via the
+        // round-trip trick. Predictable location next to the client
+        // binaries. autoTSO writes its own log this way; the host's
+        // user-script manager uses the identical pattern when saving
+        // remote scripts to disk.
+        try {
+            var primaryFile = applicationDirRoundTrip('steward/logs/console.log');
+            if (primaryFile) {
+                var primaryDir = primaryFile.parent;
+                if (createDirectoryRecursive(primaryDir)) {
+                    state.logDir  = primaryDir;
+                    state.logFile = primaryFile;
+                    emitToConsole(LEVEL.LOG,
+                        '[LOG] [' + timestamp() + '] [logger] writing to ' +
+                        state.logFile.nativePath);
+                    return state.logFile;
+                }
+            }
+        } catch (e) {
+            emitToConsole(LEVEL.WARN,
+                '[WARN] [' + timestamp() + '] [logger] applicationDirectory round-trip failed: ' + e);
+        }
+
+        // Fallback 1: per-app storage. Buried in AppData but always writable.
         try {
             var dir = air.File.applicationStorageDirectory.resolvePath('steward/logs');
             if (createDirectoryRecursive(dir)) {
                 state.logDir  = dir;
                 state.logFile = dir.resolvePath('console.log');
-                emitToConsole(LEVEL.LOG,
-                    '[LOG] [' + timestamp() + '] [logger] writing to ' +
+                emitToConsole(LEVEL.WARN,
+                    '[WARN] [' + timestamp() + '] [logger] applicationDirectory unavailable, using applicationStorageDirectory ' +
                     state.logFile.nativePath);
                 return state.logFile;
             }
@@ -128,9 +172,10 @@
             emitToConsole(LEVEL.ERROR,
                 '[ERROR] [' + timestamp() + '] [logger] storage dir resolve threw: ' + e);
         }
-        // Last-ditch fallback to documentsDirectory only fires if the storage
-        // tree is somehow unavailable. In practice this should never happen
-        // on a healthy AIR runtime.
+
+        // Fallback 2: user documents. Last-ditch — both above must have
+        // failed for this to fire. Should never happen on a healthy AIR
+        // runtime.
         try {
             var alt = air.File.documentsDirectory.resolvePath('steward/logs');
             if (createDirectoryRecursive(alt)) {
@@ -145,6 +190,7 @@
             emitToConsole(LEVEL.ERROR,
                 '[ERROR] [' + timestamp() + '] [logger] documents fallback threw: ' + e);
         }
+
         emitToConsole(LEVEL.ERROR,
             '[ERROR] [' + timestamp() + '] [logger] no writable log location — file output disabled');
         state.fileEnabled = false;

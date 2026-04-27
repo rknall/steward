@@ -30,7 +30,15 @@
         // Delay between dispatch actions. Match the kernel's default queue
         // gap so a roster of 300 explorers takes ~7-8 minutes rather than
         // 25. The kernel still pace-protects against server flooding.
-        dispatchDelay: 1500
+        dispatchDelay: 1500,
+        // When a treasure event is in its `_Content` phase, force every
+        // owned explorer onto a treasure dispatch — including ones whose
+        // trait would otherwise lean toward adventure (Royal, Love Struck,
+        // Keener, Nora). Implementation in core/specialists.biasFromTrait
+        // adds a large constant to the treasure score; nothing about the
+        // host's trait/skill objects is mutated. Off → trait bias picks
+        // the family even during events.
+        forceTreasureOnEvents: true
     };
 
 }(Steward));

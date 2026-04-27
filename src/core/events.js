@@ -212,6 +212,64 @@
         }
     }
 
+    // -----------------------------------------------------------------
+    // Event-suffix vocabulary used by trait/skill `name_string` filters.
+    //
+    // The host appends an underscore-prefixed suffix to a base task type
+    // when an event-active variant of that task should drop event-themed
+    // loot — e.g. `FindTreasureShort_Easter`, `FindTreasureLong_XMAS`,
+    // `FindTreasure_Lovely_Short_Halloween`. Steward needs to map those
+    // suffixes back to the base event codes returned by `active()` so
+    // the trait recommendation algorithm (core/specialists.biasFromTrait)
+    // can decide whether a seasonal-only effect should fire.
+    //
+    // Multiple suffixes may resolve to one event code — Soccer ships
+    // both `_SoccerResources` and `_SoccerBalls` drop tables.
+    //
+    // Update this map alongside core/events/data.js when a new event
+    // ships. The two files are kept in sync intentionally: data.js
+    // owns the run-time event metadata (treasure values, resource
+    // names), this map owns the build-time suffix vocabulary.
+    // -----------------------------------------------------------------
+    var EVENT_SUFFIX_TO_CODE = {
+        '_Easter':          'Easter',
+        '_XMAS':            'XMAS',
+        '_Halloween':       'HW',
+        '_Valentine':       'Valentine',
+        '_SoccerResources': 'Soccer',
+        '_SoccerBalls':     'Soccer',
+        '_Anniversary':     'Anniversary',
+        '_RedNose':         'RedNose',          // not yet in data.events
+        '_SpecialistWeek':  'SpecialistWeek'    // not yet in data.events
+    };
+
+    // Map a single name_string entry to its event code, or null if the
+    // entry has no recognised suffix. Endpoint OR `<suffix>_` substring
+    // both match — the host's suffixes can appear at the end of the
+    // task tag (`FindTreasureShort_Easter`) or as a middle segment in
+    // composite Lovely-private variants (`FindTreasure_Lovely_Short_Easter`).
+    function suffixToCode(entry) {
+        if (!entry) return null;
+        for (var suffix in EVENT_SUFFIX_TO_CODE) {
+            if (!Object.prototype.hasOwnProperty.call(EVENT_SUFFIX_TO_CODE, suffix)) continue;
+            var endsWith = entry.length >= suffix.length &&
+                           entry.lastIndexOf(suffix) === (entry.length - suffix.length);
+            var contains = entry.indexOf(suffix + '_') > -1;
+            if (endsWith || contains) return EVENT_SUFFIX_TO_CODE[suffix];
+        }
+        return null;
+    }
+
+    // Plain enumeration of every known suffix string. Useful for dump
+    // tooling that wants to highlight or normalise event-suffix tokens.
+    function suffixList() {
+        var out = [];
+        for (var k in EVENT_SUFFIX_TO_CODE) {
+            if (Object.prototype.hasOwnProperty.call(EVENT_SUFFIX_TO_CODE, k)) out.push(k);
+        }
+        return out;
+    }
+
     if (!S.core.events) S.core.events = {};
 
     S.core.events.active              = active;
@@ -223,6 +281,9 @@
     S.core.events.eventResource       = eventResource;
     S.core.events.eventResourceAmount = eventResourceAmount;
     S.core.events.levelMultiplier     = levelMultiplier;
+    // Suffix vocabulary — see EVENT_SUFFIX_TO_CODE comment above.
+    S.core.events.suffixToCode        = suffixToCode;
+    S.core.events.suffixList          = suffixList;
     // Lower-level helpers exposed for diagnostics / future modules.
     S.core.events.liveEventNames   = liveEventNames;
     S.core.events.matchBaseCode    = matchBaseCode;

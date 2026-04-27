@@ -151,6 +151,13 @@
             catch (e) { /* ignore */ }
             sub.addItem(openItem);
 
+            // Per-module quick-toggles. Each enabled-aware module surfaces a
+            // single entry showing its current state — clicking flips
+            // settings.<id>.enabled and refreshes the menu. autoTSO has the
+            // equivalent under "Start/Stop X Auto".
+            try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
+            appendModuleQuickToggles(sub);
+
             root.submenu = sub;
             container.addItem(root);
             S.kernel.debug('ui', 'menu rebuilt — mode:', attach.mode);
@@ -162,6 +169,54 @@
     }
 
     function refreshNativeMenu() { if (initialized) rebuildNativeMenu(); }
+
+    // Surface a quick-toggle for every dashboard-aware module that has an
+    // `enabled` settings flag. Click the entry to flip it without opening
+    // the modal. Mirrors autoTSO's "Start/Stop X Auto" entries. Modules
+    // that don't expose `enabled` (e.g. diagnostics — read-only probes)
+    // are skipped automatically.
+    function appendModuleQuickToggles(sub) {
+        try {
+            var mods = S.kernel.registry.withUi();
+            for (var i = 0; i < mods.length; i++) {
+                appendOneToggle(sub, mods[i]);
+            }
+        } catch (e) {
+            S.kernel.error('ui', 'appendModuleQuickToggles threw:', e);
+        }
+    }
+
+    function appendOneToggle(sub, mod) {
+        var s = S.kernel.settings.read(mod.id);
+        if (!s || typeof s.enabled === 'undefined') return;
+        var label = (s.enabled ? '✓ ' : '✕ ') + mod.ui.section.title;
+        var item = new air.NativeMenuItem(label);
+        item.name = 'StewardModuleToggle_' + mod.id;
+        item.enabled = true;
+        try {
+            item.addEventListener(air.Event.SELECT, function () {
+                toggleModuleEnabled(mod.id);
+            });
+        } catch (e) { /* ignore */ }
+        sub.addItem(item);
+    }
+
+    function toggleModuleEnabled(moduleId) {
+        try {
+            var s = S.kernel.settings.read(moduleId) || {};
+            s.enabled = !s.enabled;
+            S.kernel.settings.write(moduleId, s);
+            S.kernel.log('ui', 'quick-toggle', moduleId, '→', s.enabled);
+            // Cancel pending queue work the moment the user disables a module —
+            // matches the buffered-Save flow's behaviour for the same flip.
+            if (!s.enabled && S.kernel.queue && S.kernel.queue.cancelByModule) {
+                S.kernel.queue.cancelByModule(moduleId);
+            }
+            refreshNativeMenu();
+        } catch (e) {
+            S.kernel.error('ui', 'toggleModuleEnabled threw:', e);
+        }
+    }
 
     function init() {
         if (initialized) { rebuildNativeMenu(); return; }
