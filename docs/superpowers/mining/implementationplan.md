@@ -6,16 +6,45 @@
 
 **Architecture:** New `src/modules/mining/` module, sibling to `src/modules/geologists/`. Extends `src/core/deposits/types.js` with mine/mason metadata. Registers a section under the existing `geologists` UI tab. Phased `plan()` runs `tryBuild` (filled), `tryUpgrade` / `tryPause` / `tryBuff` / `tryRefill` (stubs). Settings stored at `steward.mining`. See `docs/superpowers/mining/module-design.md` for the full spec.
 
-**Tech Stack:** Adobe AIR 32 / ES5+ (strict — no `let`/`const`/arrow/template literals/destructuring/spread/`.includes()`/`.find()`/`.startsWith()`/`Promise`/`Set`/`Map`). Single-file bundle built by `scripts/build.js` (concatenation by directory + filename sort). Lint by `scripts/lint-air.js`. No test runner — verification is `npm run lint` + `npm run build` + live-host smoke against the AIR client.
+**Tech Stack:** Adobe AIR 32 / ES5+ (strict — no `let`/`const`/arrow/template literals/destructuring/spread/`.includes()`/`.find()`/`.startsWith()`/`Promise`/`Set`/`Map`). Single-file bundle built by `scripts/build.js` (concatenation by directory + filename sort). Lint by `scripts/lint-air.js`. Tests via `npm test` (custom runner at `tests/runner.js`). Live-host smoke remains the final acceptance gate — `SendServerAction` payloads and UI rendering can't be unit-tested.
+
+**Test-first discipline:** Every phase function (Build, Upgrade, Pause, Buff, Refill) ships with planner-level test coverage in `tests/modules/mining.test.js` *before* the implementation lands. Same for the type-table extension in Task 1. See `docs/MODULE_GUIDE.md` "Testing" section for harness usage; `tests/modules/geologists.test.js` is the canonical reference.
 
 ---
 
 ## Task 1: Extend `core/deposits/types.js` with mine/mason metadata
 
 **Files:**
+- Modify: `tests/core/deposits-types.test.js`
 - Modify: `src/core/deposits/types.js`
 
 The `TABLE` entries returned by `S.core.deposits.types()` need three new fields: `mineId` (numeric building type for `SendServerAction(50, ...)`), `mineName` (string for `CanPlayerAffordBuilding`), and `masonName` (host's mason building name, only for Stone/Marble/Granite). All values come from `autoTSO/user_auto.js:1086-1095` and `:5168`.
+
+- [ ] **Step 0: Extend the existing types-table test with assertions for the new fields**
+
+In `tests/core/deposits-types.test.js`, append:
+
+```js
+t.test('types() rows expose mineId / mineName / masonName fields', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var rows = H.Steward.core.deposits.types();
+
+    var iron = rows[3];
+    t.assert.strictEqual(iron.name, 'IronOre');
+    t.assert.strictEqual(iron.mineId, 50);
+    t.assert.strictEqual(iron.mineName, 'IronMine');
+    t.assert.strictEqual(iron.masonName, null);
+
+    var stone = rows[0];
+    t.assert.strictEqual(stone.name, 'Stone');
+    t.assert.strictEqual(stone.mineId, null);
+    t.assert.strictEqual(stone.mineName, null);
+    t.assert.strictEqual(stone.masonName, 'Mason');
+});
+```
+
+Run: `npm test`
+Expected: this new test FAILS (the fields don't exist yet); the other 4 still pass.
 
 - [ ] **Step 1: Edit `src/core/deposits/types.js` to add a `MINE_DATA` map and merge it into `TABLE`**
 
@@ -54,25 +83,23 @@ Replace the existing `TABLE` construction block (lines 42-51) with:
     }
 ```
 
-- [ ] **Step 2: Run lint to verify syntax**
+- [ ] **Step 2: Run tests + lint + build**
 
-Run: `npm run lint`
-Expected: passes with no errors.
+```bash
+npm test          # all 5 deposits-types tests pass (the Step 0 test now passes too)
+npm run lint
+npm run build
+```
 
-- [ ] **Step 3: Run build to verify the bundle compiles**
-
-Run: `npm run build`
-Expected: writes `build/user_steward.js`, no errors.
-
-- [ ] **Step 4: Verify the new fields appear in the bundle**
+- [ ] **Step 3: Verify the new fields appear in the bundle**
 
 Run: `grep -c "BronzeMine" build/user_steward.js`
 Expected: at least 1 (string is now present in the bundled types table).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/core/deposits/types.js
+git add tests/core/deposits-types.test.js src/core/deposits/types.js
 git commit -m "core/deposits: add mine/mason metadata to type table"
 ```
 
@@ -148,17 +175,15 @@ Contents:
 }(Steward));
 ```
 
-- [ ] **Step 2: Run lint**
+- [ ] **Step 2: Run tests + lint + build**
 
-Run: `npm run lint`
-Expected: passes.
+```bash
+npm test          # 16 tests still pass — settings-only change adds nothing testable yet
+npm run lint
+npm run build
+```
 
-- [ ] **Step 3: Run build**
-
-Run: `npm run build`
-Expected: writes `build/user_steward.js`, no errors.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add src/modules/mining/settings.js
@@ -167,7 +192,74 @@ git commit -m "mining: default settings tree"
 
 ---
 
-## Task 3: Create module skeleton with registration and stub phases
+## Task 3a: Write failing planner tests (test-first for the phased shell)
+
+**Files:**
+- Create: `tests/modules/mining.test.js`
+
+Five failing tests, one per phase function, plus the no-queue case when the module is disabled. The implementation in Task 3b makes them pass without restructure.
+
+- [ ] **Step 1: Create the file**
+
+Path: `tests/modules/mining.test.js`
+
+```js
+'use strict';
+
+var t = require('../runner');
+var harness = require('../harness');
+
+t.test('plan no-ops when module is disabled', function () {
+    var H = harness.boot();
+    H.settings.write('mining', { enabled: false });
+    var mod = H.module('mining');
+    t.assert.ok(mod, 'mining module should be registered');
+    mod.plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('plan visits each phase function for mine-bearing types', function () {
+    var H = harness.boot();
+    var calls = { build: 0, upgrade: 0, pause: 0, buff: 0, refill: 0 };
+    H.Steward.modules.mining._phases = {
+        tryBuild:   function () { calls.build++; },
+        tryUpgrade: function () { calls.upgrade++; },
+        tryPause:   function () { calls.pause++; },
+        tryBuff:    function () { calls.buff++; },
+        tryRefill:  function () { calls.refill++; }
+    };
+    var z = H.zone.zone()
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', { enabled: true });
+    H.module('mining').plan({ zone: { isHome: true } });
+    // 6 mine-bearing types: build/upgrade/pause each called 6 times.
+    t.assert.strictEqual(calls.build,   6);
+    t.assert.strictEqual(calls.upgrade, 6);
+    t.assert.strictEqual(calls.pause,   6);
+    // buff and refill apply to all 9 deposit types.
+    t.assert.strictEqual(calls.buff,   9);
+    t.assert.strictEqual(calls.refill, 9);
+});
+```
+
+(Note: the `_phases` injection point is internal to the mining module — Task 3b's shell reads from it as a test-only override hook. Production code uses the real phase functions.)
+
+- [ ] **Step 2: Run tests — these MUST fail**
+
+Run: `npm test`
+Expected: tests/modules/mining.test.js — 2 failures (mining module not yet implemented). Other 16 tests still pass.
+
+- [ ] **Step 3: Commit the failing tests**
+
+```bash
+git add tests/modules/mining.test.js
+git commit -m "tests: failing planner tests for mining module"
+```
+
+---
+
+## Task 3b: Implement the module skeleton (makes Task 3a tests pass)
 
 **Files:**
 - Create: `src/modules/mining/module.js`
@@ -251,12 +343,24 @@ Contents:
         };
     }
 
-    // Phase stubs — filled in v2.
+    // Phase functions. Production bodies are filled in later tasks
+    // (tryBuild in Task 4, the rest in v2). Tests inject stubs via
+    // S.modules.mining._phases — see tests/modules/mining.test.js.
     function tryBuild(info, cfg, ctx)   { /* filled in Task 4 */ }
     function tryUpgrade(info, cfg, ctx) { /* v2 */ }
     function tryPause(info, cfg, ctx)   { /* v2 */ }
     function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
+
+    function phase(name, info, cfg, ctx) {
+        var override = S.modules.mining._phases && S.modules.mining._phases[name];
+        if (typeof override === 'function') return override(info, cfg, ctx);
+        if (name === 'tryBuild')   return tryBuild(info, cfg, ctx);
+        if (name === 'tryUpgrade') return tryUpgrade(info, cfg, ctx);
+        if (name === 'tryPause')   return tryPause(info, cfg, ctx);
+        if (name === 'tryBuff')    return tryBuff(info, cfg, ctx);
+        if (name === 'tryRefill')  return tryRefill(info, cfg, ctx);
+    }
 
     function plan() {
         var s = readSettings();
@@ -274,12 +378,12 @@ Contents:
             if (!cfg || !cfg.enabled) continue;
 
             if (info.mineName) {
-                tryBuild(info, cfg, ctx);
-                tryUpgrade(info, cfg, ctx);
-                tryPause(info, cfg, ctx);
+                phase('tryBuild',   info, cfg, ctx);
+                phase('tryUpgrade', info, cfg, ctx);
+                phase('tryPause',   info, cfg, ctx);
             }
-            tryBuff(info, cfg, ctx);
-            tryRefill(info, cfg, ctx);
+            phase('tryBuff',  info, cfg, ctx);
+            phase('tryRefill', info, cfg, ctx);
         }
         if (ctx.queued > 0) {
             S.kernel.log('mining', 'queued', ctx.queued, 'action(s)');
@@ -324,22 +428,20 @@ Contents:
 }(Steward));
 ```
 
-- [ ] **Step 2: Run lint**
+- [ ] **Step 2: Run tests + lint + build**
 
-Run: `npm run lint`
-Expected: passes.
+```bash
+npm test          # mining.test.js now passes — 18 tests across 6 files
+npm run lint
+npm run build
+```
 
-- [ ] **Step 3: Run build**
-
-Run: `npm run build`
-Expected: writes `build/user_steward.js`, no errors.
-
-- [ ] **Step 4: Verify the module ID is registered in the bundle**
+- [ ] **Step 3: Verify the module ID is registered in the bundle**
 
 Run: `grep -c "id: *'mining'\|id:'mining'" build/user_steward.js`
 Expected: at least 1.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/modules/mining/module.js
@@ -351,9 +453,102 @@ git commit -m "mining: module skeleton with phased plan() shell"
 ## Task 4: Implement `tryBuild` and the `mining.buildMine` queue action
 
 **Files:**
+- Modify: `tests/modules/mining.test.js`
 - Modify: `src/modules/mining/module.js`
 
 Fill the `tryBuild` phase body and register the `mining.buildMine` queue action in `boot()`. Both contain defensive re-checks because state can drift between `plan()` and the queued action firing.
+
+- [ ] **Step 0: Add planner tests for tryBuild's decision logic**
+
+Append to `tests/modules/mining.test.js`:
+
+```js
+function onlyMiningEnabled(depositName, build) {
+    var names = ['Stone', 'BronzeOre', 'Marble', 'IronOre', 'GoldOre',
+                 'Coal', 'Granite', 'TitaniumOre', 'Salpeter'];
+    var deposits = {};
+    for (var i = 0; i < names.length; i++) {
+        var entry = { enabled: false, build: false, upgrade: false,
+                      targetLevel: 3, pause: false, buff: '', refill: '' };
+        if (names[i] === depositName) { entry.enabled = true; entry.build = !!build; }
+        deposits[names[i]] = entry;
+    }
+    return { enabled: true, actionDelay: 0, deposits: deposits };
+}
+
+t.test('tryBuild enqueues nothing when no on-map deposits exist', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .deposits('IronOre', [])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuild enqueues one mining.buildMine per fresh deposit', function () {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.buildMine');
+    t.assert.strictEqual(q[0].params[1], 12);                 // grid
+    t.assert.strictEqual(q[0].params[3], 'IronMine');         // mineName
+});
+
+t.test('tryBuild skips deposit grids that already host a building', function () {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 7 });
+    var existing = H.zone.building({ name: 'IronMine', grid: 7 });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .building(existing)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuild skips when build queue has no remaining slots', function () {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .buildQueue(4, 4)                                    // queue full
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuild skips when build flag is false for the deposit', function () {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.settings.write('mining', onlyMiningEnabled('IronOre', false));   // build:false
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+```
+
+Run: `npm test`
+Expected: 5 new mining tests FAIL (tryBuild is empty). Other tests still pass.
 
 - [ ] **Step 1: Replace the empty `tryBuild` stub with the filled body**
 
@@ -470,25 +665,23 @@ Replace with:
     }
 ```
 
-- [ ] **Step 3: Run lint**
+- [ ] **Step 3: Run tests + lint + build**
 
-Run: `npm run lint`
-Expected: passes.
+```bash
+npm test          # all 5 tryBuild tests now pass — 23 tests across 6 files
+npm run lint
+npm run build
+```
 
-- [ ] **Step 4: Run build**
-
-Run: `npm run build`
-Expected: writes `build/user_steward.js`, no errors.
-
-- [ ] **Step 5: Verify the queue action is registered in the bundle**
+- [ ] **Step 4: Verify the queue action is registered in the bundle**
 
 Run: `grep -c "mining.buildMine" build/user_steward.js`
 Expected: at least 2 (one registration, one `queue.add` call).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/modules/mining/module.js
+git add tests/modules/mining.test.js src/modules/mining/module.js
 git commit -m "mining: tryBuild phase + buildMine queue action"
 ```
 
@@ -674,22 +867,20 @@ Contents:
 }(Steward));
 ```
 
-- [ ] **Step 2: Run lint**
+- [ ] **Step 2: Run tests + lint + build**
 
-Run: `npm run lint`
-Expected: passes.
+```bash
+npm test
+npm run lint
+npm run build
+```
 
-- [ ] **Step 3: Run build**
-
-Run: `npm run build`
-Expected: writes `build/user_steward.js`, no errors.
-
-- [ ] **Step 4: Verify the section title is in the bundle**
+- [ ] **Step 3: Verify the section title is in the bundle**
 
 Run: `grep -c "title: *'Mining'\|title:'Mining'" build/user_steward.js`
 Expected: at least 1.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/modules/mining/ui.js
@@ -734,7 +925,15 @@ Expected: the planner does not queue any `mining.buildMine` for Coal, while stil
 
 Expected: planner skips silently — no `queued N action(s)` log line. Once a slot frees, the next tick resumes.
 
-- [ ] **Step 8: Mark validation complete in commit**
+- [ ] **Step 8: Final acceptance gate**
+
+```bash
+npm test          # all tests pass — phase tests + tryBuild tests + 16 prior seeds
+npm run lint      # passes
+npm run build     # bundle written
+```
+
+- [ ] **Step 9: Mark validation complete in commit**
 
 ```bash
 git commit --allow-empty -m "mining: v1 host smoke test complete"
@@ -742,19 +941,25 @@ git commit --allow-empty -m "mining: v1 host smoke test complete"
 
 ---
 
+## v2 Phase Tasks (Future)
+
+Each v2 phase function ships with planner-level test coverage in `tests/modules/mining.test.js` *before* implementation. Same pattern as Task 4: write failing tests for the phase's gates, then fill the body. Phase ordering: `tryUpgrade` → `tryPause` → `tryBuff` → `tryRefill`. `tryBuff` and `tryRefill` are blocked on `core/buffs` not yet existing — design that subsystem first.
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
 
-- v1 scope (build mine on found deposits, 6 mine-bearing types) → Tasks 1, 2, 3, 4
-- Phased planner shell with stubs for upgrade/pause/buff/refill → Task 3
-- Build-queue slots / building licenses / affordability gates → Task 4 (`tryBuild` + `canAffordMine`)
+- v1 scope (build mine on found deposits, 6 mine-bearing types) → Tasks 1, 2, 3a/3b, 4
+- Phased planner shell with stubs for upgrade/pause/buff/refill → Task 3a (tests) + Task 3b (impl)
+- Build-queue slots / building licenses / affordability gates → Task 4 Step 0 (tests) + Step 1 (impl)
 - Defensive re-check in queued action → Task 4 Step 2
 - `core/deposits/types.js` mineId / mineName / masonName extension → Task 1
 - Settings tree with per-type shape difference → Task 2
 - Dashboard section (master toggle, table over 9 types, Build Mine column, Active column, status footer, no icon) → Task 5
 - Cross-module behavior (geologists runs independently) → no code change needed; covered by isReady / plan independence
-- Validation via lint + build + host smoke → Tasks 1-5 lint+build steps, Task 6 host smoke
+- Validation via tests + lint + build + host smoke → every task ends with `npm test && npm run lint && npm run build`; Task 6 host smoke is the final gate
 
 **Placeholder scan:** No "TBD"/"TODO" left in steps. `tryUpgrade` / `tryPause` / `tryBuff` / `tryRefill` empty bodies are intentional v2 stubs as the spec explicitly defines, not placeholders.
 

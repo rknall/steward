@@ -249,3 +249,41 @@ There is no explicit unload — modules live for the lifetime of the client. If 
 
 - `src/modules/collect/` (v0.1) — the canonical reference module once it lands in P3.
 - autoTSO's `aBuildings.collectibles` (`autoTSO/user_auto.js:5021`) — proven game-side logic to mirror.
+
+## Testing
+
+Steward has a small custom test runner at `tests/runner.js`. Tests load source files into a fresh `vm` context per test, with stubbed host globals — pure logic and planner decisions can be exercised without an AIR client.
+
+```bash
+npm test                                    # all tests
+node tests/runner.js tests/core/foo.test.js # single file
+```
+
+Test API is flat: `var t = require('../runner'); t.test(name, fn);` plus `t.assert` (Node's built-in `assert.strict`). No describe/it nesting, no global `expect`.
+
+The harness gives each test a fresh Steward, capturable kernel logs and queue, and an in-memory settings store:
+
+```js
+var t = require('../runner');
+var harness = require('../harness');
+
+t.test('plan enqueues nothing when disabled', function () {
+    var H = harness.boot();
+    H.settings.write('mymodule', { enabled: false });
+    H.module('mymodule').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+```
+
+Stubs live under `tests/stubs/`:
+
+- `host.js` — `game`, `loca`, `air`, `$`, `settings`, `globalFlash`. Defaults are no-ops or null sentinels so an accidental host call surfaces as a loud failure rather than a silent zero.
+- `zone.js` — fluent fake-zone builder: `zone().deposits('IronOre', [...]).building({...}).specialists([...]).buildQueue(used, max).mountOnPlayer(player)`.
+- `specialists.js` — factories for `geologist({...})`, `explorer({...})`, `task(typeId, subTypeId)`.
+- `kernel.js` — wraps `kernel.log/queue.add/settings.read/write` after source load with capturing versions; the harness wires this for you.
+
+Canonical example: `tests/modules/geologists.test.js`. It builds a zone with a single idle geologist, writes settings, calls `plan()`, asserts the resulting `queue.add` payload — end-to-end planner test in ~25 lines.
+
+What the runner does **not** cover: `SendServerAction` payloads (host-side state), UI rendering against the dashboard DOM, anything depending on AIR-only globals like `air.File`. Those stay validated by the live-host smoke test in each module's plan.
+
+When adding a module, write planner tests alongside the implementation. Lint already ignores `tests/` so test files use modern JS freely; only `src/` is held to the AIR-32 ES5 subset.
