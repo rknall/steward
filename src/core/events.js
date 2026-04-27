@@ -81,10 +81,15 @@
                 };
             }
             byCode[code].rawNames.push(raw);
-            // Category guess from suffix.
-            if (raw.indexOf('_Shop') !== -1)         byCode[code].categories.shop    = true;
-            else if (raw.indexOf('Content') !== -1)  byCode[code].categories.treasure = true;
-            else                                      byCode[code].categories.other   = true;
+            // Category guess from suffix. Mirror autoTSO (user_auto.js:4435
+            // — getActiveEvent('_Content') / getActiveEvent('_Shop')) and
+            // require the underscore-prefixed suffix. The bare 'Content'
+            // substring matches wrapper event names that persist into the
+            // event's cooldown / shop-only phase, which made pickTask think
+            // treasure was still dropping after items had stopped.
+            if (raw.indexOf('_Shop') !== -1)          byCode[code].categories.shop    = true;
+            else if (raw.indexOf('_Content') !== -1)  byCode[code].categories.treasure = true;
+            else                                       byCode[code].categories.other   = true;
             // Track the latest end time across sub-events.
             var et = eventEndTime(raw);
             if (et && (!byCode[code].endTime || et > byCode[code].endTime)) {
@@ -137,6 +142,42 @@
         return out;
     }
 
+    // Player's current count of an event's resource currency. Returns null
+    // when the host APIs aren't ready or the event has no resource. Used by
+    // the dashboard to show "you have N StripedEggs" alongside the event.
+    function eventResourceAmount(code) {
+        var resName = eventResource(code);
+        if (!resName) return null;
+        try {
+            if (typeof game !== 'undefined' && game && typeof game.getResources === 'function') {
+                var resources = game.getResources();
+                if (resources && typeof resources.GetResourceAmount === 'function') {
+                    var n = resources.GetResourceAmount(resName);
+                    return (typeof n === 'number') ? n : null;
+                }
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
+    // True when the event is live but only its `_Shop` variant is in
+    // GetActiveEventNames() — items have stopped dropping from explorer
+    // treasure searches and the override should disengage. Mirrors
+    // autoTSO's `getActiveEvent('_Shop') && !getActiveEvent('_Content')`.
+    function isCooldown(eventOrCode) {
+        var ev = (typeof eventOrCode === 'string')
+            ? null
+            : eventOrCode;
+        if (!ev) {
+            var a = active();
+            for (var i = 0; i < a.length; i++) {
+                if (a[i].code === eventOrCode) { ev = a[i]; break; }
+            }
+        }
+        if (!ev) return false;
+        return !!(ev.categories && ev.categories.shop && !ev.categories.treasure);
+    }
+
     // Resource (currency) the event drops. Anniversary varies by player
     // level, so we resolve it here rather than baking the level into data.
     function eventResource(code) {
@@ -173,13 +214,15 @@
 
     if (!S.core.events) S.core.events = {};
 
-    S.core.events.active           = active;
-    S.core.events.isActive         = isActive;
-    S.core.events.treasureValues   = treasureValues;
-    S.core.events.depositModifier  = depositModifier;
-    S.core.events.byCategory       = byCategory;
-    S.core.events.eventResource    = eventResource;
-    S.core.events.levelMultiplier  = levelMultiplier;
+    S.core.events.active              = active;
+    S.core.events.isActive            = isActive;
+    S.core.events.isCooldown          = isCooldown;
+    S.core.events.treasureValues      = treasureValues;
+    S.core.events.depositModifier     = depositModifier;
+    S.core.events.byCategory          = byCategory;
+    S.core.events.eventResource       = eventResource;
+    S.core.events.eventResourceAmount = eventResourceAmount;
+    S.core.events.levelMultiplier     = levelMultiplier;
     // Lower-level helpers exposed for diagnostics / future modules.
     S.core.events.liveEventNames   = liveEventNames;
     S.core.events.matchBaseCode    = matchBaseCode;

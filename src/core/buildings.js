@@ -195,14 +195,43 @@
         }, opts);
     }
 
+    // Group every collectible building on the zone by display name and
+    // count occurrences. Returns [{ name, count }] sorted by count desc
+    // then by name. Used by the dashboard's Collect Pickups section, but
+    // intentionally lives here so any module ("how much is on the ground
+    // right now") can consume the same query without re-implementing the
+    // walk + filter + group.
+    function collectiblesByName(opts) {
+        opts = opts || {};
+        var src = ensureSnapshot(opts.zone);
+        var groups = {};
+        for (var i = 0; i < src.length; i++) {
+            if (!isCollectible(src[i])) continue;
+            var n = name(src[i]);
+            if (!n) continue;
+            groups[n] = (groups[n] || 0) + 1;
+        }
+        var out = [];
+        var keys = Object.keys(groups);
+        for (var k = 0; k < keys.length; k++) {
+            out.push({ name: keys[k], count: groups[keys[k]] });
+        }
+        out.sort(function (a, b) {
+            if (b.count !== a.count) return b.count - a.count;
+            return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+        });
+        return out;
+    }
+
     S.core.buildings = {
         // listing
-        list:         list,
-        byName:       byName,
-        byGrid:       byGrid,
-        byPredicate:  byPredicate,
-        listMines:    listMines,
-        invalidate:   invalidate,
+        list:               list,
+        byName:             byName,
+        byGrid:             byGrid,
+        byPredicate:        byPredicate,
+        listMines:          listMines,
+        collectiblesByName: collectiblesByName,
+        invalidate:         invalidate,
 
         // accessors
         name:         name,

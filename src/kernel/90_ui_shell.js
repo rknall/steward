@@ -55,11 +55,14 @@
     // The tab order shown in the bar — must match what the registry
     // accepts (see 40_registry.js). Status is built-in; the rest are
     // module-populated. Mail/Trades is omitted (deferred to a later phase).
+    // Internal `id` strings stay stable so module ui specs (and the registry's
+    // TABS set) don't have to track renames. Only the user-visible `label`
+    // changes here.
     var TAB_ORDER = [
         { id: 'status',      label: 'Status' },
-        { id: 'specialists', label: 'Specialists' },
+        { id: 'specialists', label: 'Explorers' },
         { id: 'quests',      label: 'Quests' },
-        { id: 'buildings',   label: 'Buildings' },
+        { id: 'buildings',   label: 'Collections & Buildings' },
         { id: 'tools',       label: 'Tools' },
         { id: 'misc',        label: 'Misc' }
     ];
@@ -267,9 +270,12 @@
             // ---- title bar (keep wood background) ----
             '#StewardDashboard .modal-header{padding:14px 22px 12px !important;' +
                 'border-bottom:1px solid rgba(0,0,0,.3);}',
+            // Pure white + a soft dark text-shadow so the title pops off the
+            // wood regardless of how the host renders window_top.png.
             '#StewardDashboard .modal-header .modal-title,' +
-                '#StewardDashboard .modal-header h4{color:#f8f1d9;font-size:20px;' +
-                'font-weight:500;letter-spacing:.3px;margin:0;}',
+                '#StewardDashboard .modal-header h4{color:#fff;font-size:20px;' +
+                'font-weight:600;letter-spacing:.3px;margin:0;' +
+                'text-shadow:0 1px 2px rgba(0,0,0,.6);}',
             '#StewardDashboard .modal-header .close{color:#f8f1d9;opacity:.85;' +
                 'text-shadow:none;font-size:24px;line-height:1;}',
             '#StewardDashboard .modal-header .close:hover{color:#fff;opacity:1;}',
@@ -294,51 +300,47 @@
             '#StewardDashboard .steward-panel{padding:16px 22px 20px;height:480px;' +
                 'overflow-y:auto;}',
 
-            // ---- section ----
-            '#StewardDashboard .steward-section{margin-bottom:14px;border-radius:6px;' +
-                'overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.3);}',
-            '#StewardDashboard .steward-section-band{background:linear-gradient(180deg,#ece0bb 0%,#d8c89c 100%);' +
-                'color:#2a2418;padding:8px 14px;font-size:14px;font-weight:500;}',
-            '#StewardDashboard .steward-section-band:after{content:"";display:block;clear:both;height:0;}',
-            '#StewardDashboard .steward-section-icon{float:left;width:24px;height:24px;' +
-                'border-radius:4px;background:linear-gradient(135deg,#8a6a2e,#5a4020);' +
-                'border:1px solid #4a3010;color:#f5e9c4;font-size:13px;font-weight:700;' +
-                'line-height:22px;text-align:center;margin-right:10px;}',
-            '#StewardDashboard .steward-section-title{float:left;line-height:24px;}',
-            '#StewardDashboard .steward-section-action{float:right;color:#2c5fb5;' +
-                'text-decoration:none;font-size:13px;font-weight:500;line-height:24px;}',
-            '#StewardDashboard .steward-section-action:hover{text-decoration:underline;color:#2c5fb5;}',
-
-            '#StewardDashboard .steward-section-rows{background:rgba(0,0,0,.20);' +
-                'border:1px solid rgba(0,0,0,.35);border-top:none;}',
-
-            // ---- form row ----
-            '#StewardDashboard .steward-row{padding:9px 14px;font-size:13px;' +
-                'color:#d8d0bd;border-bottom:1px solid rgba(0,0,0,.15);}',
-            '#StewardDashboard .steward-row:after{content:"";display:block;clear:both;height:0;}',
+            // ---- section header / form rows ----
+            // Sections render as a flat sequence of BS3 rows on the panel.
+            // The header row uses cells with the host's `tblHeader` class
+            // (parchment + black text + 23px height — defined in
+            // bootstrap.min.css). Form rows are plain BS3 .row with col-*
+            // cells from gridRow().
+            //
+            // tblHeader rounded corners are applied to the first / last cell
+            // of each header (matches utils.createTableRow output).
+            '#StewardDashboard .steward-row{margin:0;padding:6px 0;font-size:13px;' +
+                'color:#e8e1cf;border-bottom:1px solid rgba(0,0,0,.15);}',
             '#StewardDashboard .steward-row:last-child{border-bottom:none;}',
-            '#StewardDashboard .steward-row-label{float:left;line-height:26px;' +
-                'max-width:60%;}',
-            '#StewardDashboard .steward-row-ctl{float:right;line-height:26px;' +
-                'text-align:right;}',
-            '#StewardDashboard .steward-row-help{color:#8a7a55;font-size:11px;' +
-                'margin-left:8px;}',
             '#StewardDashboard .steward-row-disabled{background:rgba(120,40,30,.25);}',
-            '#StewardDashboard .steward-row-indent{padding-left:30px;color:#b8b0a3;' +
-                'font-size:12px;background:rgba(0,0,0,.10);}',
-            '#StewardDashboard .steward-row-arrow{color:#8a7a55;margin-right:4px;}',
+            '#StewardDashboard .steward-row-ctl{text-align:right;}',
+            '#StewardDashboard .steward-row-help{color:#a09a85;font-size:11px;' +
+                'margin-left:8px;}',
+            '#StewardDashboard .steward-row-hint{color:#b8b0a3;font-size:12px;' +
+                'padding-left:18px;}',
 
-            // ---- toggle ----
-            '#StewardDashboard .steward-toggle{display:inline-block;position:relative;' +
-                'width:50px;height:26px;background:#6a6258;border-radius:13px;' +
-                'cursor:pointer;vertical-align:middle;' +
-                'box-shadow:inset 0 1px 2px rgba(0,0,0,.3);}',
-            '#StewardDashboard .steward-toggle.on{background:#2c5fb5;}',
-            '#StewardDashboard .steward-toggle:before{content:"";position:absolute;' +
-                'top:3px;left:3px;width:20px;height:20px;background:#fff;' +
-                'border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.4);' +
-                'transition:left .12s;}',
-            '#StewardDashboard .steward-toggle.on:before{left:27px;}',
+            '#StewardDashboard .tblHeader{padding-top:3px !important;' +
+                'padding-bottom:3px !important;line-height:23px;' +
+                'font-weight:600;}',
+            '#StewardDashboard .steward-tbl-first{border-radius:10px 0 0 10px;}',
+            '#StewardDashboard .steward-tbl-last{border-radius:0 10px 10px 0;}',
+            '#StewardDashboard .steward-section-title{font-size:14px;color:#000;}',
+            '#StewardDashboard .steward-section-icon{display:inline-block;' +
+                'margin-right:4px;}',
+            '#StewardDashboard .steward-section-action{color:#2c5fb5;' +
+                'text-decoration:none;font-size:13px;font-weight:500;' +
+                'float:right;line-height:23px;}',
+            '#StewardDashboard .steward-section-action:hover{text-decoration:underline;' +
+                'color:#2c5fb5;}',
+
+            // Pad the row that follows a tblHeader so the table doesn't feel
+            // crammed against the band.
+            '#StewardDashboard .row.steward-row{padding-left:14px;padding-right:14px;}',
+
+            // Idle/busy variants of a per-explorer row — different accent
+            // colour without changing the underlying row layout.
+            '#StewardDashboard .row.steward-row-idle{color:#cfe6ce;}',
+            '#StewardDashboard .row.steward-row-busy{color:#d8c89c;}',
 
             // ---- input / dropdown ----
             '#StewardDashboard .steward-input,' +
@@ -467,61 +469,103 @@
 
         var $panel = $('#steward-panel', $body);
         $panel.empty();
+        // BS3 .row carries negative side margins; wrap in container-fluid
+        // so the rows align with the panel edges instead of overflowing.
+        var $container = $('<div>', { 'class': 'container-fluid' });
+        $panel.append($container);
 
         if (tabId === 'status') {
-            renderStatusTab($panel);
+            renderStatusTab($container);
         } else {
-            renderModuleTab($panel, tabId);
+            renderModuleTab($container, tabId);
         }
     }
 
     function renderModuleTab($panel, tabId) {
+        var h = S.kernel.ui.helpers;
         var mods = S.kernel.registry.byTab(tabId);
         if (!mods.length) {
-            $panel.append($('<div>', { 'class': 'steward-section' }).append(
-                $('<div>', { 'class': 'steward-section-band' }).append(
-                    $('<span>', { 'class': 'steward-section-title' }).text('No modules in this tab yet.')
-                )
-            ));
+            $panel.append(h.headerRow('No modules in this tab yet.'));
             return;
         }
         for (var i = 0; i < mods.length; i++) {
-            $panel.append(renderSection(mods[i]));
+            renderSection($panel, mods[i]);
         }
     }
 
-    function renderSection(mod) {
+    // The shell builds the section's header row from the ui spec, then hands
+    // the panel + helpers to the module so it can append its data rows.
+    // Modules append directly to $panel — same flat sequence-of-rows layout
+    // autoTSO uses (createTableRow per row, header rows interleaved).
+    function renderSection($panel, mod) {
         var sec = mod.ui.section;
-        var $section = $('<div>', { 'class': 'steward-section', 'data-section-id': sec.id });
+        var h = S.kernel.ui.helpers;
 
-        var $band = $('<div>', { 'class': 'steward-section-band' });
-        if (sec.icon) {
-            $band.append($('<span>', { 'class': 'steward-section-icon' }).text(sec.icon));
-        }
-        $band.append($('<span>', { 'class': 'steward-section-title' }).text(sec.title));
-        if (sec.action) {
-            var $action = $('<a>', { 'href': '#', 'class': 'steward-section-action' })
-                .text(sec.action.label);
-            $action.on('click', function (e) {
-                e.preventDefault();
-                try { sec.action.onClick(); }
-                catch (err) { S.kernel.error('ui', 'section action threw:', err); }
-            });
-            $band.append($action);
-        }
-        $section.append($band);
+        $panel.append(h.headerRow(sec.title, {
+            icon:   sec.icon,
+            action: sec.action || null
+        }));
 
-        var $rows = $('<div>', { 'class': 'steward-section-rows' });
         try {
-            sec.render($rows, S.kernel.ui.helpers);
+            sec.render($panel, h);
         } catch (e) {
             S.kernel.error('ui', 'render threw for', mod.id, ':', e);
-            $rows.append($('<div>', { 'class': 'steward-row' })
-                .text('Render failed — see log.'));
+            $panel.append(h.formRow('Render failed — see log.', ''));
         }
-        $section.append($rows);
 
-        return $section;
+        // Visual separator between sections — empty row.
+        $panel.append($('<div>', { 'class': 'steward-section-spacer' })
+            .css({ height: '10px' }));
+    }
+
+    // Render one event in the Status tab's "Active events" section.
+    // Surfaces:
+    //   - the event display name (Easter, XMAS, …)
+    //   - phase: "Treasure phase" (green) when items are dropping,
+    //            "Event Cooldown" (amber) when only the shop variant is
+    //            live, otherwise the raw category list
+    //   - the resource currency + the player's current count
+    function renderEventRow(ev, h) {
+        var $lbl = $('<span>');
+        $lbl.append($('<strong>').text(ev.name));
+        $lbl.append(document.createTextNode(' — '));
+
+        var inTreasure = !!(ev.categories && ev.categories.treasure);
+        var inCooldown = !!(ev.categories && ev.categories.shop && !inTreasure);
+        var $phase;
+        if (inTreasure) {
+            $phase = $('<span>').css({ color: '#6cba5d', fontWeight: '600' })
+                .text('Treasure phase');
+        } else if (inCooldown) {
+            $phase = $('<span>').css({ color: '#e8a64a', fontWeight: '600' })
+                .text('Cooldown Phase');
+        } else {
+            $phase = $('<span>').text((ev.categoryList || []).join(', ') || 'live');
+        }
+        $lbl.append($phase);
+
+        var $rhs = $('<span>');
+        var resource = null;
+        try {
+            if (S.core.events.eventResource) {
+                resource = S.core.events.eventResource(ev.code) || null;
+            }
+        } catch (e) { /* ignore */ }
+        if (resource) {
+            $rhs.append($('<code>').text(resource));
+            var amount = null;
+            try {
+                if (S.core.events.eventResourceAmount) {
+                    amount = S.core.events.eventResourceAmount(ev.code);
+                }
+            } catch (e) { /* ignore */ }
+            if (typeof amount === 'number') {
+                $rhs.append(document.createTextNode(' · '));
+                $rhs.append($('<strong>').text(String(amount)));
+                $rhs.append(document.createTextNode(' held'));
+            }
+        }
+        return h.formRow($lbl, $rhs);
     }
 
     // -----------------------------------------------------------------
@@ -531,22 +575,14 @@
     function renderStatusTab($panel) {
         var h = S.kernel.ui.helpers;
 
-        // Section: Steward Status.
-        var $sec1 = $('<div>', { 'class': 'steward-section' });
-        var $band1 = $('<div>', { 'class': 'steward-section-band' });
-        $band1.append($('<span>', { 'class': 'steward-section-icon' }).text('★'));
-        $band1.append($('<span>', { 'class': 'steward-section-title' }).text('Steward Status'));
-        $sec1.append($band1);
-        var $rows1 = $('<div>', { 'class': 'steward-section-rows' });
+        // ---- Section: Steward Status ----
+        $panel.append(h.headerRow('Steward Status', { icon: '★' }));
 
-        // Master pause.
-        var $pauseToggle = h.toggle({
-            checked: paused,
+        $panel.append(h.formRow('Master pause', h.toggle({
+            checked:  paused,
             onChange: function (next) { setPaused(next); }
-        });
-        $rows1.append(h.formRow('Master pause', $pauseToggle));
+        })));
 
-        // Modules running.
         var withUi = S.kernel.registry.withUi();
         var enabledNames = [];
         for (var i = 0; i < withUi.length; i++) {
@@ -558,53 +594,29 @@
         if (enabledNames.length) {
             $modText.append(document.createTextNode(' · ' + enabledNames.join(', ')));
         }
-        $rows1.append(h.formRow('Modules running', $modText));
+        $panel.append(h.formRow('Modules running', $modText));
 
-        // Queue depth + tick interval + build.
-        $rows1.append(h.formRow('Queue depth', String(S.kernel.queue.depth())));
-        $rows1.append(h.formRow('Tick interval',
+        $panel.append(h.formRow('Queue depth', String(S.kernel.queue.depth())));
+        $panel.append(h.formRow('Tick interval',
             S.kernel.scheduler.state.tickIntervalMs + ' ms'));
-        $rows1.append(h.formRow('Build', $('<code>').text('v0.4.0')));
+        $panel.append(h.formRow('Build', $('<code>').text('v0.4.0')));
 
-        $sec1.append($rows1);
-        $panel.append($sec1);
+        $panel.append($('<div>').css({ height: '10px' }));
 
-        // Section: Active events.
+        // ---- Section: Active events ----
         try {
             if (S.core.events && S.core.events.active) {
                 var ev = S.core.events.active();
-                var $sec2 = $('<div>', { 'class': 'steward-section' });
-                var $band2 = $('<div>', { 'class': 'steward-section-band' });
-                $band2.append($('<span>', { 'class': 'steward-section-icon' }).text('⚑'));
-                $band2.append($('<span>', { 'class': 'steward-section-title' }).text('Active events'));
-                $sec2.append($band2);
-                var $rows2 = $('<div>', { 'class': 'steward-section-rows' });
+                $panel.append(h.headerRow('Active events', { icon: '⚑' }));
                 if (ev.length === 0) {
-                    $rows2.append($('<div>', { 'class': 'steward-row' })
-                        .append($('<em>').css({ color: '#8a7a55' }).text('No events live.')));
+                    $panel.append(h.formRow(
+                        $('<em>').css({ color: '#a09a85' }).text('No events live.'),
+                        ''));
                 } else {
                     for (var k = 0; k < ev.length; k++) {
-                        var ev_ = ev[k];
-                        var resource = '';
-                        try {
-                            if (S.core.events.eventResource) {
-                                resource = S.core.events.eventResource(ev_.code) || '';
-                            }
-                        } catch (e2) { /* ignore */ }
-                        var $lbl = $('<span>');
-                        $lbl.append($('<strong>').text(ev_.name));
-                        $lbl.append(document.createTextNode(' — ' +
-                            (ev_.categoryList || []).join(', ')));
-                        var $rhs = $('<span>');
-                        if (resource) {
-                            $rhs.append(document.createTextNode('resource '));
-                            $rhs.append($('<code>').text(resource));
-                        }
-                        $rows2.append(h.formRow($lbl, $rhs));
+                        $panel.append(renderEventRow(ev[k], h));
                     }
                 }
-                $sec2.append($rows2);
-                $panel.append($sec2);
             }
         } catch (e) { /* ignore */ }
     }

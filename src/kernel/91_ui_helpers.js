@@ -1,84 +1,161 @@
 /*
- * Dashboard helpers.
+ * Dashboard helpers — autoTSO-mirror primitives.
  *
- * Modules' section.render($body, h) callbacks use these to emit form rows.
- * All output is plain markup with classes scoped under #StewardDashboard
- * so the shell's stylesheet can paint everything consistently.
+ * Modules' section.render($body, h) callbacks emit BS3 rows + cells. The
+ * styling is mostly the host's (`tblHeader`, `.switch / .slider`, BS3
+ * col-xs-* / col-sm-* / col-lg-*); we just provide ergonomic builders so
+ * modules don't have to know the exact markup.
  *
  * Settings buffer:
  *   var s = h.settings('collect');                  // proxy via shell buffer
  *   h.update('collect', { enabled: true });          // patch + mark dirty
  *
- * The buffer is committed when the user presses Save in the footer; Close
- * discards. See Steward.kernel.ui.bufferedSettings / markDirty.
+ * The buffer is committed when the user presses Save; Close discards.
  */
 
 (function (S) {
 
-    // ---------------------------------------------------------------
-    // Form row — light label on the left, control on the right. Lives
-    // inside a section's .section-rows container.
-    // ---------------------------------------------------------------
+    var swSeq = 0;
 
+    // ---------------------------------------------------------------
+    // Generic BS3 row builder.
+    //
+    // gridRow([[cols, content], [cols, content], ...]) → <div class="row">
+    // gridRow([[cols, content, extraClass], ...])      → cell gets extra class
+    //
+    // Cell colspans should sum to 12. Content can be a string (treated as
+    // text) or a jQuery element. Used by autoTSO at user_auto.js:2257-… via
+    // the host's createTableRow(); we replicate the structure with jQuery.
+    // ---------------------------------------------------------------
+    function gridRow(cells, opts) {
+        opts = opts || {};
+        var $row = $('<div>', { 'class': 'row steward-row' });
+        if (opts.disabled) $row.addClass('steward-row-disabled');
+
+        for (var i = 0; i < cells.length; i++) {
+            var cell = cells[i];
+            var cols = cell[0];
+            var content = cell[1];
+            var extra = cell[2] || '';
+            var classes = 'col-xs-' + cols + ' col-sm-' + cols + ' col-lg-' + cols;
+            if (extra) classes += ' ' + extra;
+            if (opts.headerCells) {
+                classes += ' tblHeader';
+                if (i === 0)               classes += ' steward-tbl-first';
+                if (i === cells.length - 1) classes += ' steward-tbl-last';
+            }
+            var $cell = $('<div>', { 'class': classes });
+            if (content && content.jquery) {
+                $cell.append(content);
+            } else if (content !== null && typeof content !== 'undefined') {
+                // Strings may contain <img> markup (e.g. host's getImageTag
+                // output), so use html() rather than text() — callers are
+                // expected to escape user content themselves.
+                $cell.html(String(content));
+            }
+            $row.append($cell);
+        }
+        return $row;
+    }
+
+    // ---------------------------------------------------------------
+    // Section header — parchment band styled with the host's `tblHeader`.
+    // Two cells: [icon + title | action link]. autoTSO does this verbatim
+    // at user_auto.js:2257.
+    // ---------------------------------------------------------------
+    function headerRow(title, opts) {
+        opts = opts || {};
+        var $title = $('<span>', { 'class': 'steward-section-title' });
+        if (opts.icon) {
+            $title.append($('<span>', { 'class': 'steward-section-icon' }).text(opts.icon));
+        }
+        $title.append(document.createTextNode(' ' + (title || '')));
+
+        var $right;
+        if (opts.action && opts.action.label) {
+            $right = $('<a>', {
+                href: '#',
+                'class': 'steward-section-action'
+            }).text(opts.action.label);
+            if (typeof opts.action.onClick === 'function') {
+                $right.on('click', function (e) {
+                    e.preventDefault();
+                    try { opts.action.onClick(); }
+                    catch (err) { S.kernel.error('ui', 'section action threw:', err); }
+                });
+            }
+        } else {
+            $right = $('<span>').html('&nbsp;');
+        }
+        return gridRow([[8, $title], [4, $right]], { headerCells: true });
+    }
+
+    // ---------------------------------------------------------------
+    // Form row — convenience for "label | control" with optional help.
+    // 6/6 split keeps the layout consistent with autoTSO's settings rows.
+    // ---------------------------------------------------------------
     function formRow(label, $control, helpText, opts) {
         opts = opts || {};
-        var classes = 'steward-row';
-        if (opts.disabled) classes += ' steward-row-disabled';
-        var $row = $('<div>', { 'class': classes });
 
-        var $label = $('<span>', { 'class': 'steward-row-label' });
-        if (typeof label === 'string') $label.text(label);
-        else if (label && label.jquery) $label.append(label);
-        $row.append($label);
+        var $labelCell;
+        if (label && label.jquery) {
+            $labelCell = label;
+        } else {
+            $labelCell = $('<span>').text(String(label || ''));
+        }
 
-        var $ctl = $('<span>', { 'class': 'steward-row-ctl' });
+        var $ctlCell = $('<span>');
         if ($control) {
-            if ($control.jquery) $ctl.append($control);
-            else $ctl.text(String($control));
+            if ($control.jquery) $ctlCell.append($control);
+            else                 $ctlCell.append(document.createTextNode(String($control)));
         }
         if (helpText) {
-            $ctl.append($('<span>', { 'class': 'steward-row-help' }).text(helpText));
+            $ctlCell.append($('<span>', { 'class': 'steward-row-help' })
+                .text(helpText));
         }
-        $row.append($ctl);
-        return $row;
+        return gridRow([[6, $labelCell], [6, $ctlCell, 'steward-row-ctl']],
+                       { disabled: opts.disabled });
     }
 
-    // Sub-hint row, shown indented below another row with a ↳ glyph.
-    // autoTSO uses this for "On: Use template / Off: Use defaults task".
+    // Sub-hint row — indented "↳ On: … / Off: …" callout.
     function indentRow(text) {
-        var $row = $('<div>', { 'class': 'steward-row steward-row-indent' });
-        var $lbl = $('<span>', { 'class': 'steward-row-label' });
-        $lbl.append($('<span>', { 'class': 'steward-row-arrow' }).text('↳'));
-        $lbl.append(document.createTextNode(' ' + (text || '')));
-        $row.append($lbl);
-        return $row;
+        var $hint = $('<span>', { 'class': 'steward-row-hint' })
+            .html('&#10551; ' + (text || ''));
+        return gridRow([[12, $hint]]);
     }
 
     // ---------------------------------------------------------------
-    // Toggle (iOS-style blue, mirrors autoTSO).
+    // Toggle — host's native iOS-style switch.
+    //   <label class="switch">
+    //     <input type="checkbox" id="…" checked>
+    //     <span class="slider round"></span>
+    //   </label>
+    // The host's CSS in bootstrap.min.css paints it; we just emit markup.
     // ---------------------------------------------------------------
-
     function toggle(opts) {
         opts = opts || {};
-        var $t = $('<span>', { 'class': 'steward-toggle' + (opts.checked ? ' on' : '') });
-        var state = !!opts.checked;
-        var onChange = opts.onChange;
-        $t.on('click', function (e) {
-            e.preventDefault();
-            state = !state;
-            if (state) $t.addClass('on'); else $t.removeClass('on');
-            if (typeof onChange === 'function') {
-                try { onChange(state); }
+        var name      = opts.id || ('steward-sw-' + (++swSeq));
+        var isChecked = !!opts.checked;
+        var onChange  = opts.onChange;
+
+        var $wrap = $('<label>', { 'class': 'switch' });
+        var $input = $('<input>', { type: 'checkbox', id: name });
+        if (isChecked) $input.attr('checked', 'checked');
+        var $slider = $('<span>', { 'class': 'slider round' });
+        $wrap.append($input).append($slider);
+
+        if (typeof onChange === 'function') {
+            $input.on('change', function () {
+                try { onChange($input.prop('checked')); }
                 catch (err) { S.kernel.error('ui', 'toggle handler threw:', err); }
-            }
-        });
-        return $t;
+            });
+        }
+        return $wrap;
     }
 
     // ---------------------------------------------------------------
     // Parchment input (text / number).
     // ---------------------------------------------------------------
-
     function input(opts) {
         opts = opts || {};
         var $i = $('<input>', {
@@ -100,7 +177,6 @@
     // ---------------------------------------------------------------
     // Parchment dropdown.
     // ---------------------------------------------------------------
-
     function dropdown(options, opts) {
         opts = opts || {};
         var $sel = $('<select>', { 'class': 'steward-dropdown' });
@@ -128,7 +204,6 @@
     // ---------------------------------------------------------------
     // Parchment button.
     // ---------------------------------------------------------------
-
     function button(label, opts) {
         opts = opts || {};
         var classes = 'steward-btn';
@@ -147,13 +222,10 @@
     // ---------------------------------------------------------------
     // Decorative bits.
     // ---------------------------------------------------------------
-
-    // Small blue "i" — title attribute carries the tooltip text.
     function helpIcon(text) {
         return $('<span>', { 'class': 'steward-help-i', title: text || '' }).text('i');
     }
 
-    // Red "NEW" sticker, inline with a label.
     function newBadge() {
         return $('<span>', { 'class': 'steward-new-badge' }).text('NEW');
     }
@@ -161,7 +233,6 @@
     // ---------------------------------------------------------------
     // Settings buffer proxy.
     // ---------------------------------------------------------------
-
     function settings(moduleId) {
         return S.kernel.ui.bufferedSettings(moduleId);
     }
@@ -181,6 +252,8 @@
 
     if (!S.kernel.ui) S.kernel.ui = {};
     S.kernel.ui.helpers = {
+        gridRow:   gridRow,
+        headerRow: headerRow,
         formRow:   formRow,
         indentRow: indentRow,
         toggle:    toggle,

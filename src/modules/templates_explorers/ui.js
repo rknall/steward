@@ -111,17 +111,17 @@
         return n + ' override' + (n === 1 ? '' : 's');
     }
 
-    function renderSection($rows, h) {
+    function renderSection($panel, h) {
         var s = h.settings('templates_explorers');
 
-        $rows.append(h.formRow('Run on Startup', h.toggle({
+        $panel.append(h.formRow('Run on Startup', h.toggle({
             checked:  !!s.enabled,
             onChange: function (next) {
                 h.update('templates_explorers', { enabled: next });
             }
         })));
 
-        $rows.append(h.formRow('Dispatch delay', h.input({
+        $panel.append(h.formRow('Dispatch delay', h.input({
             type:     'number',
             value:    s.dispatchDelay || 1500,
             width:    '90px',
@@ -136,13 +136,98 @@
         // Read-only per-explorer overrides hint. Editing the map directly
         // in the dashboard is deferred (settings.json works for now).
         var n = Object.keys(s.overrides || {}).length;
-        var $hint = $('<span>').css({ color: '#8a7a55', fontSize: '12px' });
+        var $hint = $('<span>').css({ color: '#a09a85', fontSize: '12px' });
         $hint.append(document.createTextNode(
             n === 0
                 ? 'No per-explorer overrides set. Edit settings.json to add some.'
                 : n + ' explorer override' + (n === 1 ? '' : 's') + ' configured (edit in settings.json).'
         ));
-        $rows.append(h.formRow('Per-explorer overrides', $hint));
+        $panel.append(h.formRow('Per-explorer overrides', $hint));
+
+        // Per-explorer state table — alphabetical sort, host portrait,
+        // localised task labels. Renders directly into the panel as a
+        // sequence of BS3 rows (autoTSO style).
+        appendExplorerTable($panel, h, s);
+    }
+
+    function appendExplorerTable($panel, h, s) {
+        if (!S.core.specialists || !S.core.specialists.explorers) return;
+        var explorers;
+        try { explorers = S.core.specialists.explorers(); }
+        catch (e) { return; }
+        if (!explorers || !explorers.length) return;
+
+        var c = S.core.specialists;
+        var idle = 0, busy = 0;
+        for (var x = 0; x < explorers.length; x++) {
+            if (c.status(explorers[x]) === S.SpecialistStatus.Idle) idle++;
+            else                                                     busy++;
+        }
+
+        // Alphabetical by display name (HTML stripped). Stable across renders.
+        explorers.sort(function (a, b) {
+            var na = stripHtml(c.name(a) || '').toLowerCase();
+            var nb = stripHtml(c.name(b) || '').toLowerCase();
+            if (na < nb) return -1;
+            if (na > nb) return 1;
+            return 0;
+        });
+
+        var overrides = (s && s.overrides) || {};
+
+        // Sub-header showing totals.
+        $panel.append(h.formRow(
+            'Per-explorer state',
+            $('<span>').text(explorers.length + ' total · ' + idle + ' idle · ' + busy + ' busy')
+        ));
+
+        // Table header (tblHeader band).
+        $panel.append(h.gridRow(
+            [[5, 'Name'], [2, 'Status'], [2, 'Current'], [3, 'Next']],
+            { headerCells: true }
+        ));
+
+        // One BS3 row per explorer.
+        for (var i = 0; i < explorers.length; i++) {
+            var spec = explorers[i];
+            var rawName = c.name(spec) || '?';
+            var name = stripHtml(rawName);
+            var st = c.status(spec);
+            var isIdle = (st === S.SpecialistStatus.Idle);
+
+            // Portrait: host's getIconID + getImageTag. Falls back to a
+            // gray dot if the helpers aren't available (e.g. early boot).
+            var portrait = '';
+            try {
+                if (typeof spec.getIconID === 'function' &&
+                    typeof getImageTag === 'function') {
+                    var iconId = spec.getIconID();
+                    if (iconId) portrait = getImageTag(iconId, '20px') + ' ';
+                }
+            } catch (e) { /* ignore */ }
+            var nameCell = portrait + name;
+
+            // Status with a leading dot (CSS coloured via row class).
+            var statusCell = (isIdle ? '○ Idle' : '● Busy');
+
+            // Localised task labels.
+            var current = '—';
+            if (!isIdle && c.currentTask) {
+                var ct = c.currentTask(spec);
+                current = ct ? c.taskLabel(ct) : '—';
+            }
+            var next = '?';
+            try {
+                var nt = c.pickTask(spec);
+                if (nt) next = c.taskLabel(nt);
+            } catch (e) { /* keep '?' */ }
+            if (overrides[name]) next = next + ' *';
+
+            var rowClass = isIdle ? 'steward-row-idle' : 'steward-row-busy';
+            $panel.append(h.gridRow(
+                [[5, nameCell], [2, statusCell], [2, current], [3, next]]
+            ).addClass(rowClass));
+        }
     }
 
     S.modules.templates_explorers.readSettings   = readSettings;

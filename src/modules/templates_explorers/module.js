@@ -37,21 +37,11 @@
         return (typeof name === 'string') ? name.replace(/<[^>]+>/g, '') : '';
     }
 
-    // Translate an ExplorerTask enum value into the (taskId, subTaskId)
-    // pair the dispatch packet expects. autoTSO and host both treat
-    // explorer treasure searches with taskId=0 (the host's
-    // mainSettings.explDefTask is in the SAME numeric space as ExplorerTask
-    // subTaskIDs, since the dispatch packet's taskId is always 0 for
-    // treasure searches and the variant goes into subTaskID).
-    var ENUM_TO_SUBTASK = {};
-    ENUM_TO_SUBTASK[S.ExplorerTask.Short]          = 0;
-    ENUM_TO_SUBTASK[S.ExplorerTask.Medium]         = 1;
-    ENUM_TO_SUBTASK[S.ExplorerTask.Long]           = 2;
-    ENUM_TO_SUBTASK[S.ExplorerTask.EvenLonger]     = 3;
-    ENUM_TO_SUBTASK[S.ExplorerTask.AdventureShort] = 4;
-    ENUM_TO_SUBTASK[S.ExplorerTask.AdventureLong]  = 5;
-    ENUM_TO_SUBTASK[S.ExplorerTask.Prolonged]      = 6;
-
+    // Per-explorer overrides accept ANY known ExplorerTask — both treasure
+    // searches and adventure-zone searches. Dispatch packet selection
+    // (taskId=1 vs taskId=2) is handled inside core.specialists.send via
+    // EXPLORER_TASK_PACKET. Validation goes through core.specialists.knownTask
+    // so we don't duplicate the enum list here.
     function pickForExplorer(explorer) {
         var s = readSettings();
         var c = S.core.specialists;
@@ -62,9 +52,7 @@
             var key = stripHtml(rawName);
             if (key && s.overrides[key]) {
                 var enumVal = s.overrides[key];
-                if (typeof ENUM_TO_SUBTASK[enumVal] !== 'undefined') {
-                    return enumVal;
-                }
+                if (c.knownTask(enumVal)) return enumVal;
                 S.kernel.warn('templates_explorers',
                     'override for', key, 'is not a recognised ExplorerTask value:', enumVal);
             }

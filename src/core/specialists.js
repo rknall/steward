@@ -33,50 +33,76 @@
     S.SkillModifier.LootAmount = 'ModifierLootAmount';
     S.SkillModifier.Other      = 'ModifierOther';
 
-    S.ExplorerTask.Short              = 'TaskExplorerShort';        // raw subTaskID 0
-    S.ExplorerTask.Medium             = 'TaskExplorerMedium';       // raw 1
-    S.ExplorerTask.Long               = 'TaskExplorerLong';         // raw 2
-    S.ExplorerTask.EvenLonger         = 'TaskExplorerEvenLonger';   // raw 3
-    S.ExplorerTask.AdventureShort     = 'TaskExplorerAdvShort';     // raw 4
-    S.ExplorerTask.AdventureLong      = 'TaskExplorerAdvLong';      // raw 5
-    S.ExplorerTask.Prolonged          = 'TaskExplorerProlonged';    // raw 6
+    // Explorer tasks come in two families. Treasure searches (taskId=1)
+    // include five "standard" durations + two skill-locked variants. Adventure
+    // zone searches (taskId=2) are a separate family for finding adventure
+    // zones (the activity that DROPS adventures, not adventure-zone-internal
+    // explorer tasks). Source: tso_client/.../4-specialists.js:21-33.
+    //
+    // The previous shape merged 1,4 / 1,5 with the adventure family, which
+    // was wrong: 1,4 (FindTreasureTravellingErudite) and 1,5
+    // (FindTreasureBeanACollada) are skill-locked TREASURE searches.
+    S.ExplorerTask.Short                 = 'TaskExplorerShort';                // 1,0
+    S.ExplorerTask.Medium                = 'TaskExplorerMedium';               // 1,1
+    S.ExplorerTask.Long                  = 'TaskExplorerLong';                 // 1,2
+    S.ExplorerTask.EvenLonger            = 'TaskExplorerEvenLonger';           // 1,3
+    S.ExplorerTask.TravellingErudite     = 'TaskExplorerTravellingErudite';    // 1,4 — skill 39
+    S.ExplorerTask.BeanACollada          = 'TaskExplorerBeanACollada';         // 1,5 — skill 40
+    S.ExplorerTask.Prolonged             = 'TaskExplorerProlonged';            // 1,6
+    S.ExplorerTask.AdventureZoneShort    = 'TaskExplorerAdvZoneShort';         // 2,0
+    S.ExplorerTask.AdventureZoneMedium   = 'TaskExplorerAdvZoneMedium';        // 2,1
+    S.ExplorerTask.AdventureZoneLong     = 'TaskExplorerAdvZoneLong';          // 2,2
+    S.ExplorerTask.AdventureZoneVeryLong = 'TaskExplorerAdvZoneVeryLong';      // 2,3
 
     S.GeologistTask.Search = 'TaskGeologistSearch';                 // raw 0
 
-    // Map enum → raw integer the server expects.
     // Map enum → { taskId, subTaskId } for the dispatch packet.
     //
     // The host's SendServerAction(95, taskId, 0, 0, dStartSpecialistTaskVO)
     // expects taskId to identify the *task family* and the dVO's subTaskID
-    // to pick the variant. Confirmed via the live spike — working explorer
-    // tasks return GetTask().GetType()=1 and GetSubType()={0,1,2,3,6}.
+    // to pick the variant. Live-spike confirmed working explorer tasks return
+    // GetTask().GetType()={1,2} and GetSubType()={0..6}.
     //
-    //   - Explorer treasure searches: taskId=1
-    //   - Geologist deposit search:    taskId=0
+    //   - Explorer treasure searches:        taskId=1
+    //   - Explorer adventure-zone searches:  taskId=2
+    //   - Geologist deposit search:          taskId=0
     //
-    // autoTSO/user_auto.js:743-750 confirms: sendExplorer passes taskId=1
+    // autoTSO/user_auto.js:743-750 confirms: sendExplorer passes taskId
     // (via finalTask[0]); sendGeologist passes taskId=0 (literal).
     var EXPLORER_TASK_PACKET = {};
-    EXPLORER_TASK_PACKET[S.ExplorerTask.Short]          = { taskId: 1, subTaskId: 0 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.Medium]         = { taskId: 1, subTaskId: 1 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.Long]           = { taskId: 1, subTaskId: 2 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.EvenLonger]     = { taskId: 1, subTaskId: 3 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureShort] = { taskId: 1, subTaskId: 4 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureLong]  = { taskId: 1, subTaskId: 5 };
-    EXPLORER_TASK_PACKET[S.ExplorerTask.Prolonged]      = { taskId: 1, subTaskId: 6 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Short]                 = { taskId: 1, subTaskId: 0 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Medium]                = { taskId: 1, subTaskId: 1 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Long]                  = { taskId: 1, subTaskId: 2 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.EvenLonger]            = { taskId: 1, subTaskId: 3 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.TravellingErudite]     = { taskId: 1, subTaskId: 4 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.BeanACollada]          = { taskId: 1, subTaskId: 5 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.Prolonged]             = { taskId: 1, subTaskId: 6 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureZoneShort]    = { taskId: 2, subTaskId: 0 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureZoneMedium]   = { taskId: 2, subTaskId: 1 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureZoneLong]     = { taskId: 2, subTaskId: 2 };
+    EXPLORER_TASK_PACKET[S.ExplorerTask.AdventureZoneVeryLong] = { taskId: 2, subTaskId: 3 };
 
-    // Inverse map: raw int from mainSettings.explDefTask → ExplorerTask enum.
-    // The host stores defaults as the subTaskID directly, so this is keyed
-    // by subTaskId (not by packet shape).
-    var RAW_TO_EXPLORER_TASK = [
-        S.ExplorerTask.Short,
-        S.ExplorerTask.Medium,
-        S.ExplorerTask.Long,
-        S.ExplorerTask.EvenLonger,
-        S.ExplorerTask.AdventureShort,
-        S.ExplorerTask.AdventureLong,
-        S.ExplorerTask.Prolonged
-    ];
+    // Inverse: (taskId, subTaskId) → ExplorerTask enum. Used by currentTask
+    // to decode a busy explorer's GetTask().GetType()/.GetSubType() pair, and
+    // by callers that read host settings (treasure-only context — pass 1 as
+    // taskId).
+    var RAW_TO_EXPLORER_TASK = {
+        1: {
+            0: S.ExplorerTask.Short,
+            1: S.ExplorerTask.Medium,
+            2: S.ExplorerTask.Long,
+            3: S.ExplorerTask.EvenLonger,
+            4: S.ExplorerTask.TravellingErudite,
+            5: S.ExplorerTask.BeanACollada,
+            6: S.ExplorerTask.Prolonged
+        },
+        2: {
+            0: S.ExplorerTask.AdventureZoneShort,
+            1: S.ExplorerTask.AdventureZoneMedium,
+            2: S.ExplorerTask.AdventureZoneLong,
+            3: S.ExplorerTask.AdventureZoneVeryLong
+        }
+    };
 
     var GEOLOGIST_TASK_PACKET = {};
     // Geologists: taskId=0, subTaskId is the deposit-type index supplied
@@ -329,6 +355,56 @@
         return S.SpecialistStatus.Working;
     }
 
+    // Map ExplorerTask enum → host loca key. Sourced from
+    // tso_client/.../4-specialists.js:21-33. The host's loca lookup gives
+    // the in-game label (e.g. "Treasure Search Short" vs the ambiguous bare
+    // "Short") with translation. Two families:
+    //   - FindTreasure* — the seven treasure-search variants
+    //   - FindAdventureZone* — the four adventure-zone-search variants
+    var TASK_LOCA_KEYS = {};
+    TASK_LOCA_KEYS[S.ExplorerTask.Short]                 = 'FindTreasureShort';
+    TASK_LOCA_KEYS[S.ExplorerTask.Medium]                = 'FindTreasureMedium';
+    TASK_LOCA_KEYS[S.ExplorerTask.Long]                  = 'FindTreasureLong';
+    TASK_LOCA_KEYS[S.ExplorerTask.EvenLonger]            = 'FindTreasureEvenLonger';
+    TASK_LOCA_KEYS[S.ExplorerTask.Prolonged]             = 'FindTreasureLongest';
+    TASK_LOCA_KEYS[S.ExplorerTask.TravellingErudite]     = 'FindTreasureTravellingErudite';
+    TASK_LOCA_KEYS[S.ExplorerTask.BeanACollada]          = 'FindTreasureBeanACollada';
+    TASK_LOCA_KEYS[S.ExplorerTask.AdventureZoneShort]    = 'FindAdventureZoneShort';
+    TASK_LOCA_KEYS[S.ExplorerTask.AdventureZoneMedium]   = 'FindAdventureZoneMedium';
+    TASK_LOCA_KEYS[S.ExplorerTask.AdventureZoneLong]     = 'FindAdventureZoneLong';
+    TASK_LOCA_KEYS[S.ExplorerTask.AdventureZoneVeryLong] = 'FindAdventureZoneVeryLong';
+
+    // Localised in-game label for an explorer task. Falls back gracefully
+    // when loca isn't ready or the enum is unknown.
+    function taskLabel(taskEnum) {
+        if (!taskEnum) return '';
+        var key = TASK_LOCA_KEYS[taskEnum];
+        if (!key) return String(taskEnum);
+        try {
+            if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
+                var t = loca.GetText('LAB', key);
+                if (t) return t;
+            }
+        } catch (e) { /* fall through */ }
+        return key;
+    }
+
+    // Decode the explorer's *current* task by reading both
+    // GetTask().GetType() (task family) and GetSubType() (variant) and
+    // mapping the pair back through RAW_TO_EXPLORER_TASK. Returns the
+    // ExplorerTask enum or null when idle / on an unknown task.
+    function currentTask(spec) {
+        var task = specTask(spec);
+        if (!task) return null;
+        try {
+            var type = (typeof task.GetType === 'function') ? task.GetType() : null;
+            var sub  = (typeof task.GetSubType === 'function') ? task.GetSubType() : null;
+            if (typeof type !== 'number' || typeof sub !== 'number') return null;
+            return rawToExplorerTask(type, sub);
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
     function isAttacking(spec)   {
         // Both Generals and Admirals attack. We collapse the two for this query
         // since modules generally don't care about the family — only the role.
@@ -475,9 +551,22 @@
 
     // --- Recommendations ---
 
-    function rawToExplorerTask(raw) {
-        if (typeof raw !== 'number') return null;
-        return RAW_TO_EXPLORER_TASK[raw] || null;
+    // (taskId, subTaskId) → ExplorerTask enum. Both args required: pass 1
+    // when reading a treasure-only host setting (host's `explDefTask` /
+    // `explDefTaskByType` store just the subTaskID, family is implicit).
+    function rawToExplorerTask(taskId, subTaskId) {
+        if (typeof taskId !== 'number' || typeof subTaskId !== 'number') return null;
+        var byTask = RAW_TO_EXPLORER_TASK[taskId];
+        if (!byTask) return null;
+        return byTask[subTaskId] || null;
+    }
+
+    // True when `taskEnum` is a recognised ExplorerTask (treasure OR
+    // adventure-zone). Used by the modules that accept user-configured
+    // task overrides — both families are valid choices since an explorer
+    // might be configured for adventure-zone searches based on skills.
+    function knownTask(taskEnum) {
+        return !!EXPLORER_TASK_PACKET[taskEnum];
     }
 
     function pickTask(explorer) {
@@ -489,9 +578,9 @@
         var defaultTask = S.ExplorerTask.Short;
         if (!explorer) return defaultTask;
 
-        // 1. Per-spec host override.
+        // 1. Per-spec host override (host stores treasure-only — taskId=1).
         if (S.kernel.host) {
-            var fromHostByName = rawToExplorerTask(S.kernel.host.explDefTaskByName(specName(explorer)));
+            var fromHostByName = rawToExplorerTask(1, S.kernel.host.explDefTaskByName(specName(explorer)));
             if (fromHostByName) return fromHostByName;
         }
 
@@ -538,9 +627,9 @@
             S.kernel.warn('specialists', 'pickTask event eval threw:', e);
         }
 
-        // 3. Host global default.
+        // 3. Host global default (treasure-only — taskId=1).
         if (S.kernel.host) {
-            var fromHostGlobal = rawToExplorerTask(S.kernel.host.explDefTaskGlobal());
+            var fromHostGlobal = rawToExplorerTask(1, S.kernel.host.explDefTaskGlobal());
             if (fromHostGlobal) return fromHostGlobal;
         }
 
@@ -672,6 +761,9 @@
     S.core.specialists.busy             = busy;
 
     S.core.specialists.skills           = skills;
+    S.core.specialists.currentTask      = currentTask;
+    S.core.specialists.taskLabel        = taskLabel;
+    S.core.specialists.knownTask        = knownTask;
     S.core.specialists.pickTask         = pickTask;
     S.core.specialists.pickDeposits     = pickDeposits;
 
