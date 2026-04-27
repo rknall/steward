@@ -74,16 +74,6 @@
         return true;
     }
 
-    function uniqueKey(spec) {
-        try {
-            if (typeof spec.GetUniqueID === 'function') {
-                var uid = spec.GetUniqueID();
-                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
-            }
-        } catch (e) { /* fall through */ }
-        return null;
-    }
-
     function plan() {
         var c = S.core.specialists;
         var idleExplorers;
@@ -109,7 +99,7 @@
             // can share a display name (e.g. multiple "Bewitching Explorer"
             // instances of GetType=51) — name-based lookup picks one and
             // sends to it repeatedly while ignoring the rest.
-            var uidKey = uniqueKey(spec);
+            var uidKey = c.uniqueIdKey(spec);
             if (!uidKey) {
                 S.kernel.warn('explorers', 'no uniqueID for', stripHtml(c.name(spec)),
                               '— skipping');
@@ -147,7 +137,7 @@
             try {
                 var explorers = c.explorers();
                 for (var i = 0; i < explorers.length; i++) {
-                    if (uniqueKey(explorers[i]) === uidKey) {
+                    if (c.uniqueIdKey(explorers[i]) === uidKey) {
                         spec = explorers[i];
                         break;
                     }

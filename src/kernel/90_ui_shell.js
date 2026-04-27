@@ -61,6 +61,7 @@
     var TAB_ORDER = [
         { id: 'status',      label: 'Status' },
         { id: 'specialists', label: 'Explorers' },
+        { id: 'geologists',  label: 'Geologists' },
         { id: 'quests',      label: 'Quests' },
         { id: 'buildings',   label: 'Collections & Buildings' },
         { id: 'tools',       label: 'Tools' },

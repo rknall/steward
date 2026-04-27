@@ -36,5 +36,6 @@
     if (!S.SkillModifier)       S.SkillModifier       = {};
     if (!S.ExplorerTask)        S.ExplorerTask        = {};
     if (!S.GeologistTask)       S.GeologistTask       = {};
+    if (!S.Deposit)             S.Deposit             = {};
 
 }(Steward));

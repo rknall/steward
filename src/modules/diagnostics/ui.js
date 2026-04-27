@@ -397,19 +397,6 @@
         return false;
     }
 
-    // Read uniqueID as a stable per-instance key for the dump header.
-    // Two specimens of GetType=51 ("Bewitching Explorer") look identical
-    // in the log without it.
-    function uniqueIdKey(spec) {
-        try {
-            if (typeof spec.GetUniqueID === 'function') {
-                var uid = spec.GetUniqueID();
-                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
-            }
-        } catch (e) { /* fall through */ }
-        return null;
-    }
-
     // Generic deep-dump for a specialist family. Dumps EVERY player-owned
     // specialist of that family on the current zone — no per-GetType
     // dedup, no status filter (idle, working, traveling, returning all
@@ -477,7 +464,7 @@
             var t = -1;
             try { if (typeof spec.GetType === 'function') t = spec.GetType(); }
             catch (e) { /* skip */ }
-            var uid = uniqueIdKey(spec);
+            var uid = c.uniqueIdKey(spec);
             var status = '';
             try { status = c.status(spec); } catch (e) { status = ''; }
             var header = '[' + (k + 1) + '/' + capped.length + ']' +

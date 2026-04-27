@@ -100,14 +100,16 @@
         }, opts);
     }
 
-    S.core.deposits = {
-        list:     list,
-        byType:   byType,
-        byGrid:   byGrid,
-        depleted: depleted,
-        name:     name,
-        grid:     grid,
-        amount:   amount
-    };
+    // Property-by-property assignment so helpers attached by sibling
+    // files in core/deposits/ (which load before this file by filename
+    // sort) survive — same pattern specialists.js uses.
+    if (!S.core.deposits) S.core.deposits = {};
+    S.core.deposits.list     = list;
+    S.core.deposits.byType   = byType;
+    S.core.deposits.byGrid   = byGrid;
+    S.core.deposits.depleted = depleted;
+    S.core.deposits.name     = name;
+    S.core.deposits.grid     = grid;
+    S.core.deposits.amount   = amount;
 
 }(Steward));

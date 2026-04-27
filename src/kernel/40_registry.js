@@ -31,6 +31,7 @@
 
     var TABS = {
         specialists: true,
+        geologists:  true,
         quests:      true,
         buildings:   true,
         tools:       true,

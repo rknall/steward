@@ -374,6 +374,24 @@
         return '';
     }
 
+    // Stable per-instance string key derived from the dUniqueID. Use this
+    // for queue payloads, exclude maps, and any "re-find this exact
+    // specialist later" need — display names can collide across multiple
+    // specimens of the same GetType. Returns null when the host doesn't
+    // expose a uniqueID. core.specialists.dispatch.uniqueId returns the
+    // dUniqueID *object* (for the server packet); this helper returns
+    // the .toKeyString() form (for use as a JS map key).
+    function uniqueIdKey(spec) {
+        if (!spec) return null;
+        try {
+            if (typeof spec.GetUniqueID === 'function') {
+                var uid = spec.GetUniqueID();
+                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
     function specTask(spec) {
         if (!spec) return null;
         try { return typeof spec.GetTask === 'function' ? spec.GetTask() : null; }
@@ -795,5 +813,6 @@
     S.core.specialists.recall           = recall;
 
     S.core.specialists.name             = specName;
+    S.core.specialists.uniqueIdKey      = uniqueIdKey;
 
 }(Steward));
