@@ -22,35 +22,18 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 const { minify } = require("terser");
+const loadOrder = require("../tests/load-order");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
-const SRC_DIR = path.join(REPO_ROOT, "src");
 const BUILD_DIR = path.join(REPO_ROOT, "build");
 const OUTPUT_FILE = path.join(BUILD_DIR, "user_steward.js");
 
-const SECTIONS = [
-	{ label: "kernel", dir: path.join(SRC_DIR, "kernel"), recursive: false },
-	{ label: "core", dir: path.join(SRC_DIR, "core"), recursive: true },
-	{ label: "modules", dir: path.join(SRC_DIR, "modules"), recursive: true },
-	{ label: "vendor", dir: path.join(SRC_DIR, "vendor"), recursive: true },
-];
+const SECTION_NAMES = ["kernel", "core", "modules", "vendor"];
 
-function collectFiles(dir, recursive) {
-	if (!fs.existsSync(dir)) return [];
-	const out = [];
-	const entries = fs
-		.readdirSync(dir, { withFileTypes: true })
-		.sort((a, b) => a.name.localeCompare(b.name));
-	for (let i = 0; i < entries.length; i++) {
-		const entry = entries[i];
-		const full = path.join(dir, entry.name);
-		if (entry.isDirectory()) {
-			if (recursive) Array.prototype.push.apply(out, collectFiles(full, true));
-			continue;
-		}
-		if (entry.isFile() && entry.name.endsWith(".js")) out.push(full);
-	}
-	return out;
+function collectFiles(sectionName) {
+	return loadOrder
+		.collect([sectionName], REPO_ROOT)
+		.map(function (rel) { return path.join(REPO_ROOT, rel); });
 }
 
 function gitShortSha() {
@@ -106,12 +89,12 @@ async function build() {
 	const parts = [];
 	let totalFiles = 0;
 
-	for (let i = 0; i < SECTIONS.length; i++) {
-		const section = SECTIONS[i];
-		const files = collectFiles(section.dir, section.recursive);
+	for (let i = 0; i < SECTION_NAMES.length; i++) {
+		const sectionName = SECTION_NAMES[i];
+		const files = collectFiles(sectionName);
 		if (files.length === 0) continue;
 
-		parts.push("/* ===== " + section.label + " ===== */");
+		parts.push("/* ===== " + sectionName + " ===== */");
 		for (let j = 0; j < files.length; j++) {
 			const rel = path.relative(REPO_ROOT, files[j]);
 			const body = fs.readFileSync(files[j], "utf8").replace(/\r\n/g, "\n");
