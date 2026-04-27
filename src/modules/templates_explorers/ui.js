@@ -133,21 +133,89 @@
             }
         }), 'ms — pause between sends'));
 
-        // Read-only per-explorer overrides hint. Editing the map directly
-        // in the dashboard is deferred (settings.json works for now).
-        var n = Object.keys(s.overrides || {}).length;
-        var $hint = $('<span>').css({ color: '#a09a85', fontSize: '12px' });
-        $hint.append(document.createTextNode(
-            n === 0
-                ? 'No per-explorer overrides set. Edit settings.json to add some.'
-                : n + ' explorer override' + (n === 1 ? '' : 's') + ' configured (edit in settings.json).'
-        ));
-        $panel.append(h.formRow('Per-explorer overrides', $hint));
+        // forceTreasureOnEvents — when ON, every explorer goes on a
+        // treasure dispatch during a treasure event's _Content phase
+        // (cooldown / shop-only doesn't trigger this — see
+        // core/specialists.activeEventContext). When OFF, adventure-
+        // biased explorers (Royal, Love Struck, Keener, Nora) stay on
+        // adventures even during events.
+        $panel.append(h.formRow('Force treasure during events', h.toggle({
+            checked:  s.forceTreasureOnEvents !== false,  // default ON
+            onChange: function (next) {
+                h.update('templates_explorers', { forceTreasureOnEvents: next });
+            }
+        }), 'no event items drop on adventures — keep ON unless you are deliberately farming adventure scrolls'));
+
+        // Default task — applies to vanilla explorers (no per-type
+        // trait) and to inactive-trait cases (off-event Fluffy Butte).
+        // The trait-aware algorithm in core/specialists.pickTask uses
+        // this as its fallback before the host's autoTSO-installed
+        // mainSettings.explDefTask (which usually defaults to Short).
+        $panel.append(h.formRow('Default task', h.dropdown(
+            defaultTaskOptions(),
+            {
+                selected: s.defaultTask || '',
+                onChange: function (val) {
+                    h.update('templates_explorers', { defaultTask: val || null });
+                }
+            }
+        ), 'used for explorers without a trait recommendation'));
 
         // Per-explorer state table — alphabetical sort, host portrait,
         // localised task labels. Renders directly into the panel as a
         // sequence of BS3 rows (autoTSO style).
         appendExplorerTable($panel, h, s);
+    }
+
+    // Build dropdown options for the "Default task" picker. Values are
+    // ExplorerTask enum strings (matching `core/specialists.taskLabel`).
+    // Empty value = "use Steward's longest-available baseline (Prolonged)".
+    // Skill-locked variants (Erudite/BeanACollada) are intentionally
+    // omitted — they only apply to explorers who learned the skill, and
+    // pickTask routes those automatically.
+    function defaultTaskOptions() {
+        var opts = [
+            { value: '', label: 'Auto (Prolonged baseline)' }
+        ];
+        var c = S.core.specialists;
+        var enums = [
+            S.ExplorerTask.Short,
+            S.ExplorerTask.Medium,
+            S.ExplorerTask.Long,
+            S.ExplorerTask.EvenLonger,
+            S.ExplorerTask.Prolonged,
+            S.ExplorerTask.AdventureZoneShort,
+            S.ExplorerTask.AdventureZoneMedium,
+            S.ExplorerTask.AdventureZoneLong,
+            S.ExplorerTask.AdventureZoneVeryLong
+        ];
+        for (var i = 0; i < enums.length; i++) {
+            var label = (c && c.taskLabel) ? c.taskLabel(enums[i]) : enums[i];
+            opts.push({ value: enums[i], label: label });
+        }
+        return opts;
+    }
+
+    // Best-effort remaining-time read for a busy explorer. Returns the
+    // formatted host string (e.g. "2h 14m") or null if the host APIs
+    // aren't reachable. Mirrors autoTSO's
+    // `loca.FormatDuration(item.GetTask().GetRemainingTime(), 1)`.
+    function remainingTimeFor(spec) {
+        try {
+            if (typeof spec.GetTask !== 'function') return null;
+            var task = spec.GetTask();
+            if (!task || typeof task.GetRemainingTime !== 'function') return null;
+            var ms = task.GetRemainingTime();
+            if (typeof ms !== 'number' || ms <= 0) return null;
+            if (typeof loca !== 'undefined' && loca && typeof loca.FormatDuration === 'function') {
+                return loca.FormatDuration(ms, 1);
+            }
+            // Fallback: HH:MM if the host helper isn't available.
+            var totalMinutes = Math.round(ms / 60000);
+            var hours = Math.floor(totalMinutes / 60);
+            var minutes = totalMinutes % 60;
+            return hours + 'h ' + (minutes < 10 ? '0' + minutes : minutes) + 'm';
+        } catch (e) { return null; }
     }
 
     function appendExplorerTable($panel, h, s) {
@@ -158,11 +226,6 @@
         if (!explorers || !explorers.length) return;
 
         var c = S.core.specialists;
-        var idle = 0, busy = 0;
-        for (var x = 0; x < explorers.length; x++) {
-            if (c.status(explorers[x]) === S.SpecialistStatus.Idle) idle++;
-            else                                                     busy++;
-        }
 
         // Alphabetical by display name (HTML stripped). Stable across renders.
         explorers.sort(function (a, b) {
@@ -174,12 +237,6 @@
         });
 
         var overrides = (s && s.overrides) || {};
-
-        // Sub-header showing totals.
-        $panel.append(h.formRow(
-            'Per-explorer state',
-            $('<span>').text(explorers.length + ' total · ' + idle + ' idle · ' + busy + ' busy')
-        ));
 
         // Table header (tblHeader band).
         $panel.append(h.gridRow(
@@ -208,7 +265,15 @@
             var nameCell = portrait + name;
 
             // Status with a leading dot (CSS coloured via row class).
-            var statusCell = (isIdle ? '○ Idle' : '● Busy');
+            // Append the remaining time for busy explorers when the
+            // host exposes it (e.g. "● Busy — 2h 14m").
+            var statusCell;
+            if (isIdle) {
+                statusCell = '○ Idle';
+            } else {
+                var rem = remainingTimeFor(spec);
+                statusCell = '● Busy' + (rem ? ' — ' + rem : '');
+            }
 
             // Localised task labels.
             var current = '—';

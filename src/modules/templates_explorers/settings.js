@@ -38,7 +38,16 @@
         // adds a large constant to the treasure score; nothing about the
         // host's trait/skill objects is mutated. Off → trait bias picks
         // the family even during events.
-        forceTreasureOnEvents: true
+        forceTreasureOnEvents: true,
+        // Default dispatch task for explorers that don't have a per-type
+        // trait recommending something specific (vanilla Explorer,
+        // Experienced Explorer, off-event Fluffy Butte). Stored as an
+        // ExplorerTask enum value (see kernel/15_enums.js). Null falls
+        // back to ExplorerTask.Prolonged (the "rule of thumb: longer is
+        // better off-event" baseline). Honours all subtask choices —
+        // treasure or adventure — so users can route vanilla explorers
+        // to adventures if they prefer.
+        defaultTask: null
     };
 
 }(Steward));

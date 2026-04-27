@@ -1051,6 +1051,20 @@
         } catch (e) { return true; }
     }
 
+    // Read the templates_explorers.defaultTask setting — the user's
+    // chosen fallback for vanilla explorers and inactive-trait cases
+    // (off-event Fluffy Butte). Returns the ExplorerTask enum value or
+    // null if unset.
+    function userDefaultTask() {
+        try {
+            var s = S.kernel.settings.read('templates_explorers') || {};
+            if (typeof s.defaultTask === 'string' && s.defaultTask) {
+                return s.defaultTask;
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
     var EVENT_TREASURE_BOOST = 1000;  // > any plausible adventure score (~4)
 
     // Pick the best subtask within the adventure family. VeryLong is
@@ -1064,19 +1078,26 @@
     }
 
     function pickTask(explorer) {
-        // Precedence (see docs/CORE_USAGE.md "Rule 5"):
-        //   1. mainSettings.explDefTaskByType[<name>] — per-type host override.
-        //   2. Trait-aware family selection via biasFromTrait, then:
-        //        - treasure family + active treasure event → bestTaskForEvent
+        // Precedence — algorithm wins over host global default for any
+        // trait-bearing explorer. Host global only applies to vanilla
+        // explorers (no per-type trait, biasFromTrait returns null).
+        //
+        //   1. mainSettings.explDefTaskByType[<name>] — per-type host
+        //      override (user explicitly chose, always respected).
+        //   2. Trait-aware family selection via biasFromTrait:
+        //        - adventure family → AdventureZoneVeryLong (longest)
+        //        - treasure family + treasure-event live → bestTaskForEvent
         //          (skill-aware items/hour optimisation)
-        //        - treasure family off-event → skill-locked Erudite/BeanACollada
-        //          if present, otherwise the longest available variant
-        //          (host global default if set, else Prolonged baseline).
-        //        - adventure family → longest available adventure variant.
-        //   3. Host global default — treasure-only.
-        //   4. ExplorerTask.Prolonged — longest-available baseline (per
-        //      "prefer longer for off-event" rule of thumb in
-        //      docs/EXPLORER_TRAITS.md).
+        //        - treasure family off-event → Erudite/BeanACollada
+        //          when learned, else Prolonged (longest treasure)
+        //   3. Vanilla / null-family fallback chain:
+        //        - mainSettings.explDefTask — host's global default
+        //        - ExplorerTask.Prolonged — longest-available baseline
+        //
+        // Cooldown ("_Shop only, no _Content") is treated as no event
+        // by activeEventContext — anyTreasureEvent stays false, the
+        // forceTreasureOnEvents boost stays at 0, and bestTaskForEvent
+        // never runs. Adventure-biased traits stay on adventures.
         var baseline = S.ExplorerTask.Prolonged;
         if (!explorer) return baseline;
 
@@ -1098,41 +1119,71 @@
         });
 
         if (family === 'adventure') {
-            // No event override is in play (otherwise the boost would
-            // have flipped this to 'treasure'); pick the longest
-            // adventure variant.
             return pickAdventureSubtask(explorer);
         }
 
-        // Treasure family (or null fallthrough).
-        if (ctx.anyTreasureEvent) {
-            try {
-                var bestForEvent = bestTaskForEvent(explorer, ctx.treasureEventCode);
-                if (bestForEvent) return bestForEvent;
-            } catch (e) {
-                S.kernel.warn('specialists', 'pickTask event eval threw:', e);
+        if (family === 'treasure') {
+            // On-event: skill-aware items/hour optimisation picks
+            // Short/Medium most of the time (event treasure values
+            // don't scale linearly with duration).
+            if (ctx.anyTreasureEvent) {
+                try {
+                    var bestForEvent = bestTaskForEvent(explorer, ctx.treasureEventCode);
+                    if (bestForEvent) return bestForEvent;
+                } catch (e) {
+                    S.kernel.warn('specialists', 'pickTask event eval threw:', e);
+                }
             }
+            // Off-event: skill-locked variants are strict upgrades for
+            // explorers who learned them (Erudite gates 1,4; BeanACollada
+            // gates 1,5 — see ExplorerTask.TravellingErudite / BeanACollada).
+            try {
+                if (hasSkill(explorer, S.ExplorerSkill.TravellingErudite)) {
+                    return S.ExplorerTask.TravellingErudite;
+                }
+                if (hasSkill(explorer, S.ExplorerSkill.BeanACollada)) {
+                    return S.ExplorerTask.BeanACollada;
+                }
+            } catch (e) { /* ignore */ }
+            // Treasure-family fallback when no event is live. Honour
+            // the user's configured default task if they've chosen one
+            // (templates_explorers.defaultTask), otherwise return the
+            // longest treasure variant per the "rule of thumb: longer
+            // is better off-event" decision in EXPLORER_TRAITS.md. The
+            // host global default is intentionally NOT consulted here —
+            // autoTSO-installed hosts ship `mainSettings.explDefTask = Short`
+            // by default and that conflicts with the algorithm.
+            var userTreasure = userDefaultTask();
+            if (userTreasure && taskFamilyOf(userTreasure) === 'treasure') {
+                return userTreasure;
+            }
+            return S.ExplorerTask.Prolonged;
         }
 
-        // Off-event treasure: skill-locked variants are strict upgrades
-        // for explorers who qualify (Erudite gates 1,4 — beanACollada 1,5).
-        try {
-            if (hasSkill(explorer, S.ExplorerSkill.TravellingErudite)) {
-                return S.ExplorerTask.TravellingErudite;
-            }
-            if (hasSkill(explorer, S.ExplorerSkill.BeanACollada)) {
-                return S.ExplorerTask.BeanACollada;
-            }
-        } catch (e) { /* ignore */ }
-
-        // 3. Host global default (treasure-only).
+        // 3. Vanilla / null-family fallback. No trait → no algorithmic
+        //    preference; honour the user's default first, then host
+        //    global, then the longest-available baseline.
+        var userDefault = userDefaultTask();
+        if (userDefault) return userDefault;
         if (S.kernel.host) {
             var fromHostGlobal = rawToExplorerTask(1, S.kernel.host.explDefTaskGlobal());
             if (fromHostGlobal) return fromHostGlobal;
         }
-
-        // 4. Longest-available baseline.
         return baseline;
+    }
+
+    // Map an ExplorerTask enum value to its family ('treasure' /
+    // 'adventure'). Used by pickTask to decide whether the user's
+    // configured default applies in a treasure-family context.
+    // Reads EXPLORER_TASK_PACKET (local to this module) for the
+    // taskId — host treasure tasks are taskId=1, adventures are
+    // taskId=2 (see the table near the top of this file).
+    function taskFamilyOf(taskEnum) {
+        var pkt = EXPLORER_TASK_PACKET && EXPLORER_TASK_PACKET[taskEnum];
+        if (!pkt) return null;
+        if (pkt.taskId === 1) return 'treasure';
+        if (pkt.taskId === 2) return 'adventure';
+        return null;
     }
 
     function pickDeposits(geologist) {
