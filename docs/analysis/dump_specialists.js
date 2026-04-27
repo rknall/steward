@@ -15,6 +15,13 @@
  * skill tree level, and description bonus the host exposes is
  * captured.
  *
+ * Schema v2 (2026-04-27): captures EVERY player-owned specialist on
+ * the current zone regardless of state (idle, working, traveling,
+ * returning). v1 deduped by GetType and silently dropped working
+ * specimens; v2 includes all individuals plus a stable `uniqueID`
+ * per spec so multiple specimens of the same GetType (e.g. several
+ * Bewitching Explorers) are distinguishable.
+ *
  * Independent of Steward / autoTSO. Uses only host globals (`game`,
  * `air`, `mainSettings`, `showGameAlert`) and the AIR file API.
  *
@@ -22,13 +29,13 @@
  */
 
 /* eslint-disable no-undef */
-/* global game, air, mainSettings, showGameAlert */
+/* global game, air, loca, mainSettings, showGameAlert */
 
 (function () {
     'use strict';
 
     var SCRIPT_NAME    = 'dump_specialists';
-    var SCHEMA_VERSION = 'tso.specialists.v1';
+    var SCHEMA_VERSION = 'tso.specialists.v2';
     var OUTPUT_SUBDIR  = 'specialists';
 
     // --- logging -----------------------------------------------------
@@ -241,13 +248,59 @@
         return out;
     }
 
+    function stripHtml(s) {
+        if (typeof s !== 'string') return String(s || '');
+        return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+    }
+
+    // Resolve a specialist's display name. spec.getName() works for explorers
+    // and generals but returns '' for geologists. Fall back to the description
+    // path autoTSO uses: desc.getName_string() yields a loca key like
+    // 'GEO_STONE_COLD' that loca.GetText('SPE', key) resolves to a localized
+    // display name. The host exposes getName_string() as a non-enumerable
+    // method, so it has to be invoked directly rather than read via for..in.
     function cleanName(spec) {
         try {
-            if (typeof spec.getName !== 'function') return '';
-            var raw = spec.getName();
-            if (typeof raw !== 'string') return String(raw || '');
-            return raw.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
-        } catch (e) { return ''; }
+            if (typeof spec.getName === 'function') {
+                var raw = spec.getName();
+                var direct = stripHtml(raw);
+                if (direct) return direct;
+            }
+        } catch (e) { /* fall through */ }
+        try {
+            if (typeof spec.GetSpecialistDescription === 'function') {
+                var desc = spec.GetSpecialistDescription();
+                if (desc && typeof desc.getName_string === 'function') {
+                    var key = desc.getName_string();
+                    if (typeof key === 'string' && key) {
+                        if (typeof loca !== 'undefined' && loca &&
+                            typeof loca.GetText === 'function') {
+                            try {
+                                var localized = loca.GetText('SPE', key);
+                                if (typeof localized === 'string' && localized) {
+                                    return stripHtml(localized);
+                                }
+                            } catch (e2) { /* fall through */ }
+                        }
+                        return key;
+                    }
+                }
+            }
+        } catch (e) { /* fall through */ }
+        return '';
+    }
+
+    // Stable per-instance key. Two specimens of the same GetType (e.g.
+    // multiple Bewitching Explorers, GetType=51) are otherwise
+    // indistinguishable in the JSON.
+    function uniqueIdKey(spec) {
+        try {
+            if (typeof spec.GetUniqueID === 'function') {
+                var uid = spec.GetUniqueID();
+                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
+            }
+        } catch (e) { /* fall through */ }
+        return null;
     }
 
     function captureSpec(spec) {
@@ -257,6 +310,8 @@
         catch (e) { /* skip */ }
         try { if (typeof spec.GetBaseType === 'function') out.GetBaseType = spec.GetBaseType(); }
         catch (e) { /* skip */ }
+        var uid = uniqueIdKey(spec);
+        if (uid) out.uniqueID = uid;
         out.name = cleanName(spec);
 
         try {
@@ -266,6 +321,8 @@
                     out.description = plainProps(desc, DESCRIPTION_PROP_NAMES);
                     var bonus = callFirst(desc, ['GetTimeBonus', 'getTimeBonus']);
                     if (bonus !== null) out.description.GetTimeBonus = bonus;
+                    var nameKey = callFirst(desc, ['getName_string']);
+                    if (nameKey !== null) out.description.name_string = nameKey;
                 }
             }
         } catch (e) { /* skip */ }
@@ -338,10 +395,15 @@
             return;
         }
 
-        // One specimen per unique GetType, player-owned only.
-        var byType = {};
+        // Capture every player-owned specialist on the current zone
+        // regardless of state. v1 deduped by GetType which silently
+        // dropped working specimens — analysis needs every individual so
+        // per-instance skill-tree investments and traits all surface.
         var skippedForeign = 0;
         var playerID = null;
+        var counts = { explorer: 0, geologist: 0, general: 0, unknown: 0 };
+        var uniqueTypes = {};
+        var collected = [];
         for (var i = 0; i < specs.length; i++) {
             var s = specs[i];
             if (!ownedByPlayer(s)) { skippedForeign++; continue; }
@@ -349,37 +411,30 @@
                 try { if (typeof s.getPlayerID === 'function') playerID = s.getPlayerID(); }
                 catch (e) { /* skip */ }
             }
-            var t = null;
-            try { if (typeof s.GetType === 'function') t = s.GetType(); }
-            catch (e) { t = null; }
-            if (t === null) continue;
-            if (!byType[t]) byType[t] = s;
-        }
-
-        var keys = [];
-        for (var k in byType) keys.push(k);
-        keys.sort(function (a, b) { return Number(a) - Number(b); });
-
-        var counts = { explorer: 0, geologist: 0, general: 0, unknown: 0 };
-        var collected = [];
-        for (var ki = 0; ki < keys.length; ki++) {
             var entry;
-            try { entry = captureSpec(byType[keys[ki]]); }
+            try { entry = captureSpec(s); }
             catch (e) {
-                warn('captureSpec threw for GetType=' + keys[ki] + ': ' + e);
+                var dbg = '?';
+                try { if (typeof s.GetType === 'function') dbg = String(s.GetType()); }
+                catch (e2) { /* skip */ }
+                warn('captureSpec threw for GetType=' + dbg + ': ' + e);
                 continue;
             }
             var fam = entry.family || 'unknown';
             counts[fam] = (counts[fam] || 0) + 1;
+            if (typeof entry.GetType !== 'undefined') uniqueTypes[entry.GetType] = true;
             collected.push(entry);
         }
+        var uniqueTypeCount = 0;
+        for (var u in uniqueTypes) if (uniqueTypes.hasOwnProperty(u)) uniqueTypeCount++;
 
         var meta = {
-            schema:         SCHEMA_VERSION,
-            exportedAt:     new Date().toISOString(),
-            counts:         counts,
-            skippedForeign: skippedForeign,
-            totalCaptured:  collected.length
+            schema:           SCHEMA_VERSION,
+            exportedAt:       new Date().toISOString(),
+            counts:           counts,
+            uniqueGetTypes:   uniqueTypeCount,
+            skippedForeign:   skippedForeign,
+            totalCaptured:    collected.length
         };
         if (playerID !== null) meta.playerID = playerID;
         try {

@@ -215,9 +215,9 @@
     // each successful return value. This is how we discover undocumented
     // SpecialistDescription methods (e.g. anything that might encode the
     // Princess bonus).
-    function dumpAllCallables(obj, label) {
+    function dumpAllCallables(obj, label, cat) {
         if (!obj) return;
-        S.kernel.log('diag:expl', '--- ' + label + ': callable methods ---');
+        S.kernel.log(cat, '--- ' + label + ': callable methods ---');
         var keys = [];
         for (var k in obj) {
             if (k.charAt(0) === '_' && k.charAt(1) === '_') continue;
@@ -230,7 +230,7 @@
             var key = keys[i];
             var rv = probeMethod(obj, key);
             if (rv === null) continue;
-            S.kernel.log('diag:expl', '  ' + key + '() ->', rv);
+            S.kernel.log(cat, '  ' + key + '() ->', rv);
         }
     }
 
@@ -253,25 +253,25 @@
         return parts.join(', ');
     }
 
-    function dumpSkillEffects(effects, indent) {
+    function dumpSkillEffects(effects, indent, cat) {
         if (!effects) return;
         var elen = (typeof effects.length === 'number') ? effects.length : 0;
-        S.kernel.log('diag:expl', indent + '(' + elen + ' effects)');
+        S.kernel.log(cat, indent + '(' + elen + ' effects)');
         for (var i = 0; i < elen; i++) {
             var eff = effects[i];
             if (!eff) {
-                S.kernel.log('diag:expl', indent + '  [' + i + '] (null)');
+                S.kernel.log(cat, indent + '  [' + i + '] (null)');
                 continue;
             }
             var probed = probeKnownProps(eff, EFFECT_PROP_NAMES);
-            S.kernel.log('diag:expl', indent + '  [' + i + '] ' +
+            S.kernel.log(cat, indent + '  [' + i + '] ' +
                 (probed.length ? probed : '(no probed props matched)'));
         }
     }
 
-    function dumpOneSkill(skill, label) {
+    function dumpOneSkill(skill, label, cat) {
         if (!skill) {
-            S.kernel.log('diag:expl', '  ' + label + ' (null)');
+            S.kernel.log(cat, '  ' + label + ' (null)');
             return;
         }
         var sid = '?', lvl = '?';
@@ -280,35 +280,35 @@
         try { if (typeof skill.getLevel === 'function') lvl = skill.getLevel(); }
         catch (e) { lvl = 'threw'; }
 
-        S.kernel.log('diag:expl', '  ' + label + ' id=' + sid + ' level=' + lvl);
+        S.kernel.log(cat, '  ' + label + ' id=' + sid + ' level=' + lvl);
 
         var def = null;
         try { if (typeof skill.getDefinition === 'function') def = skill.getDefinition(); }
-        catch (e) { S.kernel.log('diag:expl', '    (getDefinition threw: ' + e + ')'); }
+        catch (e) { S.kernel.log(cat, '    (getDefinition threw: ' + e + ')'); }
         if (!def) return;
 
         // Definition shape — name / id / etc. via known names (AS3 getters
         // aren't enumerable so for..in misses them).
         var defLine = probeKnownProps(def, SKILL_DEF_PROP_NAMES);
-        if (defLine) S.kernel.log('diag:expl', '    def: ' + defLine);
+        if (defLine) S.kernel.log(cat, '    def: ' + defLine);
 
         // Effects at the active level (level-1, like autoTSO does).
         try {
             if (def.level_vector && typeof lvl === 'number' && lvl > 0) {
-                S.kernel.log('diag:expl',
+                S.kernel.log(cat,
                     '    level_vector[' + (lvl - 1) + ']:');
-                dumpSkillEffects(def.level_vector[lvl - 1], '      ');
+                dumpSkillEffects(def.level_vector[lvl - 1], '      ', cat);
             } else if (def.level_vector) {
                 // Skill not learned (level 0) — log first level's effects
                 // so we still see what the skill *would* do.
-                S.kernel.log('diag:expl',
+                S.kernel.log(cat,
                     '    level_vector[0] (skill not learned):');
-                dumpSkillEffects(def.level_vector[0], '      ');
+                dumpSkillEffects(def.level_vector[0], '      ', cat);
             }
-        } catch (e) { S.kernel.log('diag:expl', '    (level_vector probe threw: ' + e + ')'); }
+        } catch (e) { S.kernel.log(cat, '    (level_vector probe threw: ' + e + ')'); }
     }
 
-    function dumpSkillVector(spec, accessorName, label) {
+    function dumpSkillVector(spec, accessorName, label, cat) {
         try {
             var fn = spec[accessorName];
             if (typeof fn !== 'function') {
@@ -318,9 +318,9 @@
                     typeof spec.skills.getItems_vector === 'function') {
                     var v = spec.skills.getItems_vector();
                     var len = (typeof v.length === 'number') ? v.length : 0;
-                    S.kernel.log('diag:expl', '--- ' + label + ' (' + len + ' items) ---');
+                    S.kernel.log(cat, '--- ' + label + ' (' + len + ' items) ---');
                     for (var x = 0; x < len; x++) {
-                        dumpOneSkill(v[x], label + '[' + x + ']');
+                        dumpOneSkill(v[x], label + '[' + x + ']', cat);
                     }
                 }
                 return;
@@ -329,16 +329,19 @@
             if (!holder || typeof holder.getItems_vector !== 'function') return;
             var items = holder.getItems_vector();
             var ilen = (typeof items.length === 'number') ? items.length : 0;
-            S.kernel.log('diag:expl', '--- ' + label + ' (' + ilen + ' items) ---');
+            S.kernel.log(cat, '--- ' + label + ' (' + ilen + ' items) ---');
             for (var i = 0; i < ilen; i++) {
-                dumpOneSkill(items[i], label + '[' + i + ']');
+                dumpOneSkill(items[i], label + '[' + i + ']', cat);
             }
         } catch (e) {
-            S.kernel.log('diag:expl', '(' + label + ' threw: ' + e + ')');
+            S.kernel.log(cat, '(' + label + ' threw: ' + e + ')');
         }
     }
 
-    function dumpExplorerType(spec, typeNum) {
+    // ctx = { cat, label, header } — log category, family display label
+    // ('Explorer' / 'Geologist'), and the per-instance header line which
+    // includes uniqueID since we no longer dedup by GetType.
+    function dumpSpecInstance(spec, typeNum, ctx) {
         var c = S.core.specialists;
         var d = S.modules.diagnostics.inspect;
         var name = '?';
@@ -349,33 +352,35 @@
             ? name.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '')
             : String(name);
 
-        S.kernel.log('diag:expl', '');
-        S.kernel.log('diag:expl', '====== Explorer GetType=' + typeNum + ' (' + cleanName + ') ======');
+        S.kernel.log(ctx.cat, '');
+        S.kernel.log(ctx.cat, '====== ' + ctx.label + ' GetType=' + typeNum +
+                              ' (' + cleanName + ')' +
+                              (ctx.header ? ' ' + ctx.header : '') + ' ======');
 
         // 1. Top-level spec — gives us the basics + any direct properties.
-        d.logLines('diag:expl', d.describe(spec, 'spec (GetType=' + typeNum + ')'));
+        d.logLines(ctx.cat, d.describe(spec, 'spec (GetType=' + typeNum + ')'));
 
-        // 2. SpecialistDescription, including ALL callables. The Princess
-        //    bonus likely hides in a method we haven't named yet.
+        // 2. SpecialistDescription, including ALL callables. Encodes per-type
+        //    bonuses (e.g. the Princess time bonus on explorers).
         try {
             if (typeof spec.GetSpecialistDescription === 'function') {
                 var desc = spec.GetSpecialistDescription();
                 if (desc) {
-                    d.logLines('diag:expl', d.describe(desc, 'description'));
-                    dumpAllCallables(desc, 'description');
+                    d.logLines(ctx.cat, d.describe(desc, 'description'));
+                    dumpAllCallables(desc, 'description', ctx.cat);
                 }
             }
         } catch (e) {
-            S.kernel.error('diag:expl', 'description probe threw:', e);
+            S.kernel.error(ctx.cat, 'description probe threw:', e);
         }
 
         // 3. Skill tree — permanent, learned skills.
-        dumpSkillVector(spec, 'getSkillTree', 'skillTree');
+        dumpSkillVector(spec, 'getSkillTree', 'skillTree', ctx.cat);
 
         // 4. Dynamic skills — from equipment / buffs / specials.
-        dumpSkillVector(spec, 'skills', 'spec.skills');
+        dumpSkillVector(spec, 'skills', 'spec.skills', ctx.cat);
 
-        S.kernel.log('diag:expl', '');
+        S.kernel.log(ctx.cat, '');
     }
 
     // True when a spec belongs to the player (not an NPC / foreign ghost).
@@ -392,63 +397,102 @@
         return false;
     }
 
-    function deepInspectExplorerTypes() {
+    // Read uniqueID as a stable per-instance key for the dump header.
+    // Two specimens of GetType=51 ("Bewitching Explorer") look identical
+    // in the log without it.
+    function uniqueIdKey(spec) {
+        try {
+            if (typeof spec.GetUniqueID === 'function') {
+                var uid = spec.GetUniqueID();
+                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
+    // Generic deep-dump for a specialist family. Dumps EVERY player-owned
+    // specialist of that family on the current zone — no per-GetType
+    // dedup, no status filter (idle, working, traveling, returning all
+    // included). For trait analysis we need to see active specimens too,
+    // and per-instance skill-tree levels can vary across copies of the
+    // same GetType.
+    function deepInspectFamily(family) {
         var c = S.core.specialists;
-        if (!c || !c.explorers) {
-            return notify('core.specialists not ready.');
+        if (!c) return notify('core.specialists not ready.');
+
+        var listFn, cat, label;
+        if (family === 'explorer') {
+            listFn = c.explorers; cat = 'diag:expl'; label = 'Explorer';
+        } else if (family === 'geologist') {
+            listFn = c.geologists; cat = 'diag:geo'; label = 'Geologist';
+        } else {
+            return notify('Unknown family: ' + family);
         }
-        var explorers;
-        try { explorers = c.explorers(); }
+        if (!listFn) return notify('core.specialists.' + family + 's() unavailable.');
+
+        var specs;
+        try { specs = listFn.call(c); }
         catch (e) {
-            S.kernel.error('diag:expl', 'explorers() threw:', e);
-            return notify('Could not list explorers — see log.');
+            S.kernel.error(cat, family + 's() threw:', e);
+            return notify('Could not list ' + family + 's — see log.');
         }
-        if (!explorers || !explorers.length) {
-            return notify('No explorers on the current zone.');
+        if (!specs || !specs.length) {
+            return notify('No ' + family + 's on the current zone.');
         }
 
-        // One specimen per unique GetType — player-owned only.
-        var byType = {};
+        // Filter to player-owned. Sort by GetType so same-type specimens
+        // group together in the log.
+        var owned = [];
         var skippedForeign = 0;
-        for (var i = 0; i < explorers.length; i++) {
-            var spec = explorers[i];
-            if (!ownedByPlayer(spec)) { skippedForeign++; continue; }
-            var t;
-            try { t = (typeof spec.GetType === 'function') ? spec.GetType() : null; }
-            catch (e) { t = null; }
-            if (t === null) continue;
-            if (!byType[t]) byType[t] = spec;
+        for (var i = 0; i < specs.length; i++) {
+            var s = specs[i];
+            if (!ownedByPlayer(s)) { skippedForeign++; continue; }
+            owned.push(s);
         }
-
-        var typeKeys = Object.keys(byType).sort(function (a, b) {
-            return Number(a) - Number(b);
+        owned.sort(function (a, b) {
+            var ta = -1, tb = -1;
+            try { if (typeof a.GetType === 'function') ta = a.GetType(); } catch (e) { /* skip */ }
+            try { if (typeof b.GetType === 'function') tb = b.GetType(); } catch (e) { /* skip */ }
+            return ta - tb;
         });
 
         // Apply the cap (if any) to keep the log manageable.
         var capped = (MAX_TYPES_PER_DUMP > 0)
-            ? typeKeys.slice(0, MAX_TYPES_PER_DUMP)
-            : typeKeys;
-        var more = typeKeys.length - capped.length;
+            ? owned.slice(0, MAX_TYPES_PER_DUMP)
+            : owned;
+        var more = owned.length - capped.length;
 
-        S.kernel.log('diag:expl', '########################################################');
-        S.kernel.log('diag:expl', '## Deep explorer-type dump — ' + typeKeys.length +
-                                  ' player-owned unique GetType(s)' +
-                                  (skippedForeign ? ' (' + skippedForeign + ' foreign skipped)' : '') +
-                                  ', dumping ' + capped.length);
+        S.kernel.log(cat, '########################################################');
+        S.kernel.log(cat, '## Deep ' + family + ' dump — ' + owned.length +
+                          ' player-owned ' + family + '(s)' +
+                          (skippedForeign ? ' (' + skippedForeign + ' foreign skipped)' : '') +
+                          ', dumping ' + capped.length);
         if (more > 0) {
-            S.kernel.log('diag:expl', '## (' + more + ' additional type(s) skipped: ' +
-                typeKeys.slice(capped.length).join(', ') + ')');
+            S.kernel.log(cat, '## (' + more + ' additional ' + family + '(s) skipped by cap)');
         }
-        S.kernel.log('diag:expl', '########################################################');
+        S.kernel.log(cat, '########################################################');
 
         for (var k = 0; k < capped.length; k++) {
-            dumpExplorerType(byType[capped[k]], capped[k]);
+            var spec = capped[k];
+            var t = -1;
+            try { if (typeof spec.GetType === 'function') t = spec.GetType(); }
+            catch (e) { /* skip */ }
+            var uid = uniqueIdKey(spec);
+            var status = '';
+            try { status = c.status(spec); } catch (e) { status = ''; }
+            var header = '[' + (k + 1) + '/' + capped.length + ']' +
+                         (uid ? ' uid=' + uid : '') +
+                         (status ? ' ' + status : '');
+            dumpSpecInstance(spec, t, { cat: cat, label: label, header: header });
         }
 
-        S.kernel.log('diag:expl', '## end deep explorer-type dump');
-        notify('Deep explorer dump for ' + capped.length +
-               ' type(s) written to log (category diag:expl).');
+        S.kernel.log(cat, '## end deep ' + family + ' dump');
+        notify('Deep ' + family + ' dump for ' + capped.length +
+               ' specialist(s) written to log (category ' + cat + ').');
     }
+
+    function deepInspectExplorerTypes()  { return deepInspectFamily('explorer'); }
+    function deepInspectGeologistTypes() { return deepInspectFamily('geologist'); }
 
     // ---------------------------------------------------------------
 
@@ -457,8 +501,10 @@
     function renderSection($rows, h) {
         $rows.append(h.formRow('Inspect specialists on current zone',
             h.button('Run', { onClick: inspectSpecialists })));
-        $rows.append(h.formRow('Deep dump explorer types (one per GetType)',
+        $rows.append(h.formRow('Deep dump explorers (every owned, all states)',
             h.button('Run', { onClick: deepInspectExplorerTypes })));
+        $rows.append(h.formRow('Deep dump geologists (every owned, all states)',
+            h.button('Run', { onClick: deepInspectGeologistTypes })));
         $rows.append(h.formRow('Inspect current zone',
             h.button('Run', { onClick: inspectCurrentZone })));
         $rows.append(h.formRow('Dump host snapshot',
@@ -467,12 +513,13 @@
             h.button('Run', { onClick: dumpKernelState })));
     }
 
-    S.modules.diagnostics.renderSection            = renderSection;
-    S.modules.diagnostics.summary                  = summary;
-    S.modules.diagnostics.inspectSpecialists       = inspectSpecialists;
-    S.modules.diagnostics.inspectCurrentZone       = inspectCurrentZone;
-    S.modules.diagnostics.dumpHostSnapshot         = dumpHostSnapshot;
-    S.modules.diagnostics.dumpKernelState          = dumpKernelState;
-    S.modules.diagnostics.deepInspectExplorerTypes = deepInspectExplorerTypes;
+    S.modules.diagnostics.renderSection             = renderSection;
+    S.modules.diagnostics.summary                   = summary;
+    S.modules.diagnostics.inspectSpecialists        = inspectSpecialists;
+    S.modules.diagnostics.inspectCurrentZone        = inspectCurrentZone;
+    S.modules.diagnostics.dumpHostSnapshot          = dumpHostSnapshot;
+    S.modules.diagnostics.dumpKernelState           = dumpKernelState;
+    S.modules.diagnostics.deepInspectExplorerTypes  = deepInspectExplorerTypes;
+    S.modules.diagnostics.deepInspectGeologistTypes = deepInspectGeologistTypes;
 
 }(Steward));

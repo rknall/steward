@@ -46,6 +46,7 @@
         qul:    function (k) { return safeText('QUL', k); },
         mel:    function (k) { return safeText('MEL', k); },
         alt:    function (k) { return safeText('ALT', k); },
+        spe:    function (k) { return safeText('SPE', k); },
         format: format
     };
 
