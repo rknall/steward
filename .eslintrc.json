@@ -3,6 +3,7 @@
     "browser": true,
     "jquery": true
   },
+  "ignorePatterns": ["build/", "tests/", "node_modules/"],
   "globals": {
     "Steward": "writable",
     "air": "readonly",
