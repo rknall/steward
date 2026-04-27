@@ -33,6 +33,8 @@ logs/
 *.bak
 *.backup
 _temp/
+docs/**/*json
+docs/**/*txt
 
 # OS files
 Thumbs.db
