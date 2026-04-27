@@ -1,7 +1,7 @@
 /*
- * Default settings for the templates_explorers module.
+ * Default settings for the explorers module.
  *
- * Stores per-explorer task assignments under steward.templates_explorers.
+ * Stores per-explorer task assignments under steward.explorers.
  * The shape is:
  *
  *   {
@@ -22,9 +22,9 @@
 
 (function (S) {
 
-    if (!S.modules.templates_explorers) S.modules.templates_explorers = {};
+    if (!S.modules.explorers) S.modules.explorers = {};
 
-    S.modules.templates_explorers.defaultSettings = {
+    S.modules.explorers.defaultSettings = {
         enabled:       false,        // off by default — must be explicitly turned on
         overrides:     {},           // { 'Snowy Explorer': 'TaskExplorerShort', ... }
         // Delay between dispatch actions. Match the kernel's default queue

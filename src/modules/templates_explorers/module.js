@@ -1,5 +1,5 @@
 /*
- * Templates_explorers module.
+ * explorers module.
  *
  * Periodically dispatches idle explorers to the task chosen by the
  * precedence chain documented in docs/CORE_USAGE.md (Rule 5):
@@ -25,14 +25,14 @@
 (function (S) {
 
     function readSettings() {
-        return (S.modules.templates_explorers && S.modules.templates_explorers.readSettings)
-            ? S.modules.templates_explorers.readSettings()
-            : S.modules.templates_explorers.defaultSettings;
+        return (S.modules.explorers && S.modules.explorers.readSettings)
+            ? S.modules.explorers.readSettings()
+            : S.modules.explorers.defaultSettings;
     }
 
     function stripHtml(name) {
-        if (S.modules.templates_explorers && S.modules.templates_explorers.stripHtml) {
-            return S.modules.templates_explorers.stripHtml(name);
+        if (S.modules.explorers && S.modules.explorers.stripHtml) {
+            return S.modules.explorers.stripHtml(name);
         }
         return (typeof name === 'string') ? name.replace(/<[^>]+>/g, '') : '';
     }
@@ -53,7 +53,7 @@
             if (key && s.overrides[key]) {
                 var enumVal = s.overrides[key];
                 if (c.knownTask(enumVal)) return enumVal;
-                S.kernel.warn('templates_explorers',
+                S.kernel.warn('explorers',
                     'override for', key, 'is not a recognised ExplorerTask value:', enumVal);
             }
         }
@@ -62,7 +62,7 @@
         try {
             return c.pickTask(explorer) || S.ExplorerTask.Short;
         } catch (e) {
-            S.kernel.warn('templates_explorers', 'pickTask threw:', e);
+            S.kernel.warn('explorers', 'pickTask threw:', e);
             return S.ExplorerTask.Short;
         }
     }
@@ -89,7 +89,7 @@
         var idleExplorers;
         try { idleExplorers = c.available(S.SpecialistType.Explorer); }
         catch (e) {
-            S.kernel.error('templates_explorers', 'available() threw:', e);
+            S.kernel.error('explorers', 'available() threw:', e);
             return;
         }
 
@@ -111,31 +111,31 @@
             // sends to it repeatedly while ignoring the rest.
             var uidKey = uniqueKey(spec);
             if (!uidKey) {
-                S.kernel.warn('templates_explorers', 'no uniqueID for', stripHtml(c.name(spec)),
+                S.kernel.warn('explorers', 'no uniqueID for', stripHtml(c.name(spec)),
                               '— skipping');
                 continue;
             }
             var name = stripHtml(c.name(spec)) || '?';
-            S.kernel.queue.add('templates_explorers.dispatch',
+            S.kernel.queue.add('explorers.dispatch',
                 [uidKey, name, task],
                 i === 0 ? 0 : delay);
             dispatched++;
         }
 
         if (dispatched > 0) {
-            S.kernel.log('templates_explorers', 'queued dispatch for', dispatched, 'idle explorer(s)');
+            S.kernel.log('explorers', 'queued dispatch for', dispatched, 'idle explorer(s)');
         }
     }
 
     function boot() {
         // Seed defaults on first run.
-        if (!S.kernel.settings.read('templates_explorers')) {
-            S.kernel.settings.write('templates_explorers',
-                S.modules.templates_explorers.defaultSettings);
+        if (!S.kernel.settings.read('explorers')) {
+            S.kernel.settings.write('explorers',
+                S.modules.explorers.defaultSettings);
         }
 
         // Register the dispatch action.
-        S.kernel.queue.action('templates_explorers.dispatch', function (params) {
+        S.kernel.queue.action('explorers.dispatch', function (params) {
             var uidKey = params[0];
             var displayName = params[1] || '?';
             var taskEnum = params[2];
@@ -153,36 +153,36 @@
                     }
                 }
             } catch (e) {
-                S.kernel.error('templates_explorers', 'lookup for', displayName, 'threw:', e);
+                S.kernel.error('explorers', 'lookup for', displayName, 'threw:', e);
                 return;
             }
 
             if (!spec) {
-                S.kernel.warn('templates_explorers', 'could not re-find', displayName,
+                S.kernel.warn('explorers', 'could not re-find', displayName,
                               '(uid', uidKey, ') — skipping');
                 return;
             }
             if (c.status(spec) !== S.SpecialistStatus.Idle) {
-                S.kernel.log('templates_explorers', displayName, 'no longer idle — skipping');
+                S.kernel.log('explorers', displayName, 'no longer idle — skipping');
                 return;
             }
 
             try {
                 var ok = c.send(spec, taskEnum);
                 if (ok) {
-                    S.kernel.log('templates_explorers', 'sent', displayName, '→', taskEnum);
+                    S.kernel.log('explorers', 'sent', displayName, '→', taskEnum);
                 } else {
-                    S.kernel.warn('templates_explorers', 'send returned false for', displayName);
+                    S.kernel.warn('explorers', 'send returned false for', displayName);
                 }
             } catch (e) {
-                S.kernel.error('templates_explorers', 'send threw for', displayName, ':', e);
+                S.kernel.error('explorers', 'send threw for', displayName, ':', e);
             }
         });
 
     }
 
     S.kernel.register({
-        id:       'templates_explorers',
+        id:       'explorers',
         priority: S.Priority.Normal,
         boot:     boot,
         isReady:  isReady,
@@ -195,20 +195,20 @@
                 title: 'Explorers',
                 icon:  '⌖',
                 render: function ($body, h) {
-                    if (S.modules.templates_explorers.renderSection) {
-                        return S.modules.templates_explorers.renderSection($body, h);
+                    if (S.modules.explorers.renderSection) {
+                        return S.modules.explorers.renderSection($body, h);
                     }
                 },
                 summary: function () {
-                    return S.modules.templates_explorers.summary
-                        ? S.modules.templates_explorers.summary()
+                    return S.modules.explorers.summary
+                        ? S.modules.explorers.summary()
                         : '';
                 },
                 action: {
                     label:   'Show overrides + state',
                     onClick: function () {
-                        if (S.modules.templates_explorers.showOverrides) {
-                            S.modules.templates_explorers.showOverrides();
+                        if (S.modules.explorers.showOverrides) {
+                            S.modules.explorers.showOverrides();
                         }
                     }
                 }

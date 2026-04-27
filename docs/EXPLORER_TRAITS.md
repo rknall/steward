@@ -185,7 +185,7 @@ function biasFromTrait(trait, activeEvents, opts):
     // or to any value larger than the maximum observed adventure score
     // (~4) to guarantee treasure wins. Default 0; the recommended
     // production value is ≥1000 (well above any plausible trait score
-    // we've observed). Wired off `templates_explorers.forceTreasureOnEvents`.
+    // we've observed). Wired off `explorers.forceTreasureOnEvents`.
     score = { treasure: 0, adventure: 0, deposit: 0, other: 0 }
     for each effect in trait.level_vector[traitLevel - 1]:
         // Princess-style traits leave type_string empty and match by

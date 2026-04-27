@@ -133,11 +133,12 @@ async function build() {
 	try {
 		const minified = await minify(body, {
 			ecma: 5,
-			mangle: false,
-			compress: false,
+			mangle: true,
+			compress: true,
 			format: {
 				comments: false,
-				beautify: true,
+				beautify: false,
+                indent_level: 0, // prevent AIR 32 parser limit
                 max_line_len: 1000, // prevent AIR 32 parser limit
                 quote_keys: true
 			},

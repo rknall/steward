@@ -23,9 +23,7 @@ LOG_PREFIX_RE = re.compile(r"^\[LOG\] \[[^\]]+\] \[diag:expl\] ?")
 HEADER_RE = re.compile(r"====== Explorer GetType=(\d+) \((.+?)\) ======")
 SECTION_SKILLS_RE = re.compile(r"--- spec\.skills \((\d+) items\) ---")
 SKILL_HEADER_RE = re.compile(r"spec\.skills\[(\d+)\] id=(\d+) level=(\d+)")
-SKILL_DEF_RE = re.compile(
-    r"def: name_string=(.*?), id=(\d+), icon_string=(\S+)$"
-)
+SKILL_DEF_RE = re.compile(r"def: name_string=(.*?), id=(\d+), icon_string=(\S+)$")
 EFFECT_RE = re.compile(
     r"\[(\d+)\] type_string=(.*?), modifier_string=(.*?), "
     r"multiplier=(.*?), adder=(.*?), value=(.*?), name_string=(.*), chance=(\S+)$",
@@ -62,7 +60,7 @@ class Explorer:
 
 def strip_prefix(line: str) -> str:
     m = LOG_PREFIX_RE.match(line)
-    return line[m.end():] if m else line
+    return line[m.end() :] if m else line
 
 
 def parse(path: str):
@@ -168,9 +166,11 @@ def family_for(eff: Effect) -> str:
     # FindAdventureZone* variants by wildDetermination's effect list,
     # so treat it as adventure-family. See open question 5 in
     # EXPLORER_TRAITS.md for the structural reasoning.
-    if (tag.startswith("FindAdventureZone") or
-            tag.startswith("FindAdventure_") or
-            tag.startswith("IntrepidLoot")):
+    if (
+        tag.startswith("FindAdventureZone")
+        or tag.startswith("FindAdventure_")
+        or tag.startswith("IntrepidLoot")
+    ):
         return "adventure"
     if tag.startswith("FindDeposit"):
         return "deposit"
@@ -183,15 +183,15 @@ def family_for(eff: Effect) -> str:
 # haven't catalogued as events yet — those still classify the effect
 # as seasonal-only, just without a code to consult at runtime).
 EVENT_SUFFIX_TO_CODE = {
-    "_Easter":           "Easter",
-    "_XMAS":             "XMAS",
-    "_Halloween":        "HW",
-    "_Valentine":        "Valentine",
-    "_SoccerResources":  "Soccer",
-    "_SoccerBalls":      "Soccer",
-    "_Anniversary":      "Anniversary",
-    "_RedNose":          "RedNose",          # not yet in core/events/data.js
-    "_SpecialistWeek":   "SpecialistWeek",   # not yet in core/events/data.js
+    "_Easter": "Easter",
+    "_XMAS": "XMAS",
+    "_Halloween": "HW",
+    "_Valentine": "Valentine",
+    "_SoccerResources": "Soccer",
+    "_SoccerBalls": "Soccer",
+    "_Anniversary": "Anniversary",
+    "_RedNose": "RedNose",  # not yet in core/events/data.js
+    "_SpecialistWeek": "SpecialistWeek",  # not yet in core/events/data.js
 }
 
 # Token used to mark a "lovely-themed" treasure variant family.
@@ -307,8 +307,8 @@ def classify_effect(eff: Effect):
         mode = "unknown"
 
     return {
-        "mode":      mode,
-        "events":    sorted(event_codes),
+        "mode": mode,
+        "events": sorted(event_codes),
         "truncated": truncated,
     }
 
@@ -369,7 +369,7 @@ def bias_from_trait(skill: Skill, active_events=None, event_boost=0):
     # "No adventure during events" boost. Purely additive to OUR scoring;
     # never mutates the host's trait/skill objects. Caller controls
     # whether this fires via `event_boost` (wired from the
-    # templates_explorers.forceTreasureOnEvents setting).
+    # explorers.forceTreasureOnEvents setting).
     has_event = (active_events == "ANY") or bool(active_events)
     if event_boost > 0 and has_event:
         scores["treasure"] += event_boost
@@ -417,7 +417,9 @@ def summarise(exp: Explorer):
 
         for key, info in groups.items():
             mod, mul, add, val, ch, mode, events = key
-            tags = sorted({(e.type_string, e.name_string.split(",", 1)[0]) for e in info["effs"]})
+            tags = sorted(
+                {(e.type_string, e.name_string.split(",", 1)[0]) for e in info["effs"]}
+            )
             shown_tags = []
             for t, n in tags:
                 shown_tags.append(t if t else f"[{n}]")
@@ -447,7 +449,7 @@ def summarise(exp: Explorer):
         # (every event live). Apart shows whether the trait is event-
         # sensitive at all.
         scores_off = bias_from_trait(skill, active_events=set())
-        scores_on  = bias_from_trait(skill, active_events=None)
+        scores_on = bias_from_trait(skill, active_events=None)
 
         def _print_bias(label, scores):
             ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
@@ -484,14 +486,18 @@ def summarise(exp: Explorer):
             print("    gating → ALWAYS active")
         elif is_always and is_seasonal:
             evs = ev_list or ["?"]
-            print(f"    gating → MIXED — year-round baseline + extra credit when {evs} is live")
+            print(
+                f"    gating → MIXED — year-round baseline + extra credit when {evs} is live"
+            )
         elif is_seasonal:
             evs = ev_list or ["?"]
             print(f"    gating → SEASONAL-ONLY (active only when one of {evs} is live)")
         elif is_always:
             print("    gating → ALWAYS active")
         else:
-            print(f"    gating → UNRESOLVED ({sorted(all_modes)}) — re-dump may be needed")
+            print(
+                f"    gating → UNRESOLVED ({sorted(all_modes)}) — re-dump may be needed"
+            )
 
 
 def main(argv):

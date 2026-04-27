@@ -1,5 +1,5 @@
 /*
- * Dashboard surface for the templates_explorers module.
+ * Dashboard surface for the explorers module.
  *
  * Renders inside the Specialists tab as an "Explorers" section. Per-explorer
  * override editing is deferred — for now the override map is still hand-
@@ -10,11 +10,11 @@
 
 (function (S) {
 
-    if (!S.modules.templates_explorers) S.modules.templates_explorers = {};
+    if (!S.modules.explorers) S.modules.explorers = {};
 
     function readSettings() {
-        var stored = S.kernel.settings.read('templates_explorers') || {};
-        var defaults = S.modules.templates_explorers.defaultSettings || {};
+        var stored = S.kernel.settings.read('explorers') || {};
+        var defaults = S.modules.explorers.defaultSettings || {};
         var merged = {};
         var key;
         for (key in defaults) merged[key] = defaults[key];
@@ -23,7 +23,7 @@
     }
 
     function writeSettings(s) {
-        S.kernel.settings.write('templates_explorers', s);
+        S.kernel.settings.write('explorers', s);
     }
 
     // Strip <b>...</b> / <font>...</font> wrappers the host uses for display
@@ -42,32 +42,32 @@
     // to the log. Helps users tune overrides before flipping `enabled`.
     function showOverrides() {
         var s = readSettings();
-        S.kernel.log('templates_explorers', '--- explorer state ---');
-        S.kernel.log('templates_explorers', 'enabled:', !!s.enabled,
+        S.kernel.log('explorers', '--- explorer state ---');
+        S.kernel.log('explorers', 'enabled:', !!s.enabled,
                      '  dispatchDelay:', s.dispatchDelay || 5000, 'ms');
 
         try {
             var liveRaw = S.core.events.liveEventNames();
-            S.kernel.log('templates_explorers', 'host events (raw):',
+            S.kernel.log('explorers', 'host events (raw):',
                          liveRaw.length ? liveRaw.join(', ') : '(none)');
             var matched = S.core.events.active();
             if (matched.length === 0) {
-                S.kernel.log('templates_explorers',
+                S.kernel.log('explorers',
                     'matched events: (none — pickTask falls back to host explDefTask)');
             } else {
                 for (var m = 0; m < matched.length; m++) {
                     var ev = matched[m];
                     var values = S.core.events.treasureValues(ev.code);
-                    S.kernel.log('templates_explorers', '  matched:', ev.code,
+                    S.kernel.log('explorers', '  matched:', ev.code,
                                  '— categories:', (ev.categoryList || []).join(',') || '(none)',
                                  '— treasureValues:',
                                  (values && values.length) ? values.join(',') : '(none)');
                 }
             }
         } catch (e) {
-            S.kernel.error('templates_explorers', 'event dump threw:', e);
+            S.kernel.error('explorers', 'event dump threw:', e);
         }
-        S.kernel.log('templates_explorers',
+        S.kernel.log('explorers',
                      'host explDefTask:', S.kernel.host.explDefTaskGlobal(),
                      ' explDefTaskByType keys:',
                      Object.keys((typeof mainSettings !== 'undefined' && mainSettings &&
@@ -77,7 +77,7 @@
         var explorers;
         try { explorers = c.explorers(); }
         catch (e) {
-            S.kernel.error('templates_explorers', 'failed to list explorers:', e);
+            S.kernel.error('explorers', 'failed to list explorers:', e);
             return notify('Could not list explorers — see log.');
         }
 
@@ -85,7 +85,7 @@
         for (var i = 0; i < explorers.length; i++) {
             if (c.status(explorers[i]) === S.SpecialistStatus.Idle) idle++; else busy++;
         }
-        S.kernel.log('templates_explorers', 'explorers — total:', explorers.length,
+        S.kernel.log('explorers', 'explorers — total:', explorers.length,
                      '  idle:', idle, '  busy:', busy);
 
         // pickTask preview per explorer.
@@ -95,7 +95,7 @@
             var picked = '?';
             try { picked = c.pickTask(spec) || '?'; } catch (e) { picked = 'threw'; }
             var override = s.overrides && s.overrides[stripHtml(name)];
-            S.kernel.log('templates_explorers',
+            S.kernel.log('explorers',
                 '  [' + (c.status(spec) === S.SpecialistStatus.Idle ? 'idle' : 'busy') + ']',
                 stripHtml(name),
                 '→ pickTask:', picked,
@@ -112,12 +112,12 @@
     }
 
     function renderSection($panel, h) {
-        var s = h.settings('templates_explorers');
+        var s = h.settings('explorers');
 
         $panel.append(h.formRow('Run on Startup', h.toggle({
             checked:  !!s.enabled,
             onChange: function (next) {
-                h.update('templates_explorers', { enabled: next });
+                h.update('explorers', { enabled: next });
             }
         })));
 
@@ -128,7 +128,7 @@
             onChange: function (val) {
                 var n = parseInt(val, 10);
                 if (!isNaN(n) && n >= 0) {
-                    h.update('templates_explorers', { dispatchDelay: n });
+                    h.update('explorers', { dispatchDelay: n });
                 }
             }
         }), 'ms — pause between sends'));
@@ -142,7 +142,7 @@
         $panel.append(h.formRow('Force treasure during events', h.toggle({
             checked:  s.forceTreasureOnEvents !== false,  // default ON
             onChange: function (next) {
-                h.update('templates_explorers', { forceTreasureOnEvents: next });
+                h.update('explorers', { forceTreasureOnEvents: next });
             }
         }), 'no event items drop on adventures — keep ON unless you are deliberately farming adventure scrolls'));
 
@@ -156,7 +156,7 @@
             {
                 selected: s.defaultTask || '',
                 onChange: function (val) {
-                    h.update('templates_explorers', { defaultTask: val || null });
+                    h.update('explorers', { defaultTask: val || null });
                 }
             }
         ), 'used for explorers without a trait recommendation'));
@@ -295,11 +295,11 @@
         }
     }
 
-    S.modules.templates_explorers.readSettings   = readSettings;
-    S.modules.templates_explorers.writeSettings  = writeSettings;
-    S.modules.templates_explorers.stripHtml      = stripHtml;
-    S.modules.templates_explorers.renderSection  = renderSection;
-    S.modules.templates_explorers.summary        = summary;
-    S.modules.templates_explorers.showOverrides  = showOverrides;
+    S.modules.explorers.readSettings   = readSettings;
+    S.modules.explorers.writeSettings  = writeSettings;
+    S.modules.explorers.stripHtml      = stripHtml;
+    S.modules.explorers.renderSection  = renderSection;
+    S.modules.explorers.summary        = summary;
+    S.modules.explorers.showOverrides  = showOverrides;
 
 }(Steward));

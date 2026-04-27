@@ -42,7 +42,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | autoTSO flag | Subsystem | Steward equivalent | Status | Tier |
 |---|---|---|---|---|
 | `Adventure` | aAdventure (auto-run an adventure) | — | ✗ | must |
-| `Explorers` | aSpecialists.manageExplorers (treasure searches) | `modules/templates_explorers` | ✓ | must |
+| `Explorers` | aSpecialists.manageExplorers (treasure searches) | `modules/explorers` | ✓ | must |
 | `Quests` | aQuests.manage (auto-complete daily/letter/event quests) | — | ✗ | must |
 | `Deposits` | aBuildings.deposits.manage (geologists + mine build/upgrade) | partially in `core/deposits` (read), no module yet | ~ | must |
 | `Buildings` | aBuildings.manage (auto-toggle production) | — | ✗ | must |
@@ -132,9 +132,9 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | autoTSO | Steward | Status |
 |---|---|---|
 | `getSpecialists(type)` | `core.specialists.byType` | ✓ |
-| `manageExplorers` (auto-dispatch) | `modules/templates_explorers` | ✓ |
+| `manageExplorers` (auto-dispatch) | `modules/explorers` | ✓ |
 | `sendGeologists(geos, count, depoIndex, depoName)` | `core.specialists.send` (low-level only) | ~ |
-| Templates (per-explorer task) | `templates_explorers.overrides` | ✓ |
+| Templates (per-explorer task) | `explorers.overrides` | ✓ |
 | Templates UI (dropdown per spec) | — | ✗ — only menu toggle exists |
 | Event optimisation (skill-aware items/hour) | partial — uses default-hours, doesn't read skills yet | ~ |
 | `pickTask` precedence (per-spec → event → host default → baseline) | yes | ✓ |

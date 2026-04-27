@@ -275,7 +275,7 @@ Small. ~20 minutes plus doc.
 | 3 | **#4 Per-module cancel** | Fixes the "disable doesn't take effect" complaint cleanly. Builds on #2. |
 | 4 | **#1 Settings backend swap** | Foundational. Should land before user config has time to grow under the old path. |
 | 5 | **#5 mainSettings honour** | Lower urgency. Useful for future experimental modules. |
-| 6 | **#6 pickTask host-defaults** | No active explorer/geologist module yet — pure groundwork for the future templates_explorers / templates_geologists modules. |
+| 6 | **#6 pickTask host-defaults** | No active explorer/geologist module yet — pure groundwork for the future explorers / templates_geologists modules. |
 
 Recommended bundling for commits:
 

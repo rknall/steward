@@ -326,7 +326,7 @@ Classification doesn't need army inspection, and `collect` (the v0.1 module) doe
 ```
 src/modules/
 ├── collect/                    # v0.1
-├── templates_explorers/        # later — uses core/specialists.pickTask, core/events
+├── explorers/        # later — uses core/specialists.pickTask, core/events
 ├── templates_geologists/       # later — also handles mine building/leveling
 └── templates_armies/           # later — warfare loadouts (will pull in core/army.js)
 ```

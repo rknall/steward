@@ -171,7 +171,7 @@
     // opts.eventBoost: when > 0 AND any event is live, add this constant
     // to the treasure score. Implements the "no adventure during events"
     // rule purely additively — never mutates the host's trait/skill
-    // objects. Wired off `templates_explorers.forceTreasureOnEvents`.
+    // objects. Wired off `explorers.forceTreasureOnEvents`.
     // ---------------------------------------------------------------
 
     function familyForEffect(eff) {
@@ -311,7 +311,7 @@
 
         // "No adventure during events" boost — purely additive to OUR
         // scoring, no host mutation. Caller decides whether to enable
-        // it via the templates_explorers.forceTreasureOnEvents setting.
+        // it via the explorers.forceTreasureOnEvents setting.
         var hasEvent = (activeEvents === 'ANY') ||
                        (!!activeEvents && objectHasAnyKey(activeEvents));
         if (eventBoost > 0 && hasEvent) {
@@ -406,26 +406,26 @@
         return ctx;
     }
 
-    // Read the templates_explorers.forceTreasureOnEvents setting. When
+    // Read the explorers.forceTreasureOnEvents setting. When
     // true (the default), an active treasure event tells biasFromTrait
     // to bump the treasure score by EVENT_TREASURE_BOOST so adventure-
     // biased explorers (Royal, Love Struck, Keener, Nora) join the
     // treasure dispatch instead of staying on adventures.
     function forceTreasureOnEventsEnabled() {
         try {
-            var s = S.kernel.settings.read('templates_explorers') || {};
+            var s = S.kernel.settings.read('explorers') || {};
             // Default ON when the setting hasn't been written yet.
             return s.forceTreasureOnEvents !== false;
         } catch (e) { return true; }
     }
 
-    // Read the templates_explorers.defaultTask setting — the user's
+    // Read the explorers.defaultTask setting — the user's
     // chosen fallback for vanilla explorers and inactive-trait cases
     // (off-event Fluffy Butte). Returns the ExplorerTask enum value or
     // null if unset.
     function userDefaultTask() {
         try {
-            var s = S.kernel.settings.read('templates_explorers') || {};
+            var s = S.kernel.settings.read('explorers') || {};
             if (typeof s.defaultTask === 'string' && s.defaultTask) {
                 return s.defaultTask;
             }
@@ -525,7 +525,7 @@
             } catch (e) { /* ignore */ }
             // Treasure-family fallback when no event is live. Honour
             // the user's configured default task if they've chosen one
-            // (templates_explorers.defaultTask), otherwise return the
+            // (explorers.defaultTask), otherwise return the
             // longest treasure variant per the "rule of thumb: longer
             // is better off-event" decision in EXPLORER_TRAITS.md. The
             // host global default is intentionally NOT consulted here —
