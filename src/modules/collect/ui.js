@@ -1,26 +1,16 @@
 /*
- * Settings UI for the collect module.
+ * Dashboard surface for the collect module.
  *
- * Three menu items under "Steward → Collect":
- *   - Enabled toggle (master switch)
- *   - Patterns: <comma-separated list>  (read-only label, edit via settings.json)
- *   - Discover collectibles             (one-shot scan that logs candidates)
- *
- * The patterns list is intentionally read-only in the menu — typing into
- * native menu items is awkward; the list lives in steward.collect.namePatterns
- * in the host settings file.
+ * Renders inside the Buildings tab as a "Collect Pickups" section. The
+ * section's action link is a one-shot "Discover collectibles" probe that
+ * walks the current zone and logs every candidate plus how it matched
+ * against the user's patterns — useful for tuning the pattern list.
  */
 
 (function (S) {
 
     if (!S.modules.collect) S.modules.collect = {};
 
-    var MENU_ENTRY_NAME = 'StewardCollectMenu';
-
-    // Merge stored settings with defaults so missing keys (e.g. after a
-    // settings-shape change between releases) get sensible values rather
-    // than silently disabling the module. The merge is shallow — top-level
-    // keys only — which matches collect's flat settings shape.
     function readSettings() {
         var stored = S.kernel.settings.read('collect') || {};
         var defaults = S.modules.collect.defaultSettings || {};
@@ -31,58 +21,10 @@
         return merged;
     }
 
-    function patternsLabel(s) {
-        var ps = (s.namePatterns && s.namePatterns.length) ? s.namePatterns : [];
-        if (!ps.length) return 'Patterns: (none — module disabled effectively)';
-        return 'Patterns: ' + ps.join(', ');
-    }
-
-    function buildSpec() {
-        var s = readSettings();
-        return {
-            name:  MENU_ENTRY_NAME,
-            label: 'Collect',
-            items: [
-                {
-                    label:    (s.enabled ? '✓ ' : '✕ ') + 'Enabled',
-                    onSelect: function () { toggle('enabled'); }
-                },
-                {
-                    label:    patternsLabel(s),
-                    enabled:  false                         // info-only
-                },
-                { type: 'separator' },
-                {
-                    label:    'Discover collectibles (log)',
-                    onSelect: discover
-                }
-            ]
-        };
-    }
-
-    function toggle(key) {
-        var s = readSettings();
-        s[key] = !s[key];
-        S.kernel.settings.write('collect', s);
-        S.kernel.log('collect', 'toggled', key, '→', s[key]);
-
-        // If the user disabled the module, drop any pending collect actions
-        // immediately. Per the busy contract this also unblocks plan() once
-        // the user re-enables (no orphan actions hanging around).
-        if (key === 'enabled' && !s.enabled) {
-            if (S.kernel.queue && S.kernel.queue.cancelByModule) {
-                S.kernel.queue.cancelByModule('collect');
-            }
-        }
-
-        renderMenu();
-    }
-
-    // One-shot: walk every building on the current zone and log whether the
-    // host's CollectionsManager flagged it collectible, plus whether each of
-    // the user's configured patterns matches. Output goes through the
-    // standard logger (category 'collect:discover') so it lands in
-    // <appStorage>/steward/logs/console.log.
+    // Walk every building on the current zone and log whether the host's
+    // CollectionsManager flagged it collectible plus pattern matches. Output
+    // goes through the standard logger (category 'collect:discover') so it
+    // lands in <appStorage>/steward/logs/console.log.
     function discover() {
         try {
             var s = readSettings();
@@ -126,13 +68,66 @@
         }
     }
 
-    function renderMenu() {
-        if (!S.kernel.ui || !S.kernel.ui.menu) return;
-        S.kernel.ui.menu.replaceByName(MENU_ENTRY_NAME, buildSpec());
+    // Section.summary — shown on the Status tab.
+    function summary() {
+        var s = readSettings();
+        if (!s.enabled) return 'disabled';
+        var n = (s.namePatterns || []).length;
+        return n + ' pattern' + (n === 1 ? '' : 's');
     }
 
-    S.modules.collect.renderMenu   = renderMenu;
-    S.modules.collect.readSettings = readSettings;
-    S.modules.collect.discover     = discover;
+    // Section.render — populates the section-rows container. `h` is
+    // S.kernel.ui.helpers; settings are buffered so the user can Save / Close.
+    function renderSection($rows, h) {
+        var s = h.settings('collect');
+
+        $rows.append(h.formRow('Run on Startup', h.toggle({
+            checked:  !!s.enabled,
+            onChange: function (next) { h.update('collect', { enabled: next }); }
+        })));
+
+        $rows.append(h.formRow('Name patterns', h.input({
+            type:     'text',
+            value:    (s.namePatterns || []).join(', '),
+            width:    '320px',
+            onChange: function (val) {
+                var parts = String(val || '').split(',');
+                var clean = [];
+                for (var i = 0; i < parts.length; i++) {
+                    var p = parts[i].replace(/^\s+|\s+$/g, '');
+                    if (p) clean.push(p);
+                }
+                h.update('collect', { namePatterns: clean });
+            }
+        })));
+
+        // Read-only help row — explains that active-event resources auto-extend
+        // the pattern set so the user doesn't need to add Easter / XMAS / etc.
+        var $help = $('<span>').css({ color: '#8a7a55', fontSize: '12px' });
+        $help.append(document.createTextNode('Active-event resources auto-extend this list'));
+        try {
+            if (S.core.events && S.core.events.active) {
+                var ev = S.core.events.active();
+                var names = [];
+                for (var i = 0; i < ev.length; i++) {
+                    if (ev[i].code) names.push(ev[i].code);
+                    if (S.core.events.eventResource) {
+                        var r = S.core.events.eventResource(ev[i].code);
+                        if (r) names.push(r);
+                    }
+                }
+                if (names.length) {
+                    $help.append(document.createTextNode(' · currently: '));
+                    $help.append($('<code>').text(names.join(', ')));
+                }
+            }
+        } catch (e) { /* ignore — the help line is decorative */ }
+        $rows.append(h.formRow('', $help));
+    }
+
+    S.modules.collect.readSettings  = readSettings;
+    S.modules.collect.discover      = discover;
+    S.modules.collect.renderSection = renderSection;
+    S.modules.collect.summary       = summary;
 
 }(Steward));

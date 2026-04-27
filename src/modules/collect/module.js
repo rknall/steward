@@ -164,8 +164,6 @@
             bld.invalidate();
         });
 
-        // Render the in-game menu entry.
-        if (S.modules.collect.renderMenu) S.modules.collect.renderMenu();
     }
 
     S.kernel.register({
@@ -173,7 +171,33 @@
         priority: S.Priority.Normal,
         boot:     boot,
         isReady:  isReady,
-        plan:     plan
+        plan:     plan,
+        // Render / summary are wrapped in closures so they resolve
+        // S.modules.collect.* at call time. ui.js loads AFTER module.js
+        // (alphabetical concat order), so a direct reference here would
+        // be undefined and validateUi would reject the spec.
+        ui: {
+            tab: 'buildings',
+            section: {
+                id:    'collect_pickups',
+                title: 'Collect Pickups',
+                icon:  '★',
+                render: function ($body, h) {
+                    if (S.modules.collect.renderSection) {
+                        return S.modules.collect.renderSection($body, h);
+                    }
+                },
+                summary: function () {
+                    return S.modules.collect.summary ? S.modules.collect.summary() : '';
+                },
+                action: {
+                    label:   'Discover collectibles (log)',
+                    onClick: function () {
+                        if (S.modules.collect.discover) S.modules.collect.discover();
+                    }
+                }
+            }
+        }
     });
 
 }(Steward));

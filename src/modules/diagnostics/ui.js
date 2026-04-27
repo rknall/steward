@@ -1,16 +1,19 @@
 /*
- * Diagnostics UI.
+ * Dashboard surface for the diagnostics module.
  *
- * Steward → Diagnostics submenu. Each item is a one-shot read-only probe.
- * Output goes to the standard log (category 'diag') so it lands in the
- * console.log file the user can paste back.
+ * Renders inside the Tools tab. Each probe is a row with the description on
+ * the left and a button on the right. All output goes through the standard
+ * logger (category 'diag') so users can paste it back when reporting bugs.
  */
 
 (function (S) {
 
     if (!S.modules.diagnostics) S.modules.diagnostics = {};
 
-    var MENU_ENTRY_NAME = 'StewardDiagnosticsMenu';
+    function notify(text) {
+        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
+        catch (e) { /* best effort */ }
+    }
 
     function dumpHostSnapshot() {
         var d = S.modules.diagnostics.inspect;
@@ -40,9 +43,6 @@
             }
         } catch (e) { S.kernel.error('diag', 'settings dump threw:', e); }
 
-        // Live events — affect pickTask precedence in templates_explorers,
-        // pickDeposits in templates_geologists, and any future event-aware
-        // module. Surface them up-front so it's clear what the kernel sees.
         S.kernel.log('diag', '--- live events ---');
         try {
             if (S.core.events && S.core.events.liveEventNames) {
@@ -94,12 +94,9 @@
             var all = c.all();
             S.kernel.log('diag', 'total:', all.length);
 
-            // 1) Distribution: how many of each (GetType, classify, status)?
-            //    Surfaces every type the host returns — including specials
-            //    like Marshal (18), Courageous Explorer (32), Admiral, etc.
-            var byTriple = {};        // 'type|classify|status' → count
-            var byRawType = {};       //  raw GetType → count
-            var firstByRaw = {};      //  raw GetType → first seen specialist
+            var byTriple = {};
+            var byRawType = {};
+            var firstByRaw = {};
             for (var i = 0; i < all.length; i++) {
                 var s = all[i];
                 var raw = '?';
@@ -118,8 +115,6 @@
                 S.kernel.log('diag', '  ' + tripleKeys[t] + '  →  ' + byTriple[tripleKeys[t]]);
             }
 
-            // 2) Dump one specimen per RAW GetType so we see Marshal,
-            //    Courageous Explorer, etc., not just one per classify-result.
             S.kernel.log('diag', '--- one specimen per GetType ---');
             var rawKeys = Object.keys(firstByRaw).sort(function (a, b) { return Number(a) - Number(b); });
             for (var r = 0; r < rawKeys.length; r++) {
@@ -133,8 +128,6 @@
                     'specialist GetType=' + rt + ' classify=' + cls2 +
                     ' status=' + st2 + ' name=' + (nm || '?')));
 
-                // Also dump the description object — that's where carrier
-                // detection and capacity live.
                 try {
                     if (typeof spec.GetSpecialistDescription === 'function') {
                         var desc = spec.GetSpecialistDescription();
@@ -162,34 +155,24 @@
         notify('Zone dumped to log.');
     }
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
+    function summary() { return 'read-only probes'; }
+
+    function renderSection($rows, h) {
+        $rows.append(h.formRow('Inspect specialists on current zone',
+            h.button('Run', { onClick: inspectSpecialists })));
+        $rows.append(h.formRow('Inspect current zone',
+            h.button('Run', { onClick: inspectCurrentZone })));
+        $rows.append(h.formRow('Dump host snapshot',
+            h.button('Run', { onClick: dumpHostSnapshot })));
+        $rows.append(h.formRow('Dump kernel state',
+            h.button('Run', { onClick: dumpKernelState })));
     }
 
-    function buildSpec() {
-        return {
-            name:  MENU_ENTRY_NAME,
-            label: 'Diagnostics',
-            items: [
-                { label: 'Inspect specialists',  onSelect: inspectSpecialists },
-                { label: 'Inspect current zone', onSelect: inspectCurrentZone },
-                { type: 'separator' },
-                { label: 'Dump host snapshot',   onSelect: dumpHostSnapshot },
-                { label: 'Dump kernel state',    onSelect: dumpKernelState }
-            ]
-        };
-    }
-
-    function renderMenu() {
-        if (!S.kernel.ui || !S.kernel.ui.menu) return;
-        S.kernel.ui.menu.replaceByName(MENU_ENTRY_NAME, buildSpec());
-    }
-
-    S.modules.diagnostics.renderMenu          = renderMenu;
-    S.modules.diagnostics.inspectSpecialists  = inspectSpecialists;
-    S.modules.diagnostics.inspectCurrentZone  = inspectCurrentZone;
-    S.modules.diagnostics.dumpHostSnapshot    = dumpHostSnapshot;
-    S.modules.diagnostics.dumpKernelState     = dumpKernelState;
+    S.modules.diagnostics.renderSection      = renderSection;
+    S.modules.diagnostics.summary            = summary;
+    S.modules.diagnostics.inspectSpecialists = inspectSpecialists;
+    S.modules.diagnostics.inspectCurrentZone = inspectCurrentZone;
+    S.modules.diagnostics.dumpHostSnapshot   = dumpHostSnapshot;
+    S.modules.diagnostics.dumpKernelState    = dumpKernelState;
 
 }(Steward));

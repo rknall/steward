@@ -191,10 +191,6 @@
             }
         });
 
-        // Render the menu.
-        if (S.modules.templates_explorers.renderMenu) {
-            S.modules.templates_explorers.renderMenu();
-        }
     }
 
     S.kernel.register({
@@ -202,7 +198,34 @@
         priority: S.Priority.Normal,
         boot:     boot,
         isReady:  isReady,
-        plan:     plan
+        plan:     plan,
+        // Late-binding refs — see collect/module.js for why.
+        ui: {
+            tab: 'specialists',
+            section: {
+                id:    'explorers',
+                title: 'Explorers',
+                icon:  '⌖',
+                render: function ($body, h) {
+                    if (S.modules.templates_explorers.renderSection) {
+                        return S.modules.templates_explorers.renderSection($body, h);
+                    }
+                },
+                summary: function () {
+                    return S.modules.templates_explorers.summary
+                        ? S.modules.templates_explorers.summary()
+                        : '';
+                },
+                action: {
+                    label:   'Show overrides + state',
+                    onClick: function () {
+                        if (S.modules.templates_explorers.showOverrides) {
+                            S.modules.templates_explorers.showOverrides();
+                        }
+                    }
+                }
+            }
+        }
     });
 
 }(Steward));

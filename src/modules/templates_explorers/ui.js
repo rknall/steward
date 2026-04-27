@@ -1,26 +1,17 @@
 /*
- * UI for the templates_explorers module.
+ * Dashboard surface for the templates_explorers module.
  *
- * Adds "Steward → Explorer Templates" with:
- *   - Enabled toggle (master switch)
- *   - "Show current overrides" — dumps overrides + idle/busy counts to log
- *   - "Set <task> as default for all idle" — quick bulk-assignment that
- *     writes the chosen task into mainSettings.explDefTask via
- *     settings.store. Writes Steward's own override map only when the
- *     user wants per-explorer customization (done by editing settings.json
- *     directly for v0.4 — a per-explorer dropdown UI lands later).
+ * Renders inside the Specialists tab as an "Explorers" section. Per-explorer
+ * override editing is deferred — for now the override map is still hand-
+ * edited in settings.json. The section action dumps current state (overrides,
+ * idle/busy counts, pickTask results) to the log so users can see what
+ * dispatches will look like before turning the module on.
  */
 
 (function (S) {
 
     if (!S.modules.templates_explorers) S.modules.templates_explorers = {};
 
-    var MENU_ENTRY_NAME = 'StewardExplorerTemplatesMenu';
-
-    // Shallow merge stored values over defaults so old settings shapes
-    // (or missing keys after a release update) get filled with sensible
-    // defaults rather than silently disabling the module or stalling
-    // dispatch.
     function readSettings() {
         var stored = S.kernel.settings.read('templates_explorers') || {};
         var defaults = S.modules.templates_explorers.defaultSettings || {};
@@ -35,28 +26,26 @@
         S.kernel.settings.write('templates_explorers', s);
     }
 
-    function toggle(key) {
-        var s = readSettings();
-        s[key] = !s[key];
-        writeSettings(s);
-        S.kernel.log('templates_explorers', 'toggled', key, '→', s[key]);
-        if (key === 'enabled' && !s.enabled) {
-            // Drop any pending dispatches when the user turns us off.
-            if (S.kernel.queue && S.kernel.queue.cancelByModule) {
-                S.kernel.queue.cancelByModule('templates_explorers');
-            }
-        }
-        renderMenu();
+    // Strip <b>...</b> / <font>...</font> wrappers the host uses for display
+    // names so users can match against plain strings in settings.json.
+    function stripHtml(s) {
+        if (typeof s !== 'string') return '';
+        return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
     }
 
+    function notify(text) {
+        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
+        catch (e) { /* best effort */ }
+    }
+
+    // Section action: dump explorer state + per-explorer pickTask results
+    // to the log. Helps users tune overrides before flipping `enabled`.
     function showOverrides() {
         var s = readSettings();
         S.kernel.log('templates_explorers', '--- explorer state ---');
         S.kernel.log('templates_explorers', 'enabled:', !!s.enabled,
                      '  dispatchDelay:', s.dispatchDelay || 5000, 'ms');
 
-        // Active events affect pickTask precedence. Log them so users can
-        // see why a given recommendation came out the way it did.
         try {
             var liveRaw = S.core.events.liveEventNames();
             S.kernel.log('templates_explorers', 'host events (raw):',
@@ -99,8 +88,7 @@
         S.kernel.log('templates_explorers', 'explorers — total:', explorers.length,
                      '  idle:', idle, '  busy:', busy);
 
-        // Pick precedence preview: for each explorer, log what pickTask
-        // would return so the user can see what's about to be dispatched.
+        // pickTask preview per explorer.
         for (var j = 0; j < explorers.length; j++) {
             var spec = explorers[j];
             var name = c.name(spec) || '?';
@@ -116,46 +104,52 @@
         notify('Explorer state dumped to log.');
     }
 
-    // The host wraps spec names in <b>...</b> / <font>...</font> for display.
-    // Strip when comparing against settings keys so users can write plain
-    // names in settings.json.
-    function stripHtml(s) {
-        if (typeof s !== 'string') return '';
-        return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
-    }
-
-    function buildSpec() {
+    function summary() {
         var s = readSettings();
-        return {
-            name:  MENU_ENTRY_NAME,
-            label: 'Explorer Templates',
-            items: [
-                {
-                    label:    (s.enabled ? '✓ ' : '✕ ') + 'Enabled',
-                    onSelect: function () { toggle('enabled'); }
-                },
-                { type: 'separator' },
-                {
-                    label:    'Show current overrides + state',
-                    onSelect: showOverrides
+        if (!s.enabled) return 'disabled';
+        var n = Object.keys(s.overrides || {}).length;
+        return n + ' override' + (n === 1 ? '' : 's');
+    }
+
+    function renderSection($rows, h) {
+        var s = h.settings('templates_explorers');
+
+        $rows.append(h.formRow('Run on Startup', h.toggle({
+            checked:  !!s.enabled,
+            onChange: function (next) {
+                h.update('templates_explorers', { enabled: next });
+            }
+        })));
+
+        $rows.append(h.formRow('Dispatch delay', h.input({
+            type:     'number',
+            value:    s.dispatchDelay || 1500,
+            width:    '90px',
+            onChange: function (val) {
+                var n = parseInt(val, 10);
+                if (!isNaN(n) && n >= 0) {
+                    h.update('templates_explorers', { dispatchDelay: n });
                 }
-            ]
-        };
+            }
+        }), 'ms — pause between sends'));
+
+        // Read-only per-explorer overrides hint. Editing the map directly
+        // in the dashboard is deferred (settings.json works for now).
+        var n = Object.keys(s.overrides || {}).length;
+        var $hint = $('<span>').css({ color: '#8a7a55', fontSize: '12px' });
+        $hint.append(document.createTextNode(
+            n === 0
+                ? 'No per-explorer overrides set. Edit settings.json to add some.'
+                : n + ' explorer override' + (n === 1 ? '' : 's') + ' configured (edit in settings.json).'
+        ));
+        $rows.append(h.formRow('Per-explorer overrides', $hint));
     }
 
-    function renderMenu() {
-        if (!S.kernel.ui || !S.kernel.ui.menu) return;
-        S.kernel.ui.menu.replaceByName(MENU_ENTRY_NAME, buildSpec());
-    }
-
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
-    S.modules.templates_explorers.renderMenu    = renderMenu;
-    S.modules.templates_explorers.readSettings  = readSettings;
-    S.modules.templates_explorers.writeSettings = writeSettings;
-    S.modules.templates_explorers.stripHtml     = stripHtml;
+    S.modules.templates_explorers.readSettings   = readSettings;
+    S.modules.templates_explorers.writeSettings  = writeSettings;
+    S.modules.templates_explorers.stripHtml      = stripHtml;
+    S.modules.templates_explorers.renderSection  = renderSection;
+    S.modules.templates_explorers.summary        = summary;
+    S.modules.templates_explorers.showOverrides  = showOverrides;
 
 }(Steward));
