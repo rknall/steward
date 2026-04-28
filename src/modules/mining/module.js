@@ -125,7 +125,48 @@
             if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
         }
     }
-    function tryUpgrade(info, cfg, ctx) { /* v2 */ }
+    function tryUpgrade(info, cfg, ctx) {
+        if (!cfg.upgrade) return;
+        if (ctx.slotsRemaining <= 0) return;
+        if (!info.mineName) return;
+        var target = (typeof cfg.targetLevel === 'number') ? cfg.targetLevel : 0;
+        if (target <= 0) return;
+
+        var onMapDepos;
+        try { onMapDepos = S.core.deposits.byType(info.name); }
+        catch (e) {
+            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
+            return;
+        }
+
+        for (var i = 0; i < onMapDepos.length; i++) {
+            var depo = onMapDepos[i];
+            if (!depo) continue;
+            var grid = S.core.deposits.grid(depo);
+            if (!grid) continue;
+            if (ctx.assigned[grid]) continue;            // tryBuild already claimed this grid
+
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld) continue;                                              // no mine to upgrade
+            if (S.core.buildings.name(bld) !== info.mineName) continue;      // wrong building (depleted shell, etc.)
+            if (S.core.buildings.level(bld) >= target) continue;             // already at or above target
+            if (typeof bld.IsUpgradeAllowed === 'function' &&
+                !bld.IsUpgradeAllowed(true)) continue;                       // host says no
+
+            var nextLevel = S.core.buildings.level(bld) + 1;
+
+            ctx.assigned[grid] = true;
+            ctx.slotsRemaining--;
+            ctx.queued++;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            S.kernel.queue.add('mining.upgradeMine',
+                [grid, info.mineName, nextLevel],
+                delay);
+
+            if (ctx.slotsRemaining <= 0) return;
+        }
+    }
     function tryPause(info, cfg, ctx)   { /* v2 */ }
     function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
@@ -195,6 +236,41 @@
                 S.core.buildings.invalidate();
             } catch (e) {
                 S.kernel.error('mining', 'SendServerAction(50) threw for', mineName, ':', e);
+            }
+        });
+
+        S.kernel.queue.action('mining.upgradeMine', function (params) {
+            var grid     = params[0];
+            var mineName = params[1];
+            var nextLvl  = params[2];
+
+            // Re-check: state may have drifted since plan() queued.
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld || S.core.buildings.name(bld) !== mineName) {
+                S.kernel.log('mining', 'grid', grid, 'no longer hosts', mineName,
+                             '— skipping upgrade');
+                return;
+            }
+            if (S.core.buildings.level(bld) >= nextLvl) {
+                S.kernel.log('mining', mineName, 'on grid', grid,
+                             'already at level', S.core.buildings.level(bld),
+                             '— skipping upgrade');
+                return;
+            }
+            if (typeof bld.IsUpgradeAllowed === 'function' &&
+                !bld.IsUpgradeAllowed(true)) {
+                S.kernel.log('mining', mineName, 'on grid', grid,
+                             'no longer upgradable — skipping');
+                return;
+            }
+            try {
+                game.zone.UpgradeBuildingOnGridPosition(grid);
+                S.kernel.log('mining', 'upgrading', mineName, 'on grid', grid,
+                             'to level', nextLvl);
+                S.core.buildings.invalidate();
+            } catch (e) {
+                S.kernel.error('mining',
+                               'UpgradeBuildingOnGridPosition threw for', mineName, ':', e);
             }
         });
     }
