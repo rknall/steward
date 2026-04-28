@@ -68,10 +68,63 @@
         };
     }
 
-    // Phase functions. Production bodies are filled in later tasks
-    // (tryBuild in Task 4, the rest in v2). Tests inject stubs via
+    function canAffordMine(mineName) {
+        if (!mineName) return false;
+        try {
+            var res = game.zone.GetResources(game.player);
+            return !!(res && typeof res.CanPlayerAffordBuilding === 'function' &&
+                      res.CanPlayerAffordBuilding(mineName));
+        } catch (e) {
+            S.kernel.warn('mining', 'canAffordMine threw for', mineName, ':', e);
+            return false;
+        }
+    }
+
+    // Phase functions. tryBuild is live in v1; the rest are v2 stubs
+    // (filled once core/buffs lands). Tests inject stubs via
     // S.modules.mining._phases — see tests/modules/mining.test.js.
-    function tryBuild(info, cfg, ctx)   { /* filled in Task 4 */ }
+    function tryBuild(info, cfg, ctx) {
+        if (!cfg.build) return;
+        if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
+        if (!info.mineId || !info.mineName) return;
+
+        var onMapDepos;
+        try { onMapDepos = S.core.deposits.byType(info.name); }
+        catch (e) {
+            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
+            return;
+        }
+
+        for (var i = 0; i < onMapDepos.length; i++) {
+            var depo = onMapDepos[i];
+            if (!depo) continue;
+
+            var grid = S.core.deposits.grid(depo);
+            if (!grid) continue;
+            if (ctx.assigned[grid]) continue;
+
+            // A building (any building, including a depleted shell) on
+            // this grid means the deposit is already covered. Depleted
+            // shells resolve naturally on the next tick: a geo finds a
+            // new deposit, the shell goes away, byGrid returns null,
+            // and we queue the build then.
+            if (S.core.buildings.byGrid(grid)) continue;
+
+            if (!canAffordMine(info.mineName)) continue;
+
+            ctx.assigned[grid] = true;
+            ctx.slotsRemaining--;
+            ctx.licensesRemaining--;
+            ctx.queued++;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            S.kernel.queue.add('mining.buildMine',
+                [info.mineId, grid, info.name, info.mineName],
+                delay);
+
+            if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
+        }
+    }
     function tryUpgrade(info, cfg, ctx) { /* v2 */ }
     function tryPause(info, cfg, ctx)   { /* v2 */ }
     function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
@@ -119,7 +172,31 @@
         if (!S.kernel.settings.read('mining')) {
             S.kernel.settings.write('mining', S.modules.mining.defaultSettings);
         }
-        // Queue action 'mining.buildMine' is registered in Task 4.
+
+        S.kernel.queue.action('mining.buildMine', function (params) {
+            var mineId   = params[0];
+            var grid     = params[1];
+            var depoName = params[2];
+            var mineName = params[3];
+
+            // Re-check: state may have drifted since plan() queued.
+            if (S.core.buildings.byGrid(grid)) {
+                S.kernel.log('mining', 'grid', grid, 'now occupied — skipping', mineName);
+                return;
+            }
+            if (!canAffordMine(mineName)) {
+                S.kernel.log('mining', 'no longer affordable — skipping', mineName);
+                return;
+            }
+            try {
+                game.gi.SendServerAction(50, mineId, grid, 0, null);
+                S.kernel.log('mining', 'placed', mineName, 'on grid', grid,
+                             '(' + depoName + ')');
+                S.core.buildings.invalidate();
+            } catch (e) {
+                S.kernel.error('mining', 'SendServerAction(50) threw for', mineName, ':', e);
+            }
+        });
     }
 
     // Exposed for ui.js (set in Task 5).

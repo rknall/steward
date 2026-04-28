@@ -63,7 +63,7 @@ function makeAir() {
 }
 
 function makeGame() {
-    return {
+    var g = {
         gi: {
             mCurrentPlayer:        null,
             mCurrentPlayerZone:    null,
@@ -82,19 +82,56 @@ function makeGame() {
             }
         },
         def:          function () { return null; },
-        zone:         {
-            ScrollToGrid:                 noop,
-            GetBuildingFromGridPosition:  function () { return null; },
-            GetResources:                 function () { return { CanPlayerAffordBuilding: function () { return true; } }; },
-            mStreetDataMap: {
-                getDeposits_vectorByType: function () { return []; },
-                GetBuildings_vector:      function () { return []; },
-                getBuildingsByName_vector:function () { return []; }
-            }
-        },
         getResources: function () { return {}; },
         player:       { GetPlayerLevel: function () { return 60; } }
     };
+    // game.zone delegates to the mounted player zone where the fluent
+    // builder has wired real lookups (deposits, buildings, resources).
+    // Mirrors the AIR host where game.zone is the current zone.
+    g.zone = {
+        ScrollToGrid: noop,
+        GetBuildingFromGridPosition: function (gridId) {
+            var z = g.gi.mCurrentPlayerZone;
+            if (z && typeof z.GetBuildingFromGridPosition === 'function') {
+                return z.GetBuildingFromGridPosition(gridId);
+            }
+            return null;
+        },
+        GetResources: function (player) {
+            var z = g.gi.mCurrentPlayerZone;
+            if (z && typeof z.GetResources === 'function') {
+                return z.GetResources(player);
+            }
+            return { CanPlayerAffordBuilding: function () { return true; } };
+        },
+        mStreetDataMap: {
+            getDeposits_vectorByType: function (typeName) {
+                var z = g.gi.mCurrentPlayerZone;
+                if (z && z.mStreetDataMap &&
+                    typeof z.mStreetDataMap.getDeposits_vectorByType === 'function') {
+                    return z.mStreetDataMap.getDeposits_vectorByType(typeName);
+                }
+                return [];
+            },
+            GetBuildings_vector: function () {
+                var z = g.gi.mCurrentPlayerZone;
+                if (z && z.mStreetDataMap &&
+                    typeof z.mStreetDataMap.GetBuildings_vector === 'function') {
+                    return z.mStreetDataMap.GetBuildings_vector();
+                }
+                return [];
+            },
+            getBuildingsByName_vector: function (name) {
+                var z = g.gi.mCurrentPlayerZone;
+                if (z && z.mStreetDataMap &&
+                    typeof z.mStreetDataMap.getBuildingsByName_vector === 'function') {
+                    return z.mStreetDataMap.getBuildingsByName_vector(name);
+                }
+                return [];
+            }
+        }
+    };
+    return g;
 }
 
 function makeJQuery() {
