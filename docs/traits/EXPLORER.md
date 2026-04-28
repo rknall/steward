@@ -78,6 +78,28 @@ spec.skills.getItems_vector()
 | 94 | Ghost Explorer | 334 | `Trait_Ghostlyloot` | 9 stacked-chance effects on Long (chances 0.7+0.7+0.35), EvenLonger (0.85+0.85+0.42), Prolonged (1.0+1.0+0.5) — each `ChangeLoottableRolls add=1`. | **Long-form treasure (probabilistic)** — the layered chances appear to roll independently for variable extra loot |
 | 97 | Nora the Explorer | 338 | `Trait_GloryExploriExplorer` | 13 effects mixing two modifiers: `searchTime mul=1.5` on every `FindTreasure*` (penalty — slower), `searchTime mul=0.5` on every `FindAdventureZone*` (bonus — faster), and `ChangeLoottableRolls add=1` on `FindAdventureZoneLong/VeryLong`. | **Adventure (strong)** — only trait observed that uses `searchTime` to actively discourage one family. Sending her on treasure costs +50% time |
 
+### Newly catalogued from external dump (2026-04-28)
+
+Sourced from `docs/analysis/user_provided/angrywolf_specialists-20260428-122935.json`.
+The bias column for these rows is a **GUESS** based on raw effect content
+and existing pattern matching — please re-confirm against in-game
+behaviour before relying on the recommendation. Mark a row "verified"
+when you've test-dispatched and observed the result.
+
+| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias (GUESS) | Verified? |
+|---|---|---|---|---|---|---|
+| 4 | _unknown_ (vanilla, +200%) | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 200` | follow user default — vanilla tier-2 | no |
+| 17 | _unknown_ (Fast Lucky?) | 106 | `Trait_FastLuckyExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `ExplorerBuffs` (matched by `name_string`; `type_string` empty). `description.GetTimeBonus = 300` | **Buff finder** — drops onto a private `ExplorerBuffs` loot table on every dispatch. Bias is "always-on buff producer" rather than a treasure/adventure family lean. Recommendation should fall back to user default for the family choice and treat the buff as a passive bonus | no |
+| 28 | _unknown_ (Intrepid) | 107 | `Trait_IntrepidExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `IntrepidLoot` (matched by `name_string`). `description.GetTimeBonus = 200` | **Adventure** — identical mechanic to Keener Explorer (GetType=55). `IntrepidLoot` is a named loot table grouped with the four `FindAdventureZone*` variants by `wildDetermination`'s effect list, so the algorithm should bin this trait as `adventure=1.0` | no |
+| 58 | _unknown_ (Bold) | 274 | `Trait_BoldExplorer` | 9 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Bold_Buffs` AND `FindAdventure_Zoe_Buffs` (Zoe-style), plus **`mul=1.5 ChangeLootCount` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 250` | **Treasure (moderate)** — count multiplier across all sizes is a uniform +50%. The Zoe-style private adventure-buff drop is a side bonus. Year-round score should be ~2 for treasure, smaller adventure-buff signal | no |
+| 61 | _unknown_ (Scared) | 277 | `Trait_ScaredExplorer` | 6 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Scared_Buffs`, plus **`mul=4 ChangeLootCount` on every `FindTreasure*` size** (with all event suffixes; no Erudite/BeanACollada). `description.GetTimeBonus = 25` (!) — only 25% time bonus, suggesting a slow-but-rewarding tier | **Treasure (very strong)** — 4× count is the strongest count multiplier observed. Low time bonus partially offsets, but recommendation is still treasure with a clear preference for any size. The unusual 25% time bonus is unique among observed traits and should be flagged for confirmation | no |
+| 68 | _unknown_ (Motherly) | 286 | `Trait_MotherlyExplorer` | 7 effects, **`mul=4 ChangeLoottableRolls` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 100` | **Treasure (very strong)** — same shape as Emphatic (GetType=48) but `mul=4` instead of `mul=3`. Year-round score ≈ 21 (7 × ((4-1) chance=1)). Strong recommendation regardless of events | no |
+| 69 | _unknown_ (Benevolent) | 287 | `Trait_BenevolentExplorer` | 2 effects: `+1 ChangeLoottableRolls` on `FindTreasureEvenLonger` private `FindTreasure_Benevolent_Buffs1`, and on `FindTreasureProlonged` private `FindTreasure_Benevolent_Buffs2`. `description.GetTimeBonus = 200` | **Long-form buff finder** — like Princess Zoe restricted to the two longest treasure variants. Bias is "extra buff loot rolls on EvenLonger / Prolonged"; family-wise lean is treasure (slight) | no |
+
+Display names are placeholders — the dump's `name` field was empty for
+all of these. Re-dump in-game with `getName()` populated to fill them in,
+or look up the host's loca catalog by trait id.
+
 Note: the host's own modifier name is **`ChangeLoottableRolls`** (not
 `changeloottablerolls`); autoTSO at `user_auto.js:4456` lower-cases before
 comparing. Our matcher will do the same.
@@ -217,7 +239,8 @@ function biasFromTrait(trait, activeEvents, opts):
 
         // Seasonal gating. The effect's name_string lists the loot-
         // table identifiers the bonus fires on. Classify the entries
-        // (see `classify_effect()` in docs/analysis/parse_explorers_dump.py):
+        // (the original Python tool's `classify_effect()` codified
+        // this; the algorithm now lives inline below):
         //   - 'plain'         : bare type_string match (year-round)
         //   - 'lovely'        : '_Lovely' token without event suffix
         //                       (Lovely-trait private; year-round for owner)
@@ -403,9 +426,10 @@ traceability; trim on next doc pass.
 ## Next dump targets
 
 All 20 home-zone explorer types (1, 10, 32, 39, 41, 44, 48, 51, 53, 55,
-65, 66, 70, 74, 78, 84, 87, 90, 94, 97) captured on 2026-04-27 from the
-4767-line dump in `docs/analysis/explorers_dump.txt`. Re-parse with
-`docs/analysis/parse_explorers_dump.py` if the dump is regenerated.
+65, 66, 70, 74, 78, 84, 87, 90, 94, 97) captured on 2026-04-27. The
+canonical source for re-analysis is now
+`docs/analysis/specialists-20260427-134729.json` (schema v2). Re-parse
+with `docs/analysis/parse-specialists-dump.js`.
 
 Future dump targets:
 

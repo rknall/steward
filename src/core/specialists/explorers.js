@@ -8,7 +8,7 @@
  *   - treasureTaskTable / applySkills / allSpecSkills — task durations +
  *     skill-aware items/hour scoring used by bestTaskForEvent
  *   - biasFromTrait + classifyEffect / classifyEntry / familyForEffect —
- *     trait-skill scoring documented in docs/EXPLORER_TRAITS.md
+ *     trait-skill scoring documented in docs/traits/EXPLORER.md
  *   - familyFromBias / pickAdventureSubtask / bestTaskForEvent /
  *     activeEventContext / forceTreasureOnEventsEnabled / userDefaultTask
  *   - pickTask — the explorer-routing entry point (precedence chain
@@ -37,7 +37,7 @@
     // Token for Lovely-trait private variants (`FindTreasure_Lovely_Short`,
     // `FindTreasure_Lovely_Prolonged_Easter`, …). The runtime gate is the
     // event suffix when one is present, otherwise the trait owner. See
-    // EXPLORER_TRAITS.md "Trait-private drop tables".
+    // docs/traits/EXPLORER.md "Trait-private drop tables".
     var LOVELY_TOKEN = '_Lovely';
 
     var EVENT_TREASURE_BOOST = 1000;  // > any plausible adventure score (~4)
@@ -146,7 +146,7 @@
     // biasFromTrait — score an explorer's trait-skill effects into
     // {treasure, adventure, deposit, other} buckets so callers can pick
     // the best dispatch family. Mirrors the algorithm documented in
-    // docs/EXPLORER_TRAITS.md and exercised by docs/analysis/parse_explorers_dump.py.
+    // docs/traits/EXPLORER.md and exercised by docs/analysis/parse-specialists-dump.js.
     //
     // Per-effect rules:
     //   - Loot modifiers (changeloottablerolls / changelootcount /
@@ -160,7 +160,7 @@
     //
     // Family dispatch: type_string prefix → family. IntrepidLoot is
     // grouped with FindAdventureZone* per `wildDetermination`'s effect
-    // list (resolved open question 5 in EXPLORER_TRAITS.md).
+    // list (resolved open question 5 in docs/traits/EXPLORER.md).
     //
     // Seasonal gating: an effect whose name_string lists ONLY event-
     // suffixed loot-table identifiers (no plain entry) only contributes
@@ -527,7 +527,7 @@
             // the user's configured default task if they've chosen one
             // (explorers.defaultTask), otherwise return the
             // longest treasure variant per the "rule of thumb: longer
-            // is better off-event" decision in EXPLORER_TRAITS.md. The
+            // is better off-event" decision in docs/traits/EXPLORER.md. The
             // host global default is intentionally NOT consulted here —
             // autoTSO-installed hosts ship `mainSettings.explDefTask = Short`
             // by default and that conflicts with the algorithm.
