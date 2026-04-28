@@ -69,7 +69,10 @@
     }
 
     function updateDeposit(h, depositName, partial) {
-        var s = readSettings();
+        // Read from the dashboard buffer, NOT from persisted settings —
+        // multiple edits before Save must layer on top of each other or
+        // earlier pending changes get clobbered by stale persisted reads.
+        var s = h.settings('mining');
         var deposits = {};
         var k;
         for (k in (s.deposits || {})) deposits[k] = s.deposits[k];
