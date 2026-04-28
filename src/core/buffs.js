@@ -237,6 +237,11 @@
                 building.IsInConstructionMode()) return false;
             if (typeof building.IsInDestruction === 'function' &&
                 building.IsInDestruction()) return false;
+            // Paused (or otherwise non-actively-producing) buildings don't
+            // benefit from buffs — the buff timer would tick down on a stalled
+            // production. autoTSO uses the same intent at user_auto.js:5279.
+            if (typeof building.IsProductionActive === 'function' &&
+                !building.IsProductionActive()) return false;
         } catch (e) { return false; }
 
         var b = byName(buffName);

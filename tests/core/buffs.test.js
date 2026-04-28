@@ -101,6 +101,14 @@ t.test('canApply() rejects when building is upgrading / constructing / destructi
     t.assert.strictEqual(H.Steward.core.buffs.canApply(destructing, 'IronMineBuff'), false);
 });
 
+t.test('canApply() rejects when building is paused (IsProductionActive=false)', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'IronMineBuff', amount: 1, targets: 'IronMine' })
+    ]);
+    var paused = building({ name: 'IronMine', grid: 12, producing: false });
+    t.assert.strictEqual(H.Steward.core.buffs.canApply(paused, 'IronMineBuff'), false);
+});
+
 t.test('canApply() rejects when buff target list does not include the building name', function () {
     var H = bootWithBuffs([
         buff({ name: 'GoldMineBuff', amount: 1, targets: 'GoldMine' })
