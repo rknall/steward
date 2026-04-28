@@ -135,8 +135,8 @@
         var depCfg = (s && s.deposits) || {};
 
         $panel.append(h.gridRow(
-            [[3, 'Deposit'], [2, 'Build Mine'], [2, 'Upgrade Mine'],
-             [2, 'Target Lvl'], [2, 'Pause'], [1, 'Active']],
+            [[2, 'Deposit'], [2, 'Build Mine'], [2, 'Upgrade Mine'],
+             [1, 'Target'], [1, 'Pause'], [3, 'Buff'], [1, 'Active']],
             { headerCells: true }
         ));
 
@@ -144,9 +144,11 @@
             var info = types[i];
             var cfg = depCfg[info.name] || {};
             var active = activeCount(info);
+            // Mason types carry their buffs against the mason building name.
+            var buffTarget = info.mineName || info.masonName;
 
-            (function (depositName, currentCfg, activeNum, mineable) {
-                var $buildCell, $upgradeCell, $targetCell, $pauseCell;
+            (function (depositName, currentCfg, activeNum, mineable, target) {
+                var $buildCell, $upgradeCell, $targetCell, $pauseCell, $buffCell;
                 if (mineable) {
                     $buildCell = h.toggle({
                         checked:  !!currentCfg.build,
@@ -184,16 +186,45 @@
                     $targetCell  = '—';
                     $pauseCell   = '—';
                 }
+                $buffCell = renderBuffDropdown(h, depositName, currentCfg, target);
                 $panel.append(h.gridRow(
-                    [[3, depositName],
+                    [[2, depositName],
                      [2, $buildCell],
                      [2, $upgradeCell],
-                     [2, $targetCell],
-                     [2, $pauseCell],
+                     [1, $targetCell],
+                     [1, $pauseCell],
+                     [3, $buffCell],
                      [1, String(activeNum)]]
                 ));
-            })(info.name, cfg, active, !!info.mineName);
+            })(info.name, cfg, active, !!info.mineName, buffTarget);
         }
+    }
+
+    // Build the per-row Buff dropdown. Pulls the inventory snapshot once
+    // per render, filters by target building name, and wires the change
+    // handler back through updateDeposit so the partial write preserves
+    // every other field.
+    function renderBuffDropdown(h, depositName, cfg, target) {
+        if (!target) return '—';
+        var inv = [];
+        try { inv = S.core.buffs.forBuilding(target) || []; }
+        catch (e) { inv = []; }
+
+        var options = [{ value: '', label: 'None' }];
+        for (var i = 0; i < inv.length; i++) {
+            var b = inv[i];
+            var nm = S.core.buffs.name(b);
+            var amt = S.core.buffs.amount(b);
+            if (!nm) continue;
+            options.push({ value: nm, label: nm + ' (' + amt + ')' });
+        }
+        return h.dropdown(options, {
+            selected: typeof cfg.buff === 'string' ? cfg.buff : '',
+            width:    '180px',
+            onChange: function (val) {
+                updateDeposit(h, depositName, { buff: val || '' });
+            }
+        });
     }
 
     function appendStatusFooter($panel, h) {
