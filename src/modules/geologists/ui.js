@@ -237,9 +237,11 @@
 
     // Merge a partial change into settings.deposits[name]. h.update
     // does shallow merge at the top level so we hand it the full
-    // updated `deposits` object.
+    // updated `deposits` object. Read from the dashboard buffer, NOT
+    // from persisted settings — multiple edits before Save must layer
+    // on top of each other or earlier pending changes get clobbered.
     function updateDeposit(h, depositName, partial) {
-        var s = readSettings();
+        var s = h.settings('geologists');
         var deposits = {};
         var k;
         for (k in (s.deposits || {})) deposits[k] = s.deposits[k];
