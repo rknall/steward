@@ -32,7 +32,30 @@
         //
         // Note: 'Starfall' is intentionally NOT listed — that family lives
         // in a separate module (planned).
-        namePatterns: ['Collectible']
+        namePatterns: ['Collectible'],
+
+        // Inventory items to surface on the Collections & Buildings tab.
+        // These are item-resources (Leather, Banner, Cauldron, …) that
+        // live in the player's resource inventory but are normally hidden
+        // — only visible in the storehouse's event tab during events or
+        // when crafting at the mayor's house. Use the internal name (the
+        // host's name_string) as it appears in `loca.GetText('RES', x)`.
+        // Add seasonal items (e.g. EasterEgg) here when an event is live
+        // — names that aren't in the host's resource map render as 0.
+        inventory: {
+            items: [
+                'Leather',
+                'Scarecrow',
+                'Barrel',
+                'Herbs',
+                'AdmantiumCore',
+                'FoodCard',
+                'Banner',
+                'GrainSacks',
+                'BronzeCauldron',
+                'Kettle'
+            ]
+        }
     };
 
 }(Steward));

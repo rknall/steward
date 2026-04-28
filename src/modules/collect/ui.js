@@ -90,6 +90,7 @@
         })));
 
         appendCollectiblesList($panel, h);
+        appendInventoryList($panel, h);
     }
 
     function appendCollectiblesList($panel, h) {
@@ -124,6 +125,59 @@
             $panel.append(h.gridRow([
                 [8, g.name],
                 [4, g.count + ' on zone']
+            ]));
+        }
+    }
+
+    // Inventory of curated "collection items" (Leather, Banner, Cauldron, …)
+    // that live in the host's resource inventory but are normally hidden
+    // (storehouse event tab during events; mayor's house crafting menu).
+    // We render them here so the user can see counts at any time.
+    //
+    // Read settings via readSettings() rather than h.settings('collect') so
+    // existing users without `inventory` in their persisted settings still
+    // see the default tracked list. The buffer would otherwise return an
+    // undefined `inventory` field and the section would be empty.
+    function appendInventoryList($panel, h) {
+        if (!S.core.resources) return;
+
+        var s = readSettings();
+        var items = (s.inventory && s.inventory.items) || [];
+        if (!items.length) return;
+
+        // Force a fresh inventory read so amounts reflect the moment the
+        // dashboard is opened.
+        try { S.core.resources.invalidate(); }
+        catch (e) { /* ignore */ }
+
+        var entries = [];
+        for (var i = 0; i < items.length; i++) {
+            var nm = items[i];
+            if (!nm) continue;
+            entries.push({
+                internal:    nm,
+                displayName: S.core.resources.displayName(nm),
+                amount:      S.core.resources.amount(nm)
+            });
+        }
+        entries.sort(function (a, b) {
+            var ak = (a.displayName || '').toLowerCase();
+            var bk = (b.displayName || '').toLowerCase();
+            if (ak < bk) return -1;
+            if (ak > bk) return 1;
+            return 0;
+        });
+
+        $panel.append(h.gridRow(
+            [[8, 'Tracked items'], [4, entries.length + ' tracked']],
+            { headerCells: true }
+        ));
+
+        for (var j = 0; j < entries.length; j++) {
+            var e = entries[j];
+            $panel.append(h.gridRow([
+                [8, e.displayName],
+                [4, String(e.amount)]
             ]));
         }
     }
