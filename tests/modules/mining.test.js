@@ -289,3 +289,149 @@ t.test('tryPause skips when cfg.pause is undefined', function () {
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
+
+// --- tryBuff ------------------------------------------------------------
+
+function withBuffFixture(opts) {
+    var H = harness.boot();
+    opts = opts || {};
+    var depositName = opts.depositName || 'IronOre';
+    var bldName = opts.bldName || 'IronMine';
+    var bld = H.zone.building({
+        name:           bldName,
+        grid:           typeof opts.grid === 'number' ? opts.grid : 12,
+        productionBuff: opts.productionBuff || null,
+        upgrading:      !!opts.upgrading,
+        constructing:   !!opts.constructing,
+        destructing:    !!opts.destructing
+    });
+    var buffs = [];
+    var specs = opts.buffs || [];
+    for (var i = 0; i < specs.length; i++) buffs.push(H.zone.buff(specs[i]));
+    var z = H.zone.zone()
+        .building(bld)
+        .buffs(buffs)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled(depositName, false);
+    settings.actionDelay = 0;
+    if (typeof opts.buff === 'string') {
+        settings.deposits[depositName].buff = opts.buff;
+    } else {
+        delete settings.deposits[depositName].buff;
+    }
+    H.settings.write('mining', settings);
+    return H;
+}
+
+t.test('tryBuff skips when cfg.buff is empty string', function () {
+    var H = withBuffFixture({
+        buff: '',
+        buffs: [{ name: 'IronMineBuff', amount: 1, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff skips when cfg.buff is undefined', function () {
+    var H = withBuffFixture({
+        buffs: [{ name: 'IronMineBuff', amount: 1, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff skips when no matching building of the type exists', function () {
+    // Building is GoldMine but settings target IronOre — no IronMine on map.
+    var H = withBuffFixture({
+        bldName: 'GoldMine',
+        buff:    'IronMineBuff',
+        buffs:   [{ name: 'IronMineBuff', amount: 1, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff queues mining.applyBuff for an eligible mine', function () {
+    var H = withBuffFixture({
+        buff:  'IronMineBuff',
+        buffs: [{ name: 'IronMineBuff', amount: 3, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.applyBuff');
+    t.assert.strictEqual(q[0].params[0], 12);             // grid
+    t.assert.strictEqual(q[0].params[1], 'IronMine');     // building name
+    t.assert.strictEqual(q[0].params[2], 'IronMineBuff'); // buff name
+});
+
+t.test('tryBuff skips when building already has productionBuff', function () {
+    var H = withBuffFixture({
+        buff:           'IronMineBuff',
+        productionBuff: { sentinel: true },
+        buffs:          [{ name: 'IronMineBuff', amount: 1, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff skips when building is upgrading', function () {
+    var H = withBuffFixture({
+        buff:      'IronMineBuff',
+        upgrading: true,
+        buffs:     [{ name: 'IronMineBuff', amount: 1, targets: 'IronMine' }]
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff skips when buff inventory is empty', function () {
+    var H = withBuffFixture({
+        buff:  'IronMineBuff',
+        buffs: []
+    });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryBuff applies to mason buildings via masonName for non-mine deposit types', function () {
+    var H = harness.boot();
+    var bld = H.zone.building({ name: 'Mason', grid: 30 });
+    var z = H.zone.zone()
+        .building(bld)
+        .buffs([H.zone.buff({ name: 'StoneMasonBuff', amount: 1, targets: 'Mason' })])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('Stone', false);
+    settings.actionDelay        = 0;
+    settings.deposits.Stone.buff = 'StoneMasonBuff';
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.applyBuff');
+    t.assert.strictEqual(q[0].params[1], 'Mason');
+    t.assert.strictEqual(q[0].params[2], 'StoneMasonBuff');
+});
+
+t.test('tryBuff queues for every eligible building of the type', function () {
+    var H = harness.boot();
+    var b1 = H.zone.building({ name: 'IronMine', grid: 12 });
+    var b2 = H.zone.building({ name: 'IronMine', grid: 13 });
+    var z = H.zone.zone()
+        .building(b1)
+        .building(b2)
+        .buffs([H.zone.buff({ name: 'IronMineBuff', amount: 5, targets: 'IronMine' })])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay          = 0;
+    settings.deposits.IronOre.buff = 'IronMineBuff';
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 2);
+});

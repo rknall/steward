@@ -227,7 +227,43 @@
                 delay);
         }
     }
-    function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
+    function tryBuff(info, cfg, ctx) {
+        // Apply the user-selected buff (cfg.buff) to every eligible
+        // building of this deposit type. Mine-bearing types target the
+        // mine; mason-only types target the mason building. Eligibility
+        // (no active buff, not mid-construction/upgrade/destruction, buff
+        // in inventory, target match) is delegated to S.core.buffs.canApply.
+        if (!cfg.buff || typeof cfg.buff !== 'string') return;
+
+        var targetName = info.mineName || info.masonName;
+        if (!targetName) return;
+
+        var blds;
+        try { blds = S.core.buildings.byName(targetName); }
+        catch (e) {
+            S.kernel.warn('mining', 'byName threw for', targetName, ':', e);
+            return;
+        }
+        if (!blds || !blds.length) return;
+
+        for (var i = 0; i < blds.length; i++) {
+            var bld = blds[i];
+            if (!bld) continue;
+            var grid = S.core.buildings.grid(bld);
+            if (!grid) continue;
+            if (ctx.assigned[grid]) continue;
+
+            if (!S.core.buffs.canApply(bld, cfg.buff)) continue;
+
+            ctx.assigned[grid] = true;
+            ctx.queued++;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            S.kernel.queue.add('mining.applyBuff',
+                [grid, targetName, cfg.buff],
+                delay);
+        }
+    }
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
 
     function phase(name, info, cfg, ctx) {
@@ -368,6 +404,41 @@
                 // No buildings.invalidate(): pause/resume doesn't change snapshot composition.
             } catch (e) {
                 S.kernel.error('mining', 'SendServerAction(107) threw for', mineName, ':', e);
+            }
+        });
+
+        S.kernel.queue.action('mining.applyBuff', function (params) {
+            var grid     = params[0];
+            var bldName  = params[1];
+            var buffName = params[2];
+
+            // Re-check: state may have drifted since plan() queued.
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld || S.core.buildings.name(bld) !== bldName) {
+                S.kernel.log('mining', 'grid', grid, 'no longer hosts', bldName,
+                             '— skipping buff');
+                return;
+            }
+            if (!S.core.buffs.canApply(bld, buffName)) {
+                S.kernel.log('mining', buffName, 'no longer applicable to',
+                             bldName, 'on grid', grid, '— skipping buff');
+                return;
+            }
+            var b = S.core.buffs.byName(buffName);
+            var uid = S.core.buffs.uniqueId(b);
+            if (!uid) {
+                S.kernel.warn('mining', buffName, 'has no uniqueId — skipping');
+                return;
+            }
+            try {
+                // Action 61: SendServerAction(61, 0, grid, 0, uniqueId, null).
+                // Source: autoTSO/user_auto.js:4661.
+                game.gi.SendServerAction(61, 0, grid, 0, uid, null);
+                S.kernel.log('mining', 'buffed', bldName, 'on grid', grid,
+                             'with', buffName);
+                S.core.buffs.invalidate();          // we just consumed one buff
+            } catch (e) {
+                S.kernel.error('mining', 'SendServerAction(61) threw for', buffName, ':', e);
             }
         });
     }
