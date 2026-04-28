@@ -96,6 +96,39 @@
         } catch (e) { return []; }
     }
 
+    // ----- localization helpers ------------------------------------------
+
+    // displayName(b) — localized resource name from loca.GetText('RES', name).
+    // Falls back to the internal GetType() name if loca is unavailable or
+    // returns falsy (older host build, missing translation key, etc.).
+    function displayName(b) {
+        var internal = name(b);
+        if (!internal) return '';
+        try {
+            if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
+                var t = loca.GetText('RES', internal);
+                if (t) return t;
+            }
+        } catch (e) { /* fall through */ }
+        return internal;
+    }
+
+    // description(b) — localized description, truncated at the host's
+    // 'Target' suffix (mirrors autoTSO/user_auto.js:4583). The DES text
+    // continues past 'Target' with internal detail that's not useful in a
+    // user-facing picker. Returns '' if no description is available.
+    function description(b) {
+        var internal = name(b);
+        if (!internal) return '';
+        try {
+            if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
+                var raw = loca.GetText('DES', internal);
+                if (raw) return String(raw).split('Target')[0];
+            }
+        } catch (e) { /* fall through */ }
+        return '';
+    }
+
     // ----- targeting helpers ---------------------------------------------
 
     function isWorkyardBuilding(b) {
@@ -225,6 +258,8 @@
 
         // accessors
         name:        name,
+        displayName: displayName,
+        description: description,
         amount:      amount,
         uniqueId:    uniqueId,
         targets:     targets,

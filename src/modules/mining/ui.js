@@ -213,13 +213,31 @@
         try { inv = S.core.buffs.forBuilding(target, { isWorkyard: true }) || []; }
         catch (e) { inv = []; }
 
-        var options = [{ value: '', label: 'None' }];
+        // Build sortable entries: localized display name + amount + truncated
+        // description, mirroring autoTSO's picker format (user_auto.js:4585).
+        var entries = [];
         for (var i = 0; i < inv.length; i++) {
             var b = inv[i];
-            var nm = S.core.buffs.name(b);
-            var amt = S.core.buffs.amount(b);
-            if (!nm) continue;
-            options.push({ value: nm, label: nm + ' (' + amt + ')' });
+            var internal = S.core.buffs.name(b);
+            if (!internal) continue;
+            var label = S.core.buffs.displayName(b);
+            var amt   = S.core.buffs.amount(b);
+            var desc  = S.core.buffs.description(b);
+            var line  = label + ' (' + amt + ')';
+            if (desc) line += ': ' + desc;
+            entries.push({ value: internal, sortKey: label, label: line });
+        }
+        entries.sort(function (a, b) {
+            var ak = (a.sortKey || '').toLowerCase();
+            var bk = (b.sortKey || '').toLowerCase();
+            if (ak < bk) return -1;
+            if (ak > bk) return 1;
+            return 0;
+        });
+
+        var options = [{ value: '', label: 'None' }];
+        for (var j = 0; j < entries.length; j++) {
+            options.push({ value: entries[j].value, label: entries[j].label });
         }
         return h.dropdown(options, {
             selected: typeof cfg.buff === 'string' ? cfg.buff : '',
