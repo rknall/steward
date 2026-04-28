@@ -84,26 +84,28 @@ spec.skills.getItems_vector()
 | 83 | Sooty | 320 | `sooty` | 3 effects on Coal: `searchTime mul=0.75` + `searchDepositCapacity mul=3` + `modifierEffect chance=0.75` | **Coal specialist (best observed)** — 25% faster, 3× capacity, 75% chance of modifier |
 | 86 | _balanced_ | 325 | `balanced` | 18 effects on every deposit except Salpeter: `searchTime mul=0.5` + `modifierEffect chance=1` | **Universal speed + guaranteed modifier** — no capacity boost, but every search is fast and rolls a modifier |
 
-### Newly catalogued from external dump (2026-04-28) — GUESSES
+### Newly catalogued from external dump (2026-04-28)
 
 Sourced from `docs/analysis/user_provided/angrywolf_specialists-20260428-122935.json`.
-The bias column is a **GUESS** based on raw effect content matched against
-the verified rows above — please re-confirm against in-game behaviour
-before relying on the recommendation. Mark a row "verified" when
-test-dispatched and observed.
+Display names cross-referenced with
+[settlersonlinewiki.eu](https://settlersonlinewiki.eu/en/guides/geologist/),
+[tsomaps](https://en.tsomaps.com/handbook/geologs/), and
+[settlersportal](https://settlersportal.com/specialists/geologists).
+The "Verified?" column indicates how the row was confirmed:
 
-| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias (GUESS) | Verified? |
+- `wiki` — display name + bias inferred from public wikis; mechanically
+  consistent with raw effect data but not yet test-dispatched in our
+  automation.
+- `yes` — observed end-to-end in our own dispatch + log capture.
+- `no` — neither verified.
+
+| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias | Verified? |
 |---|---|---|---|---|---|---|
-| 5 | _unknown_ (vanilla, +200%) | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 200` | follow user default — vanilla tier-2 | no |
-| 26 | _unknown_ (Conscientious?) | 57 | `conscientious` | 9 effects on every deposit: `findDeposit add=1, chance=1` (no searchTime/capacity multipliers) | **Universal +1 deposit per search** — guarantees one extra deposit found on every dispatch, on every deposit type. Note: the `findDeposit` modifier is NOT yet handled by `geologistScoreFor`, so this trait scores as vanilla until the scorer is extended | no |
-| 34 | _unknown_ (Iron Willed II) | 115 | `iron_willed2` | 2 effects on IronOre: `searchTime mul=0.5` + `searchDepositCapacity mul=2` | **Iron specialist** — same shape as `stone_cold` but Iron-only. Use for IronOre dispatches | no |
-| 49 | _unknown_ (Thorough?) | 178 | `thorough` | 18 effects on every deposit: `searchTime mul=3` (penalty) + `searchDepositCapacity mul=3` | **Universal capacity tripler (slow)** — 3× capacity at 3× time cost. In current scoring, capacity wins over time, so this geo would rank above vanilla on every deposit | no |
-| 95 | _unknown_ (Stargazing Geology) | 336 | `Stargazinggeology` | 23 effects on every deposit: `searchTime mul=2` + `searchDepositCapacity mul=2`; modifierEffect chances Coal/Gold=0.25, Granite/Titanium/Salpeter=0.5 | **Slow universal capacity + tiered modifier** — like `GingerbreadGeology` but cap×2 instead of cap×1.5 and slightly different chance distribution; better on premium deposits than tier-1 | no |
-
-Display names are placeholders for the new entries — the dump's `name`
-field was empty for all of them. Re-dump in-game with `getName()`
-populated to fill them in, or look up the host's loca catalog by trait
-id.
+| 5 | Jolly Geologist | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 200` | wiki: "finds new deposits in half the speed of the normal Geologist". Pure-speed vanilla tier-2 (300 Gems). Internal class name on tsomaps is `MasterGeologist` — the host's class label diverges from the in-game display name | wiki |
+| 26 | Conscientious Geologist | 57 | `conscientious` | 9 effects on every deposit: `findDeposit add=1, chance=1` (no searchTime/capacity multipliers) | wiki: "finds an additional deposit on every search". Guarantees one extra deposit found on every dispatch, on every deposit type. **Note:** the `findDeposit` modifier is NOT yet handled by `geologistScoreFor`, so this trait scores as vanilla until the scorer is extended | wiki |
+| 34 | Iron-Willed Geologist | 115 | `iron_willed2` | 2 effects on IronOre: `searchTime mul=0.5` + `searchDepositCapacity mul=2` | wiki: "Iron Ore deposits twice the size in half the time" (+100% task speed, +100% deposit size on Iron only). Easter Event item. Same shape as `stone_cold` but Iron-only — use for IronOre dispatches | wiki |
+| 49 | Thorough Geologist | 178 | `thorough` | 18 effects on every deposit: `searchTime mul=3` (penalty) + `searchDepositCapacity mul=3` | wiki: "takes three times as long on deposit searches but finds three times bigger deposits". Universal capacity tripler at 3× time cost. In current scoring, capacity wins over time, so this geo ranks above vanilla on every deposit | wiki |
+| 95 | Stargazing Geologist | 336 | `Stargazinggeology` | 23 effects on every deposit: `searchTime mul=2` + `searchDepositCapacity mul=2`; modifierEffect chances Coal/Gold=0.25, Granite/Titanium/Salpeter=0.5 | wiki: "−50% task speed, +100% deposit size, chance to find Star Shards on successful searches for Coal, Gold Ore, Granite, Titanium Ore and Saltpeter". Christmas Event 2025. Like `GingerbreadGeology` but cap×2 instead of cap×1.5; better on premium deposits than tier-1 | wiki |
 
 ## Effect modifier vocabulary (observed)
 
@@ -160,7 +162,7 @@ The rough per-deposit "best trait" map (from current data):
 | Stone | `stone_cold` (cap×2, time×0.5) | tied with `versed` (cap×1.5, time×0.5 + extra finds) |
 | BronzeOre | `versed` | only universal cap-boosting trait that touches Bronze |
 | Marble | `stone_cold` | matches Stone |
-| IronOre | `iron_willed2` (GUESS) → `versed` | iron_willed2 unverified; versed is the safe choice |
+| IronOre | `iron_willed2` (Iron-Willed Geologist, wiki-verified) | cap×2 + time×0.5 on Iron; `versed` is the safe fallback when no Iron-Willed available |
 | GoldOre | `gold_hearted` (cap×2, time×0.5, modifier guaranteed) | best single-deposit trait observed |
 | Coal | `sooty` (cap×3, time×0.75, modifier 75%) | strongest observed trait by raw factor |
 | Granite | `stone_cold` | tied with `versed` |

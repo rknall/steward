@@ -81,24 +81,26 @@ spec.skills.getItems_vector()
 ### Newly catalogued from external dump (2026-04-28)
 
 Sourced from `docs/analysis/user_provided/angrywolf_specialists-20260428-122935.json`.
-The bias column for these rows is a **GUESS** based on raw effect content
-and existing pattern matching — please re-confirm against in-game
-behaviour before relying on the recommendation. Mark a row "verified"
-when you've test-dispatched and observed the result.
+Display names cross-referenced with [settlersonlinewiki.eu](https://settlersonlinewiki.eu/en/guides/explorer/),
+[tsomaps](https://en.tsomaps.com/handbook/explorers/), and
+[settlersportal](https://settlersportal.com/specialists/explorers).
+The "Verified?" column indicates how the row was confirmed:
 
-| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias (GUESS) | Verified? |
+- `wiki` — display name + bias inferred from public wikis; mechanically
+  consistent with raw effect data but not yet test-dispatched in our
+  automation.
+- `yes` — observed end-to-end in our own dispatch + log capture.
+- `no` — neither verified.
+
+| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias | Verified? |
 |---|---|---|---|---|---|---|
-| 4 | _unknown_ (vanilla, +200%) | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 200` | follow user default — vanilla tier-2 | no |
-| 17 | _unknown_ (Fast Lucky?) | 106 | `Trait_FastLuckyExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `ExplorerBuffs` (matched by `name_string`; `type_string` empty). `description.GetTimeBonus = 300` | **Buff finder** — drops onto a private `ExplorerBuffs` loot table on every dispatch. Bias is "always-on buff producer" rather than a treasure/adventure family lean. Recommendation should fall back to user default for the family choice and treat the buff as a passive bonus | no |
-| 28 | _unknown_ (Intrepid) | 107 | `Trait_IntrepidExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `IntrepidLoot` (matched by `name_string`). `description.GetTimeBonus = 200` | **Adventure** — identical mechanic to Keener Explorer (GetType=55). `IntrepidLoot` is a named loot table grouped with the four `FindAdventureZone*` variants by `wildDetermination`'s effect list, so the algorithm should bin this trait as `adventure=1.0` | no |
-| 58 | _unknown_ (Bold) | 274 | `Trait_BoldExplorer` | 9 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Bold_Buffs` AND `FindAdventure_Zoe_Buffs` (Zoe-style), plus **`mul=1.5 ChangeLootCount` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 250` | **Treasure (moderate)** — count multiplier across all sizes is a uniform +50%. The Zoe-style private adventure-buff drop is a side bonus. Year-round score should be ~2 for treasure, smaller adventure-buff signal | no |
-| 61 | _unknown_ (Scared) | 277 | `Trait_ScaredExplorer` | 6 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Scared_Buffs`, plus **`mul=4 ChangeLootCount` on every `FindTreasure*` size** (with all event suffixes; no Erudite/BeanACollada). `description.GetTimeBonus = 25` (!) — only 25% time bonus, suggesting a slow-but-rewarding tier | **Treasure (very strong)** — 4× count is the strongest count multiplier observed. Low time bonus partially offsets, but recommendation is still treasure with a clear preference for any size. The unusual 25% time bonus is unique among observed traits and should be flagged for confirmation | no |
-| 68 | _unknown_ (Motherly) | 286 | `Trait_MotherlyExplorer` | 7 effects, **`mul=4 ChangeLoottableRolls` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 100` | **Treasure (very strong)** — same shape as Emphatic (GetType=48) but `mul=4` instead of `mul=3`. Year-round score ≈ 21 (7 × ((4-1) chance=1)). Strong recommendation regardless of events | no |
-| 69 | _unknown_ (Benevolent) | 287 | `Trait_BenevolentExplorer` | 2 effects: `+1 ChangeLoottableRolls` on `FindTreasureEvenLonger` private `FindTreasure_Benevolent_Buffs1`, and on `FindTreasureProlonged` private `FindTreasure_Benevolent_Buffs2`. `description.GetTimeBonus = 200` | **Long-form buff finder** — like Princess Zoe restricted to the two longest treasure variants. Bias is "extra buff loot rolls on EvenLonger / Prolonged"; family-wise lean is treasure (slight) | no |
-
-Display names are placeholders — the dump's `name` field was empty for
-all of these. Re-dump in-game with `getName()` populated to fill them in,
-or look up the host's loca catalog by trait id.
+| 4 | **Savage Scout** _or_ **Fast Explorer** _(awaiting roster owner)_ | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 200` | follow user default — pure-speed vanilla tier-2. Both candidate names are +100% speed vanillas with no other trait, so the data alone cannot distinguish them. Question sent to angrywolf for confirmation | no — ambiguous |
+| 17 | Lucky Explorer | 106 | `Trait_FastLuckyExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `ExplorerBuffs` (matched by `name_string`; `type_string` empty). `description.GetTimeBonus = 300` | **Buff finder** — wiki: "+200% task speed and a chance to find a buff on treasure, artefact, rarity and adventure searches". Always-on buff producer rather than a treasure/adventure family lean — the `ExplorerBuffs` private table fires regardless of dispatch family. Recommendation should fall back to user default for family choice and treat the buff as a passive bonus | wiki |
+| 28 | Intrepid Explorer | 107 | `Trait_IntrepidExplorer` | 1 effect, `ChangeLoottableRolls add=1` on `IntrepidLoot` (matched by `name_string`). `description.GetTimeBonus = 200` | **Adventure** — wiki: "+100% task speed and 2× rewards on adventure searches". `IntrepidLoot` is a named loot table grouped with the four `FindAdventureZone*` variants by `wildDetermination`'s effect list (same mechanic as Keener Explorer GetType=55). Algorithm should bin this trait as `adventure=1.0` | wiki |
+| 58 | Bold Explorer | 274 | `Trait_BoldExplorer` | 9 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Bold_Buffs` AND `FindAdventure_Zoe_Buffs` (Zoe-style), plus **`mul=1.5 ChangeLootCount` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 250` | **Treasure (moderate)** — wiki: "+150% task speed, +50% rewards on treasure searches, guaranteed buff on treasure and adventure searches". Anniversary Event 2020. The Zoe-style private adventure-buff drop is a side bonus | wiki |
+| 61 | Scared Explorer | 277 | `Trait_ScaredExplorer` | 6 effects: `+1 ChangeLoottableRolls` on private `FindTreasure_Scared_Buffs`, plus **`mul=4 ChangeLootCount` on every `FindTreasure*` size** (with all event suffixes; no Erudite/BeanACollada). `description.GetTimeBonus = 25` | **Treasure (very strong, slow)** — wiki: "-75% task speed, 4× rewards on treasure searches, small chance to find crystals/premium days/books". Halloween Event 2020. The unusual 25% TimeBonus is the speed penalty rendered as a positive number, not a 75% boost. Recommendation is treasure with the caveat that searches take 4× longer | wiki |
+| 68 | Motherly Explorer | 286 | `Trait_MotherlyExplorer` | 7 effects, **`mul=4 ChangeLoottableRolls` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 100` | **Treasure (very strong)** — wiki: "loves to bring back lots of loot". Same shape as Emphatic (GetType=48) but `mul=4` instead of `mul=3`. Year-round score ≈ 21 (7 × ((4-1) chance=1)). Strong recommendation regardless of events | wiki |
+| 69 | Benevolent Explorer | 287 | `Trait_BenevolentExplorer` | 2 effects: `+1 ChangeLoottableRolls` on `FindTreasureEvenLonger` private `FindTreasure_Benevolent_Buffs1`, and on `FindTreasureProlonged` private `FindTreasure_Benevolent_Buffs2`. `description.GetTimeBonus = 200` | **Long-form buff finder** — wiki: "+100% speed, always finds an extra buff (sometimes a Medipack) on EvenLonger and Prolonged treasure searches". Football Event 2021. Bias is "extra buff loot rolls on the two longest variants"; family-wise lean is treasure (slight) | wiki |
 
 Note: the host's own modifier name is **`ChangeLoottableRolls`** (not
 `changeloottablerolls`); autoTSO at `user_auto.js:4456` lower-cases before
