@@ -43,7 +43,8 @@ function building(opts) {
         GetArmy:                function () {
             return opts.hasArmy ? { HasUnits: function () { return true; } } : null;
         },
-        IsUpgradeAllowed:       function () { return !!opts.upgradable; }
+        IsUpgradeAllowed:       function () { return !!opts.upgradable; },
+        IsProductionActive:     function () { return opts.producing !== false; }
     };
 }
 

@@ -192,3 +192,81 @@ t.test('tryUpgrade skips when build queue has no remaining slots', function () {
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
+
+// --- tryPause -----------------------------------------------------------
+
+function withMineForPause(mineOpts, pauseFlag) {
+    var H = harness.boot();
+    var mine = H.zone.building({
+        name:      mineOpts.name      || 'IronMine',
+        grid:      typeof mineOpts.grid === 'number' ? mineOpts.grid : 12,
+        producing: typeof mineOpts.producing === 'undefined' ? true : !!mineOpts.producing
+    });
+    var z = H.zone.zone()
+        .building(mine)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay              = 0;
+    settings.deposits.IronOre.pause   = pauseFlag;
+    H.settings.write('mining', settings);
+    return H;
+}
+
+t.test('tryPause queues mining.setProduction(0) when cfg.pause=true and mine is producing', function () {
+    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: true }, true);
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.setProduction');
+    t.assert.strictEqual(q[0].params[0], 12);             // grid
+    t.assert.strictEqual(q[0].params[1], 'IronMine');     // mineName
+    t.assert.strictEqual(q[0].params[2], false);          // active = false (paused)
+});
+
+t.test('tryPause queues mining.setProduction(1) when cfg.pause=false and mine is paused', function () {
+    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: false }, false);
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.setProduction');
+    t.assert.strictEqual(q[0].params[2], true);           // active = true (resume)
+});
+
+t.test('tryPause skips when mine is already in desired state', function () {
+    // pause=true, mine already not producing → nothing to do.
+    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: false }, true);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryPause skips when no mines of this type exist', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay              = 0;
+    settings.deposits.IronOre.pause   = true;
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryPause skips when cfg.pause is undefined', function () {
+    var H = harness.boot();
+    var mine = H.zone.building({ name: 'IronMine', grid: 12, producing: true });
+    var z = H.zone.zone()
+        .building(mine)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay              = 0;
+    delete settings.deposits.IronOre.pause;
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
