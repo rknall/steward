@@ -155,6 +155,53 @@
         notify('Zone dumped to log.');
     }
 
+    // Dumps every resource in the player's inventory with internal name +
+    // localized label + amount, sorted by display name. Useful for
+    // identifying the right `name_string` keys when curating the
+    // collect.inventory.items list.
+    function dumpResources() {
+        try {
+            if (!S.core.resources) {
+                S.kernel.warn('diag:resources', 'core.resources unavailable');
+                return notify('core.resources unavailable.');
+            }
+            S.core.resources.invalidate();
+            var src = S.core.resources.list();
+            S.kernel.log('diag:resources', '--- inventory dump ---',
+                         'count:', src.length);
+            var rows = [];
+            for (var i = 0; i < src.length; i++) {
+                var r = src[i];
+                var internal = S.core.resources.name(r);
+                if (!internal) continue;
+                rows.push({
+                    internal: internal,
+                    display:  S.core.resources.displayName(internal),
+                    amount:   S.core.resources.amount(r)
+                });
+            }
+            rows.sort(function (a, b) {
+                var ak = (a.display || '').toLowerCase();
+                var bk = (b.display || '').toLowerCase();
+                if (ak < bk) return -1;
+                if (ak > bk) return 1;
+                return 0;
+            });
+            for (var j = 0; j < rows.length; j++) {
+                var row = rows[j];
+                var translated = (row.display !== row.internal);
+                S.kernel.log('diag:resources',
+                    '  ' + row.internal +
+                    (translated ? '  =  ' + row.display : '  (no translation)') +
+                    '  x' + row.amount);
+            }
+            S.kernel.log('diag:resources', '--- end ---');
+            notify('Resources dumped to log (' + rows.length + ' entries).');
+        } catch (e) {
+            S.kernel.error('diag:resources', 'dumpResources threw:', e);
+        }
+    }
+
     // ---------------------------------------------------------------
     // Deep explorer dump — capped at MAX_TYPES_PER_DUMP unique GetTypes
     // per run. Surfaces every callable on the SpecialistDescription, plus
@@ -494,6 +541,8 @@
             h.button('Run', { onClick: deepInspectGeologistTypes })));
         $rows.append(h.formRow('Inspect current zone',
             h.button('Run', { onClick: inspectCurrentZone })));
+        $rows.append(h.formRow('Dump player resource inventory',
+            h.button('Run', { onClick: dumpResources })));
         $rows.append(h.formRow('Dump host snapshot',
             h.button('Run', { onClick: dumpHostSnapshot })));
         $rows.append(h.formRow('Dump kernel state',
@@ -506,6 +555,7 @@
     S.modules.diagnostics.inspectCurrentZone        = inspectCurrentZone;
     S.modules.diagnostics.dumpHostSnapshot          = dumpHostSnapshot;
     S.modules.diagnostics.dumpKernelState           = dumpKernelState;
+    S.modules.diagnostics.dumpResources             = dumpResources;
     S.modules.diagnostics.deepInspectExplorerTypes  = deepInspectExplorerTypes;
     S.modules.diagnostics.deepInspectGeologistTypes = deepInspectGeologistTypes;
 

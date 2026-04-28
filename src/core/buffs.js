@@ -100,9 +100,15 @@
 
     // Detects the host's "missing translation" sentinel — strings like
     // "[undefined text]" or "[missing-key]" the host returns instead of
-    // null/undefined. We treat any bracketed placeholder as a miss.
+    // null/undefined. Trim surrounding whitespace and check first/last
+    // chars rather than a strict regex — the host has been observed to
+    // return the sentinel with trailing whitespace, which `^...$` misses.
     function isPlaceholder(s) {
-        return typeof s === 'string' && /^\[.*\]$/.test(s);
+        if (typeof s !== 'string') return false;
+        var trimmed = s.replace(/^\s+|\s+$/g, '');
+        if (trimmed.length < 2) return false;
+        return trimmed.charAt(0) === '[' &&
+               trimmed.charAt(trimmed.length - 1) === ']';
     }
 
     // displayName(b) — localized resource name from loca.GetText('RES', name).

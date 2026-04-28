@@ -35,25 +35,32 @@
         namePatterns: ['Collectible'],
 
         // Inventory items to surface on the Collections & Buildings tab.
-        // These are item-resources (Leather, Banner, Cauldron, …) that
-        // live in the player's resource inventory but are normally hidden
-        // — only visible in the storehouse's event tab during events or
-        // when crafting at the mayor's house. Use the internal name (the
-        // host's name_string) as it appears in `loca.GetText('RES', x)`.
-        // Add seasonal items (e.g. EasterEgg) here when an event is live
-        // — names that aren't in the host's resource map render as 0.
+        // These are item-resources that live in the player's resource
+        // inventory but are normally hidden — only visible in the
+        // storehouse's event tab during events or when crafting at the
+        // mayor's house. Use the host's internal `name_string` (NOT the
+        // localized label).
+        //
+        // The internal names follow TSO's `Collectible*` convention for
+        // drop-style items. Find more via the Diagnostics tab's "Log all
+        // resources" probe — it dumps every resource with internal name,
+        // localized label, and current amount.
+        //
+        // Add seasonal items (e.g. CollectibleChristmasCandy,
+        // CollectiblePlainEgg) here when the event is live; names not in
+        // the host's resource map simply render as 0.
         inventory: {
             items: [
-                'Leather',
-                'Scarecrow',
-                'Barrel',
-                'Herbs',
-                'AdmantiumCore',
-                'FoodCard',
-                'Banner',
-                'GrainSacks',
-                'BronzeCauldron',
-                'Kettle'
+                'CollectibleFurs',           // Leather
+                'CollectibleScarecrow',      // Scarecrow
+                'CollectibleWineBarrel',     // Barrel
+                'CollectibleHerbs',          // Herbs
+                'CollectibleAdamantium',     // Adamantium Ore
+                'CollectibleFoodCart',       // Food Cart
+                'CollectibleBanner',         // Banner
+                'CollectibleGrainSacks',     // Grain Sacks
+                'CollectibleBronzeCauldron', // Bronze Cauldron
+                'CollectibleKettle'          // Kettle
             ]
         }
     };

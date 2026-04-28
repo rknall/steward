@@ -77,10 +77,16 @@
 
     // Detects the host's "missing translation" sentinel. TSO's loca
     // returns strings like "[undefined text]" or "[missing-key]" rather
-    // than null/undefined when a key isn't found. Treat any bracketed
-    // placeholder as a miss so the caller falls back to the internal key.
+    // than null/undefined when a key isn't found. Trim surrounding
+    // whitespace and check the first/last chars rather than a strict
+    // regex — the host has been observed to return the sentinel with
+    // trailing whitespace which `^...$` would miss.
     function isPlaceholder(s) {
-        return typeof s === 'string' && /^\[.*\]$/.test(s);
+        if (typeof s !== 'string') return false;
+        var trimmed = s.replace(/^\s+|\s+$/g, '');
+        if (trimmed.length < 2) return false;
+        return trimmed.charAt(0) === '[' &&
+               trimmed.charAt(trimmed.length - 1) === ']';
     }
 
     // displayName(name) — loca.GetText('RES', name). Falls back to the

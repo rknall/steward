@@ -136,22 +136,6 @@
             { headerCells: true }
         ));
 
-        // One-shot helper to find the right internal names for items the
-        // user wants to add. Logs every resource the host returns, with
-        // the localized display name (or '(no translation)') plus amount.
-        $panel.append(h.formRow(
-            'Find item names',
-            h.button('Log all resources', {
-                size:    'sm',
-                onClick: function () {
-                    if (S.modules.collect.discoverResources) {
-                        S.modules.collect.discoverResources();
-                    }
-                }
-            }),
-            'logs every resource in inventory — paste matching internal names into settings.json'
-        ));
-
         for (var j = 0; j < entries.length; j++) {
             var e = entries[j];
             // Show the internal key alongside the display name so the user
@@ -167,62 +151,9 @@
         }
     }
 
-    // Dump every resource the host knows about. Output goes to
-    // category 'collect:resources' in the standard logger so it lands in
-    // <appStorage>/steward/logs/console.log.
-    function discoverResources() {
-        try {
-            if (!S.core.resources) {
-                S.kernel.warn('collect:resources', 'core.resources unavailable');
-                return;
-            }
-            S.core.resources.invalidate();
-            var src = S.core.resources.list();
-            S.kernel.log('collect:resources', '--- inventory dump ---',
-                         'count:', src.length);
-            // Sort by display name for readability; fall back to internal.
-            var rows = [];
-            for (var i = 0; i < src.length; i++) {
-                var r = src[i];
-                var internal = S.core.resources.name(r);
-                if (!internal) continue;
-                rows.push({
-                    internal: internal,
-                    display:  S.core.resources.displayName(internal),
-                    amount:   S.core.resources.amount(r)
-                });
-            }
-            rows.sort(function (a, b) {
-                var ak = (a.display || '').toLowerCase();
-                var bk = (b.display || '').toLowerCase();
-                if (ak < bk) return -1;
-                if (ak > bk) return 1;
-                return 0;
-            });
-            for (var j = 0; j < rows.length; j++) {
-                var row = rows[j];
-                var translated = (row.display !== row.internal);
-                S.kernel.log('collect:resources',
-                    '  ' + row.internal +
-                    (translated ? '  =  ' + row.display : '  (no translation)') +
-                    '  x' + row.amount);
-            }
-            S.kernel.log('collect:resources', '--- end ---');
-            try {
-                if (typeof showGameAlert === 'function') {
-                    showGameAlert('Steward: dumped ' + rows.length +
-                                  ' resources to console.');
-                }
-            } catch (e) { /* alert is best-effort */ }
-        } catch (e) {
-            S.kernel.error('collect:resources', 'discoverResources threw:', e);
-        }
-    }
-
-    S.modules.collect.readSettings      = readSettings;
-    S.modules.collect.discover          = discover;
-    S.modules.collect.discoverResources = discoverResources;
-    S.modules.collect.renderSection     = renderSection;
-    S.modules.collect.summary           = summary;
+    S.modules.collect.readSettings  = readSettings;
+    S.modules.collect.discover      = discover;
+    S.modules.collect.renderSection = renderSection;
+    S.modules.collect.summary       = summary;
 
 }(Steward));
