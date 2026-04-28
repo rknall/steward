@@ -44,7 +44,32 @@ function building(opts) {
             return opts.hasArmy ? { HasUnits: function () { return true; } } : null;
         },
         IsUpgradeAllowed:       function () { return !!opts.upgradable; },
-        IsProductionActive:     function () { return opts.producing !== false; }
+        IsProductionActive:     function () { return opts.producing !== false; },
+        // Buff-related state — see core/buffs.canApply gates.
+        productionBuff:         (typeof opts.productionBuff !== 'undefined') ? opts.productionBuff : null,
+        IsUpgradeInProgress:    function () { return !!opts.upgrading; },
+        IsInConstructionMode:   function () { return !!opts.constructing; },
+        IsInDestruction:        function () { return !!opts.destructing; }
+    };
+}
+
+// Factory for a host-shaped buff entry. Used by tests that exercise
+// core/buffs and tryBuff. Mirrors the fields read by autoTSO/aBuffs.
+function buff(opts) {
+    opts = opts || {};
+    var def = {
+        GetBuffType:                function () { return typeof opts.buffType === 'number' ? opts.buffType : 0; },
+        GetTargetDescription_string: function () { return opts.targets || ''; },
+        GetTargetGroup_string:       function () { return opts.targetGroup || ''; },
+        GetName_string:              function () { return opts.name || ''; },
+        GetBuffEfficiencies_vector:  function () { return opts.efficiencies || []; }
+    };
+    return {
+        GetType:           function () { return opts.name || 'UnnamedBuff'; },
+        GetUniqueId:       function () { return opts.uniqueId || (opts.name + '_id'); },
+        GetBuffDefinition: function () { return def; },
+        GetResourceName_string: function () { return opts.resourceName || ''; },
+        amount:            (typeof opts.amount === 'number') ? opts.amount : 1
     };
 }
 
@@ -132,8 +157,15 @@ function makeZone() {
             player.mIsAdventureZone         = false;
             player.GetMaxBuildingCount      = function () { return 100; };
             player.mCurrentBuildingsCountAll = buildings.length;
+            player.getAvailableBuffs_vector = function () { return buffsInventory; };
             return fluent;
         }
+    };
+
+    var buffsInventory = [];
+    fluent.buffs = function (list) {
+        buffsInventory = (list || []).slice();
+        return fluent;
     };
 
     return fluent;
@@ -142,5 +174,6 @@ function makeZone() {
 module.exports = {
     zone:     makeZone,
     deposit:  deposit,
-    building: building
+    building: building,
+    buff:     buff
 };
