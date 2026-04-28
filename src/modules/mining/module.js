@@ -168,22 +168,29 @@
         }
     }
     function tryPause(info, cfg, ctx) {
-        // Asymmetric reconciliation:
-        //   cfg.pause=true  ⇒ pause producing mines whose deposit has dropped
-        //                     below pauseThreshold (preserve mine longevity).
-        //   cfg.pause=false ⇒ resume any paused mine (unconditional).
-        // Pause/resume is a state toggle, not a construction — no slot gate.
-        if (typeof cfg.pause !== 'boolean') return;
+        // Pause-only. Steward only undoes what Steward did:
+        //   cfg.pause=true  ⇒ pause producing mines whose deposit has
+        //                     dropped below pauseThreshold (mine longevity).
+        //   cfg.pause=false ⇒ inert. Manual user pauses stay intact.
+        //
+        // Auto-unpause is NOT a tryPause job. It belongs to tryRefill: when
+        // a Steward-initiated refill brings a deposit's remaining back above
+        // pauseThreshold, that phase queues the unpause as a side-step. This
+        // ties auto-unpause to a causal Steward action (the refill we just
+        // sent) rather than a periodic reconciler — the user can pause/unpause
+        // by hand without Steward second-guessing them.
+        //
+        // Pause/resume is a state toggle, not construction — no slot gate.
+        if (cfg.pause !== true) return;
         if (!info.mineName) return;
 
         var settings  = readSettings();
         var threshold = (typeof settings.pauseThreshold === 'number')
             ? settings.pauseThreshold : 50;
-        var wantsActive = !cfg.pause;
 
         // Walk deposits (not buildings) so we can read GetAmount() for the
         // threshold gate. Mines on depleted shells (no on-map deposit) are
-        // intentionally skipped — we don't auto-resume a depleted shell.
+        // intentionally skipped here.
         var depos;
         try { depos = S.core.deposits.byType(info.name); }
         catch (e) {
@@ -205,21 +212,18 @@
 
             var isActive = (typeof bld.IsProductionActive === 'function')
                 ? !!bld.IsProductionActive() : true;
-            if (isActive === wantsActive) continue;        // already in desired state
+            if (!isActive) continue;                       // already paused
 
-            // Pause direction is gated on remaining amount; resume direction is not.
-            if (!wantsActive) {
-                var remaining = (typeof depo.GetAmount === 'function')
-                    ? depo.GetAmount() : 0;
-                if (remaining >= threshold) continue;       // still high-yield — leave it
-            }
+            var remaining = (typeof depo.GetAmount === 'function')
+                ? depo.GetAmount() : 0;
+            if (remaining >= threshold) continue;          // still high-yield
 
             ctx.assigned[grid] = true;
             ctx.queued++;
 
             var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
             S.kernel.queue.add('mining.setProduction',
-                [grid, info.mineName, wantsActive],
+                [grid, info.mineName, false],              // always pause direction
                 delay);
         }
     }
