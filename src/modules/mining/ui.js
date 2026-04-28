@@ -120,7 +120,8 @@
         var depCfg = (s && s.deposits) || {};
 
         $panel.append(h.gridRow(
-            [[5, 'Deposit'], [3, 'Build Mine'], [2, 'Active']],
+            [[3, 'Deposit'], [2, 'Build Mine'], [2, 'Upgrade Mine'],
+             [3, 'Target Lvl'], [2, 'Active']],
             { headerCells: true }
         ));
 
@@ -130,7 +131,7 @@
             var active = activeCount(info);
 
             (function (depositName, currentCfg, activeNum, mineable) {
-                var $buildCell;
+                var $buildCell, $upgradeCell, $targetCell;
                 if (mineable) {
                     $buildCell = h.toggle({
                         checked:  !!currentCfg.build,
@@ -138,12 +139,34 @@
                             updateDeposit(h, depositName, { build: next });
                         }
                     });
+                    $upgradeCell = h.toggle({
+                        checked:  !!currentCfg.upgrade,
+                        onChange: function (next) {
+                            updateDeposit(h, depositName, { upgrade: next });
+                        }
+                    });
+                    $targetCell = h.input({
+                        type:     'number',
+                        value:    typeof currentCfg.targetLevel === 'number' ? currentCfg.targetLevel : 3,
+                        width:    '60px',
+                        // TSO mines cap at level 5; reject out-of-range input rather than persist garbage.
+                        onChange: function (val) {
+                            var n = parseInt(val, 10);
+                            if (!isNaN(n) && n >= 1 && n <= 5) {
+                                updateDeposit(h, depositName, { targetLevel: n });
+                            }
+                        }
+                    });
                 } else {
-                    $buildCell = '—';
+                    $buildCell   = '—';
+                    $upgradeCell = '—';
+                    $targetCell  = '—';
                 }
                 $panel.append(h.gridRow(
-                    [[5, depositName],
-                     [3, $buildCell],
+                    [[3, depositName],
+                     [2, $buildCell],
+                     [2, $upgradeCell],
+                     [3, $targetCell],
                      [2, String(activeNum)]]
                 ));
             })(info.name, cfg, active, !!info.mineName);
