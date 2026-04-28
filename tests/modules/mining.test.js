@@ -118,3 +118,77 @@ t.test('tryBuild skips when build flag is false for the deposit', function () {
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
+
+// --- tryUpgrade ---------------------------------------------------------
+
+function withMineOnDeposit(depoName, gridN, mineName, level, upgradable, settingsTweaks) {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: depoName, grid: gridN });
+    var mine = H.zone.building({
+        name:       mineName,
+        grid:       gridN,
+        level:      typeof level === 'number' ? level : 0,
+        upgradable: typeof upgradable === 'undefined' ? true : !!upgradable
+    });
+    var z = H.zone.zone()
+        .deposits(depoName, [depo])
+        .building(mine)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled(depoName, false);
+    settings.deposits[depoName].upgrade     = true;
+    settings.deposits[depoName].targetLevel = 3;
+    if (settingsTweaks) {
+        for (var k in settingsTweaks) settings.deposits[depoName][k] = settingsTweaks[k];
+    }
+    H.settings.write('mining', settings);
+    return H;
+}
+
+t.test('tryUpgrade enqueues mining.upgradeMine when level below target', function () {
+    var H = withMineOnDeposit('IronOre', 12, 'IronMine', 1, true);
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.upgradeMine');
+    t.assert.strictEqual(q[0].params[0], 12);             // grid
+    t.assert.strictEqual(q[0].params[1], 'IronMine');     // mineName
+    t.assert.strictEqual(q[0].params[2], 2);              // nextLevel = current + 1
+});
+
+t.test('tryUpgrade skips when current level already at target', function () {
+    var H = withMineOnDeposit('IronOre', 12, 'IronMine', 3, true);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryUpgrade skips when IsUpgradeAllowed is false', function () {
+    var H = withMineOnDeposit('IronOre', 12, 'IronMine', 1, false);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryUpgrade skips when upgrade flag is false in settings', function () {
+    var H = withMineOnDeposit('IronOre', 12, 'IronMine', 1, true, { upgrade: false });
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryUpgrade skips when build queue has no remaining slots', function () {
+    var H = harness.boot();
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
+    var mine = H.zone.building({ name: 'IronMine', grid: 12, level: 1, upgradable: true });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .building(mine)
+        .buildQueue(4, 4)                             // queue full
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.deposits.IronOre.upgrade     = true;
+    settings.deposits.IronOre.targetLevel = 3;
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
