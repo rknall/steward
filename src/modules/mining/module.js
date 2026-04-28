@@ -167,7 +167,42 @@
             if (ctx.slotsRemaining <= 0) return;
         }
     }
-    function tryPause(info, cfg, ctx)   { /* v2 */ }
+    function tryPause(info, cfg, ctx) {
+        // Declarative reconciliation: cfg.pause=true ⇒ ensure all mines of
+        // this type are paused; cfg.pause=false ⇒ ensure they're producing.
+        // Pause/resume is a state toggle (not a build), so no slot gate.
+        if (typeof cfg.pause !== 'boolean') return;
+        if (!info.mineName) return;
+
+        var mines;
+        try { mines = S.core.buildings.byName(info.mineName); }
+        catch (e) {
+            S.kernel.warn('mining', 'byName threw for', info.mineName, ':', e);
+            return;
+        }
+        if (!mines || !mines.length) return;
+
+        var wantsActive = !cfg.pause;
+        for (var i = 0; i < mines.length; i++) {
+            var bld = mines[i];
+            if (!bld) continue;
+            var grid = S.core.buildings.grid(bld);
+            if (!grid) continue;
+            if (ctx.assigned[grid]) continue;
+
+            var isActive = (typeof bld.IsProductionActive === 'function')
+                ? !!bld.IsProductionActive() : true;
+            if (isActive === wantsActive) continue;        // already in desired state
+
+            ctx.assigned[grid] = true;
+            ctx.queued++;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            S.kernel.queue.add('mining.setProduction',
+                [grid, info.mineName, wantsActive],
+                delay);
+        }
+    }
     function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
 
@@ -278,6 +313,37 @@
             } catch (e) {
                 S.kernel.error('mining',
                                'UpgradeBuildingOnGridPosition threw for', mineName, ':', e);
+            }
+        });
+
+        S.kernel.queue.action('mining.setProduction', function (params) {
+            var grid     = params[0];
+            var mineName = params[1];
+            var active   = !!params[2];
+
+            // Re-check: state may have drifted since plan() queued.
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld || S.core.buildings.name(bld) !== mineName) {
+                S.kernel.log('mining', 'grid', grid, 'no longer hosts', mineName,
+                             '— skipping setProduction');
+                return;
+            }
+            var current = (typeof bld.IsProductionActive === 'function')
+                ? !!bld.IsProductionActive() : true;
+            if (current === active) {
+                S.kernel.log('mining', mineName, 'on grid', grid, 'already',
+                             active ? 'active' : 'paused', '— skipping');
+                return;
+            }
+            try {
+                // Action 107: SendServerAction(107, 1=resume / 0=pause, grid, 0, null).
+                // Source: tso_client/.../scripts/7-building.js:125.
+                game.gi.SendServerAction(107, active ? 1 : 0, grid, 0, null);
+                S.kernel.log('mining', active ? 'resumed' : 'paused',
+                             mineName, 'on grid', grid);
+                // No buildings.invalidate(): pause/resume doesn't change snapshot composition.
+            } catch (e) {
+                S.kernel.error('mining', 'SendServerAction(107) threw for', mineName, ':', e);
             }
         });
     }
