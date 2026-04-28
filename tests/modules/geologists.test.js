@@ -68,3 +68,72 @@ t.test('plan enqueues nothing when wanted slots are already filled (deposits on 
     H.module('geologists').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
+
+// "Ghost" specialist: classifies as a Geologist (GetType returns geo
+// type) and reports Idle (no task, not in use), but lacks GetUniqueID.
+// Live host returns these in GetSpecialists_vector under conditions we
+// haven't pinned down — likely transient state or unloaded data. We
+// must filter them at the idle-pool stage to avoid the dispatch loop
+// re-picking the same null-uid spec wanted-many times.
+function ghostGeologist() {
+    return {
+        GetType:    function () { return 2; },                        // GEOLOGIST type
+        GetTask:    function () { return null; },
+        IsInUse:    function () { return false; },
+        getName:    function () { return ''; },
+        GetName:    function () { return ''; },
+        GetName_string: function () { return ''; },
+        GetSkills_vector: function () { return []; },
+        skills:     { getItems_vector: function () { return []; } },
+        GetSpecialistDescription: function () {
+            return { getBaseType: function () { return 2; },
+                     isTransportGeneral: function () { return false; } };
+        }
+        // GetUniqueID intentionally absent.
+    };
+}
+
+t.test('plan ignores ghost specialists that lack a uniqueID', function () {
+    var H = harness.boot();
+    var realGeo = H.specs.geologist({ name: 'irongut', uid: 'g1' });
+    var z = H.zone.zone()
+        .deposits('IronOre', [])
+        .specialists([ghostGeologist(), realGeo])
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+
+    H.settings.write('geologists', onlyEnable('IronOre', 1));
+    H.module('geologists').plan({ zone: { isHome: true } });
+
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].params[0], 'g1');         // dispatch went to the real geo
+
+    var warns = H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'geologists';
+    });
+    var ghostWarns = warns.filter(function (l) {
+        return l.args && l.args.length && /no uniqueID|ghost/i.test(String(l.args[0]));
+    });
+    // No "best candidate has no uniqueID" noise when ghosts are filtered.
+    t.assert.strictEqual(ghostWarns.length, 0);
+});
+
+t.test('plan with only ghost geologists enqueues nothing and stays quiet', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .deposits('IronOre', [])
+        .specialists([ghostGeologist(), ghostGeologist(), ghostGeologist()])
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+
+    H.settings.write('geologists', onlyEnable('IronOre', 5));
+    H.module('geologists').plan({ zone: { isHome: true } });
+
+    t.assert.strictEqual(H.queued().length, 0);
+    var ghostWarns = H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'geologists' &&
+               l.args && /no uniqueID/.test(String(l.args[0]));
+    });
+    t.assert.strictEqual(ghostWarns.length, 0);
+});

@@ -76,13 +76,29 @@
 
     function plan() {
         var c = S.core.specialists;
-        var idleExplorers;
-        try { idleExplorers = c.available(S.SpecialistType.Explorer); }
+        var rawIdle;
+        try { rawIdle = c.available(S.SpecialistType.Explorer); }
         catch (e) {
             S.kernel.error('explorers', 'available() threw:', e);
             return;
         }
+        if (rawIdle.length === 0) return;
 
+        // Filter out "ghost" specs — host returns entries in
+        // GetSpecialists_vector that pass classify() but lack a stable
+        // uniqueID (likely transient/unloaded). Without filtering, the
+        // dispatch loop emits a no-uniqueID warning per ghost on every
+        // tick. The queue contract needs uid for re-find at fire time,
+        // so they're not actionable to us anyway.
+        var idleExplorers = [];
+        var ghostCount = 0;
+        for (var ie = 0; ie < rawIdle.length; ie++) {
+            if (!c.uniqueIdKey(rawIdle[ie])) { ghostCount++; continue; }
+            idleExplorers.push(rawIdle[ie]);
+        }
+        if (ghostCount > 0) {
+            S.kernel.log('explorers', 'skipped', ghostCount, 'spec(s) without uniqueID');
+        }
         if (idleExplorers.length === 0) return;
 
         var s = readSettings();
@@ -99,12 +115,8 @@
             // can share a display name (e.g. multiple "Bewitching Explorer"
             // instances of GetType=51) — name-based lookup picks one and
             // sends to it repeatedly while ignoring the rest.
+            // uid is non-null by invariant: idle pool was filtered above.
             var uidKey = c.uniqueIdKey(spec);
-            if (!uidKey) {
-                S.kernel.warn('explorers', 'no uniqueID for', stripHtml(c.name(spec)),
-                              '— skipping');
-                continue;
-            }
             var name = stripHtml(c.name(spec)) || '?';
             S.kernel.queue.add('explorers.dispatch',
                 [uidKey, name, task],

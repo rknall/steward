@@ -107,11 +107,24 @@
         }
         if (!allGeos || !allGeos.length) return;
 
+        // Idle pool: idle status AND a stable uniqueID. Specs lacking a
+        // uid are "ghost" entries — host returns them in
+        // GetSpecialists_vector under transient conditions (likely
+        // unloaded data). Filtering here keeps the rest of the planner
+        // honest: we can't dispatch a queue action that re-finds them
+        // at fire time.
         var idleGeos = [];
+        var ghostCount = 0;
         for (var ig = 0; ig < allGeos.length; ig++) {
+            var g0 = allGeos[ig];
             try {
-                if (c.status(allGeos[ig]) === S.SpecialistStatus.Idle) idleGeos.push(allGeos[ig]);
-            } catch (e) { /* skip */ }
+                if (c.status(g0) !== S.SpecialistStatus.Idle) continue;
+            } catch (e) { continue; }
+            if (!c.uniqueIdKey(g0)) { ghostCount++; continue; }
+            idleGeos.push(g0);
+        }
+        if (ghostCount > 0) {
+            S.kernel.log('geologists', 'skipped', ghostCount, 'spec(s) without uniqueID');
         }
         if (!idleGeos.length) return;
 
@@ -150,10 +163,8 @@
                     requirePositive: false   // accept vanilla geo when no specialist is idle
                 });
                 if (!best) break;
-                if (!best.uid) {
-                    S.kernel.warn('geologists', 'best candidate for', info.name, 'has no uniqueID — skipping');
-                    continue;
-                }
+                // best.uid is non-null by invariant: idle pool was
+                // filtered to specs with uid above.
                 assigned[best.uid] = true;
 
                 var displayName = stripHtml(c.name(best.geo)) || '?';
