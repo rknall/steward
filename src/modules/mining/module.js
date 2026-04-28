@@ -429,17 +429,15 @@
                              '— skipping buff');
                 return;
             }
-            if (!S.core.buffs.canApply(bld, buffName)) {
-                S.kernel.log('mining', buffName, 'no longer applicable to',
-                             bldName, 'on grid', grid, '— skipping buff');
-                return;
-            }
+            // Buff-availability checks are silent on miss: state drift between
+            // plan() and the queued send is expected (inventory consumed by
+            // the same tick, building got buffed elsewhere, etc.) and not
+            // worth log noise. Failures of the actual SendServerAction below
+            // still surface as errors.
+            if (!S.core.buffs.canApply(bld, buffName)) return;
             var b = S.core.buffs.byName(buffName);
             var uid = S.core.buffs.uniqueId(b);
-            if (!uid) {
-                S.kernel.warn('mining', buffName, 'has no uniqueId — skipping');
-                return;
-            }
+            if (!uid) return;
             try {
                 // Action 61: SendServerAction(61, 0, grid, 0, uniqueId, null).
                 // Source: autoTSO/user_auto.js:4661.
