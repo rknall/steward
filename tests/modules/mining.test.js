@@ -195,38 +195,68 @@ t.test('tryUpgrade skips when build queue has no remaining slots', function () {
 
 // --- tryPause -----------------------------------------------------------
 
-function withMineForPause(mineOpts, pauseFlag) {
+// Build a single-IronOre fixture with both deposit and mine on the same grid.
+// Pause-direction tests rely on deposit.GetAmount() — walking buildings alone
+// is not enough since the threshold gate reads the deposit's remaining count.
+function withPauseFixture(opts) {
     var H = harness.boot();
+    var depo = H.zone.deposit({
+        name:   'IronOre',
+        grid:   12,
+        amount: typeof opts.amount === 'number' ? opts.amount : 100
+    });
     var mine = H.zone.building({
-        name:      mineOpts.name      || 'IronMine',
-        grid:      typeof mineOpts.grid === 'number' ? mineOpts.grid : 12,
-        producing: typeof mineOpts.producing === 'undefined' ? true : !!mineOpts.producing
+        name:      'IronMine',
+        grid:      12,
+        producing: typeof opts.producing === 'undefined' ? true : !!opts.producing
     });
     var z = H.zone.zone()
+        .deposits('IronOre', [depo])
         .building(mine)
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
     var settings = onlyMiningEnabled('IronOre', false);
-    settings.actionDelay              = 0;
-    settings.deposits.IronOre.pause   = pauseFlag;
+    settings.actionDelay = 0;
+    if (typeof opts.threshold === 'number') settings.pauseThreshold = opts.threshold;
+    if (typeof opts.pause !== 'undefined') {
+        settings.deposits.IronOre.pause = opts.pause;
+    } else {
+        delete settings.deposits.IronOre.pause;
+    }
     H.settings.write('mining', settings);
     return H;
 }
 
-t.test('tryPause queues mining.setProduction(0) when cfg.pause=true and mine is producing', function () {
-    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: true }, true);
+t.test('tryPause pauses producing mine when cfg.pause=true and amount < threshold', function () {
+    var H = withPauseFixture({ pause: true, producing: true, amount: 20 });   // threshold default 50
     H.module('mining').plan({ zone: { isHome: true } });
     var q = H.queued();
     t.assert.strictEqual(q.length, 1);
     t.assert.strictEqual(q[0].name, 'mining.setProduction');
-    t.assert.strictEqual(q[0].params[0], 12);             // grid
-    t.assert.strictEqual(q[0].params[1], 'IronMine');     // mineName
+    t.assert.strictEqual(q[0].params[0], 12);
+    t.assert.strictEqual(q[0].params[1], 'IronMine');
     t.assert.strictEqual(q[0].params[2], false);          // active = false (paused)
 });
 
-t.test('tryPause queues mining.setProduction(1) when cfg.pause=false and mine is paused', function () {
-    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: false }, false);
+t.test('tryPause does NOT pause when cfg.pause=true but amount >= threshold', function () {
+    var H = withPauseFixture({ pause: true, producing: true, amount: 80 });   // above default 50
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('tryPause threshold is configurable globally via pauseThreshold', function () {
+    // amount 80 is above default 50 (would skip), but with threshold 100 it pauses.
+    var H = withPauseFixture({ pause: true, producing: true, amount: 80, threshold: 100 });
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].params[2], false);
+});
+
+t.test('tryPause resumes paused mine when cfg.pause=false (unconditional, no threshold)', function () {
+    // Even with high amount, resume direction fires whenever cfg.pause=false.
+    var H = withPauseFixture({ pause: false, producing: false, amount: 200 });
     H.module('mining').plan({ zone: { isHome: true } });
     var q = H.queued();
     t.assert.strictEqual(q.length, 1);
@@ -234,14 +264,14 @@ t.test('tryPause queues mining.setProduction(1) when cfg.pause=false and mine is
     t.assert.strictEqual(q[0].params[2], true);           // active = true (resume)
 });
 
-t.test('tryPause skips when mine is already in desired state', function () {
-    // pause=true, mine already not producing → nothing to do.
-    var H = withMineForPause({ name: 'IronMine', grid: 12, producing: false }, true);
+t.test('tryPause skips when mine already in desired state', function () {
+    // pause=true, mine already paused, amount low → already in desired state.
+    var H = withPauseFixture({ pause: true, producing: false, amount: 10 });
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
 
-t.test('tryPause skips when no mines of this type exist', function () {
+t.test('tryPause skips when no deposits of this type on map', function () {
     var H = harness.boot();
     var z = H.zone.zone()
         .buildQueue(0, 4)
@@ -256,17 +286,7 @@ t.test('tryPause skips when no mines of this type exist', function () {
 });
 
 t.test('tryPause skips when cfg.pause is undefined', function () {
-    var H = harness.boot();
-    var mine = H.zone.building({ name: 'IronMine', grid: 12, producing: true });
-    var z = H.zone.zone()
-        .building(mine)
-        .buildQueue(0, 4)
-        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
-    H.host.game.gi.mCurrentPlayerZone = z.zone;
-    var settings = onlyMiningEnabled('IronOre', false);
-    settings.actionDelay              = 0;
-    delete settings.deposits.IronOre.pause;
-    H.settings.write('mining', settings);
+    var H = withPauseFixture({ producing: true, amount: 10 });   // pause is undefined
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
