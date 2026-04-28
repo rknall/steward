@@ -174,9 +174,21 @@ function makeZone() {
     return fluent;
 }
 
+// Factory for a host-shaped resource entry. Used by tests that exercise
+// core/resources and the collections inventory section.
+function resource(opts) {
+    opts = opts || {};
+    return {
+        name_string:    opts.name || 'UnknownResource',
+        amount:         (typeof opts.amount === 'number') ? opts.amount : 0,
+        producedAmount: (typeof opts.producedAmount === 'number') ? opts.producedAmount : 0
+    };
+}
+
 module.exports = {
     zone:     makeZone,
     deposit:  deposit,
     building: building,
-    buff:     buff
+    buff:     buff,
+    resource: resource
 };

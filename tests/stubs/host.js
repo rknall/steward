@@ -82,7 +82,24 @@ function makeGame() {
             }
         },
         def:          function () { return null; },
-        getResources: function () { return {}; },
+        getResources: function () {
+            var inv = g._resourceInventory || {};
+            return {
+                GetPlayerResources_vector: function () {
+                    var out = [];
+                    for (var k in inv) out.push(inv[k]);
+                    return out;
+                },
+                GetPlayerResource: function (name) {
+                    return inv[name] || null;
+                },
+                HasPlayerResource: function (name, amt) {
+                    var r = inv[name];
+                    return !!(r && (r.amount || 0) >= (amt || 0));
+                }
+            };
+        },
+        _resourceInventory: {},
         player:       { GetPlayerLevel: function () { return 60; } }
     };
     // game.zone delegates to the mounted player zone where the fluent
