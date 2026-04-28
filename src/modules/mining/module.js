@@ -196,12 +196,19 @@
             var cfg = depCfg[info.name];
             if (!cfg || !cfg.enabled) continue;
 
+            // Phase order per deposit:
+            //   tryBuild → tryUpgrade → tryBuff → tryPause → tryRefill
+            // Buff comes after upgrade so its effect compounds with the
+            // newer level. Pause runs last among mine-only phases so the
+            // earlier active-state phases get their chance first.
             if (info.mineName) {
                 phase('tryBuild',   info, cfg, ctx);
                 phase('tryUpgrade', info, cfg, ctx);
-                phase('tryPause',   info, cfg, ctx);
             }
-            phase('tryBuff',  info, cfg, ctx);
+            phase('tryBuff', info, cfg, ctx);            // mine OR mason
+            if (info.mineName) {
+                phase('tryPause', info, cfg, ctx);
+            }
             phase('tryRefill', info, cfg, ctx);
         }
         if (ctx.queued > 0) {
