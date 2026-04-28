@@ -254,14 +254,13 @@ t.test('tryPause threshold is configurable globally via pauseThreshold', functio
     t.assert.strictEqual(q[0].params[2], false);
 });
 
-t.test('tryPause resumes paused mine when cfg.pause=false (unconditional, no threshold)', function () {
-    // Even with high amount, resume direction fires whenever cfg.pause=false.
+t.test('tryPause does nothing when cfg.pause=false (manual user pauses preserved)', function () {
+    // Steward only undoes what Steward did. Auto-unpause is a job for
+    // tryRefill (when refill crosses the threshold), not tryPause. With
+    // cfg.pause=false the phase is fully inert for that type.
     var H = withPauseFixture({ pause: false, producing: false, amount: 200 });
     H.module('mining').plan({ zone: { isHome: true } });
-    var q = H.queued();
-    t.assert.strictEqual(q.length, 1);
-    t.assert.strictEqual(q[0].name, 'mining.setProduction');
-    t.assert.strictEqual(q[0].params[2], true);           // active = true (resume)
+    t.assert.strictEqual(H.queued().length, 0);
 });
 
 t.test('tryPause skips when mine already in desired state', function () {
