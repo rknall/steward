@@ -49,7 +49,10 @@ function building(opts) {
         productionBuff:         (typeof opts.productionBuff !== 'undefined') ? opts.productionBuff : null,
         IsUpgradeInProgress:    function () { return !!opts.upgrading; },
         IsInConstructionMode:   function () { return !!opts.constructing; },
-        IsInDestruction:        function () { return !!opts.destructing; }
+        IsInDestruction:        function () { return !!opts.destructing; },
+        // Mines and masons are workyards — autoTSO's filter uses this to
+        // include generic 'Workyard'-targeting buffs (e.g. productivity buffs).
+        isWorkyard:             function () { return !!opts.isWorkyard; }
     };
 }
 

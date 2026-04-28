@@ -206,8 +206,11 @@
     // every other field.
     function renderBuffDropdown(h, depositName, cfg, target) {
         if (!target) return '—';
+        // Mines and masons are both workyards in TSO — set the flag so
+        // generic Workyard-targeting buffs (productivity boosts, etc.)
+        // appear alongside building-name-specific buffs.
         var inv = [];
-        try { inv = S.core.buffs.forBuilding(target) || []; }
+        try { inv = S.core.buffs.forBuilding(target, { isWorkyard: true }) || []; }
         catch (e) { inv = []; }
 
         var options = [{ value: '', label: 'None' }];

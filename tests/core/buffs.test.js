@@ -117,6 +117,41 @@ t.test('canApply() returns true when all gates pass', function () {
     t.assert.strictEqual(H.Steward.core.buffs.canApply(bld, 'IronMineBuff'), true);
 });
 
+// --- workyard catch-all ----------------------------------------------------
+
+t.test('forBuilding() with isWorkyard=true matches Workyard-targeting buffs', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'ProductivityBuff', amount: 5, targets: 'Workyard' })
+    ]);
+    var without = H.Steward.core.buffs.forBuilding('IronMine');
+    t.assert.strictEqual(without.length, 0);                                // direct target only
+    var withFlag = H.Steward.core.buffs.forBuilding('IronMine', { isWorkyard: true });
+    t.assert.strictEqual(withFlag.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.name(withFlag[0]), 'ProductivityBuff');
+});
+
+t.test('canApply() accepts Workyard-targeting buff when building.isWorkyard()=true', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'ProductivityBuff', amount: 1, targets: 'Workyard' })
+    ]);
+    var workyard = building({ name: 'IronMine', grid: 12, isWorkyard: true });
+    t.assert.strictEqual(H.Steward.core.buffs.canApply(workyard, 'ProductivityBuff'), true);
+
+    var notWorkyard = building({ name: 'IronMine', grid: 13 });             // isWorkyard not set
+    t.assert.strictEqual(H.Steward.core.buffs.canApply(notWorkyard, 'ProductivityBuff'), false);
+});
+
+t.test('forBuilding() merges direct and Workyard matches without duplicating', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'IronMineBuff',     amount: 2, targets: 'IronMine' }),
+        buff({ name: 'ProductivityBuff', amount: 5, targets: 'Workyard' })
+    ]);
+    var hits = H.Steward.core.buffs.forBuilding('IronMine', { isWorkyard: true });
+    t.assert.strictEqual(hits.length, 2);
+    var names = [H.Steward.core.buffs.name(hits[0]), H.Steward.core.buffs.name(hits[1])].sort();
+    t.assert.deepStrictEqual(names, ['IronMineBuff', 'ProductivityBuff']);
+});
+
 t.test('invalidate() forces a fresh inventory read', function () {
     var H = bootWithBuffs([
         buff({ name: 'IronMineBuff', amount: 1, targets: 'IronMine' })

@@ -96,6 +96,56 @@
         } catch (e) { return []; }
     }
 
+    // ----- targeting helpers ---------------------------------------------
+
+    function isWorkyardBuilding(b) {
+        if (!b) return false;
+        try { return typeof b.isWorkyard === 'function' && !!b.isWorkyard(); }
+        catch (e) { return false; }
+    }
+
+    // Returns the buff's target group string, or '' if none / unreadable.
+    function targetGroup(b) {
+        var def = definition(b);
+        if (!def || typeof def.GetTargetGroup_string !== 'function') return '';
+        try { return def.GetTargetGroup_string() || ''; }
+        catch (e) { return ''; }
+    }
+
+    // True when the host's BuffSystem says `target` belongs to `groupName`.
+    // Defensive: `game.def('BuffSystem.cBuffDefinition')` may not exist in
+    // some host builds or under tests.
+    function targetGroupContains(groupName, target) {
+        if (!groupName || !target) return false;
+        try {
+            if (typeof game === 'undefined' || !game || typeof game.def !== 'function') return false;
+            var bs = game.def('BuffSystem.cBuffDefinition');
+            if (!bs || !bs.targetGroups || typeof bs.targetGroups.groupContains !== 'function') return false;
+            return !!bs.targetGroups.groupContains(groupName, target);
+        } catch (e) { return false; }
+    }
+
+    // matches(buff, target, isWorkyard) — three-path filter mirroring
+    // autoTSO/aBuffs.getBuffsForBuilding (user_auto.js:4567):
+    //   1. direct target name match
+    //   2. workyard catch-all: target is a workyard AND buff lists 'Workyard'
+    //   3. host-defined target group match
+    function matches(b, target, isWorkyard) {
+        if (!b || !target) return false;
+        var t = targets(b);
+        for (var i = 0; i < t.length; i++) {
+            if (t[i] === target) return true;
+        }
+        if (isWorkyard) {
+            for (var j = 0; j < t.length; j++) {
+                if (t[j] === 'Workyard') return true;
+            }
+        }
+        var grp = targetGroup(b);
+        if (grp && targetGroupContains(grp, target)) return true;
+        return false;
+    }
+
     // ----- public API ----------------------------------------------------
 
     // available() — every buff in inventory (includes non-building buffs).
@@ -106,11 +156,15 @@
         return out;
     }
 
-    // forBuilding(target) — buffs whose target list mentions the given
-    // building name AND whose definition is a building-buff (BuffType === 0)
-    // AND whose amount > 0. Returns the host buff objects untouched.
-    function forBuilding(target) {
+    // forBuilding(target, opts) — buffs that apply to a building of the
+    // given name. opts.isWorkyard=true expands the match to include
+    // generic Workyard-targeting buffs (productivity boosts, etc.). Only
+    // building-buffs (BuffType===0) with amount>0 are returned. Host buff
+    // objects come back untouched.
+    function forBuilding(target, opts) {
         if (!target) return [];
+        opts = opts || {};
+        var isWorkyard = !!opts.isWorkyard;
         var src = ensureSnapshot();
         var out = [];
         for (var i = 0; i < src.length; i++) {
@@ -118,10 +172,7 @@
             if (!b) continue;
             if (!isBuildingBuff(b)) continue;
             if (amount(b) <= 0) continue;
-            var t = targets(b);
-            for (var j = 0; j < t.length; j++) {
-                if (t[j] === target) { out.push(b); break; }
-            }
+            if (matches(b, target, isWorkyard)) out.push(b);
         }
         return out;
     }
@@ -161,11 +212,7 @@
         var bn = (typeof building.GetBuildingName_string === 'function')
             ? building.GetBuildingName_string() : '';
         if (!bn) return false;
-        var t = targets(b);
-        for (var i = 0; i < t.length; i++) {
-            if (t[i] === bn) return true;
-        }
-        return false;
+        return matches(b, bn, isWorkyardBuilding(building));
     }
 
     if (!S.core) S.core = {};
@@ -181,8 +228,10 @@
         amount:      amount,
         uniqueId:    uniqueId,
         targets:     targets,
+        targetGroup: targetGroup,
 
-        // gate
+        // matchers / gate
+        matches:     matches,
         canApply:    canApply
     };
 
