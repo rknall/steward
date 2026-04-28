@@ -39,14 +39,34 @@
         S.Deposit[TYPE_ORDER[i]] = TYPE_ORDER[i];
     }
 
+    // Per-deposit mine + mason metadata. Source: autoTSO/user_auto.js:1086-1095
+    // (numeric mine IDs, mine name convention) and :5168 (mason name
+    // convention — Stone uses bare 'Mason', the others get prefix).
+    var MINE_DATA = {
+        Stone:       { mineId: null, mineName: null,           masonName: 'Mason' },
+        BronzeOre:   { mineId: 36,   mineName: 'BronzeMine',   masonName: null },
+        Marble:      { mineId: null, mineName: null,           masonName: 'MarbleMason' },
+        IronOre:     { mineId: 50,   mineName: 'IronMine',     masonName: null },
+        GoldOre:     { mineId: 46,   mineName: 'GoldMine',     masonName: null },
+        Coal:        { mineId: 37,   mineName: 'CoalMine',     masonName: null },
+        Granite:     { mineId: null, mineName: null,           masonName: 'GraniteMason' },
+        TitaniumOre: { mineId: 69,   mineName: 'TitaniumMine', masonName: null },
+        Salpeter:    { mineId: 63,   mineName: 'SalpeterMine', masonName: null }
+    };
+
     // Cache the type-table so callers can iterate without rebuilding.
     var TABLE = [];
     for (var j = 0; j < TYPE_ORDER.length; j++) {
+        var nm = TYPE_ORDER[j];
+        var md = MINE_DATA[nm] || { mineId: null, mineName: null, masonName: null };
         TABLE.push({
-            name:     TYPE_ORDER[j],
-            enumVal:  TYPE_ORDER[j],
-            index:    j,
-            typeString: 'FindDeposit' + TYPE_ORDER[j]
+            name:       nm,
+            enumVal:    nm,
+            index:      j,
+            typeString: 'FindDeposit' + nm,
+            mineId:     md.mineId,
+            mineName:   md.mineName,
+            masonName:  md.masonName
         });
     }
 

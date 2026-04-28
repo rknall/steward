@@ -34,3 +34,20 @@ t.test('depositTypeStringFor prefixes FindDeposit', function () {
         H.Steward.core.deposits.depositTypeStringFor(''),
         '');
 });
+
+t.test('types() rows expose mineId / mineName / masonName fields', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var rows = H.Steward.core.deposits.types();
+
+    var iron = rows[3];
+    t.assert.strictEqual(iron.name, 'IronOre');
+    t.assert.strictEqual(iron.mineId, 50);
+    t.assert.strictEqual(iron.mineName, 'IronMine');
+    t.assert.strictEqual(iron.masonName, null);
+
+    var stone = rows[0];
+    t.assert.strictEqual(stone.name, 'Stone');
+    t.assert.strictEqual(stone.mineId, null);
+    t.assert.strictEqual(stone.mineName, null);
+    t.assert.strictEqual(stone.masonName, 'Mason');
+});
