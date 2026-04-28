@@ -96,9 +96,6 @@
             if (!c.uniqueIdKey(rawIdle[ie])) { ghostCount++; continue; }
             idleExplorers.push(rawIdle[ie]);
         }
-        if (ghostCount > 0) {
-            S.kernel.log('explorers', 'skipped', ghostCount, 'spec(s) without uniqueID');
-        }
         if (idleExplorers.length === 0) return;
 
         var s = readSettings();

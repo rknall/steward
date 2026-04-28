@@ -123,9 +123,6 @@
             if (!c.uniqueIdKey(g0)) { ghostCount++; continue; }
             idleGeos.push(g0);
         }
-        if (ghostCount > 0) {
-            S.kernel.log('geologists', 'skipped', ghostCount, 'spec(s) without uniqueID');
-        }
         if (!idleGeos.length) return;
 
         var types = S.core.deposits.types();
