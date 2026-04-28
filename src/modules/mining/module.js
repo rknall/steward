@@ -214,8 +214,10 @@
                 ? !!bld.IsProductionActive() : true;
             if (!isActive) continue;                       // already paused
 
-            var remaining = (typeof depo.GetAmount === 'function')
-                ? depo.GetAmount() : 0;
+            // Funnel through the core accessor — has try/catch + typeof guard,
+            // resilient to stale host VOs whose typeof still reports 'function'
+            // but whose call throws (Flash/AIR GC behaviour).
+            var remaining = S.core.deposits.amount(depo);
             if (remaining >= threshold) continue;          // still high-yield
 
             ctx.assigned[grid] = true;
@@ -267,13 +269,21 @@
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
 
     function phase(name, info, cfg, ctx) {
-        var override = S.modules.mining._phases && S.modules.mining._phases[name];
-        if (typeof override === 'function') return override(info, cfg, ctx);
-        if (name === 'tryBuild')   return tryBuild(info, cfg, ctx);
-        if (name === 'tryUpgrade') return tryUpgrade(info, cfg, ctx);
-        if (name === 'tryPause')   return tryPause(info, cfg, ctx);
-        if (name === 'tryBuff')    return tryBuff(info, cfg, ctx);
-        if (name === 'tryRefill')  return tryRefill(info, cfg, ctx);
+        // Per-phase try/catch: a broken phase logs and the planner moves on
+        // to the next one. Without this, a single host hiccup (stale VO,
+        // missing method) would skip every later phase for every later
+        // deposit type on this tick.
+        try {
+            var override = S.modules.mining._phases && S.modules.mining._phases[name];
+            if (typeof override === 'function') return override(info, cfg, ctx);
+            if (name === 'tryBuild')   return tryBuild(info, cfg, ctx);
+            if (name === 'tryUpgrade') return tryUpgrade(info, cfg, ctx);
+            if (name === 'tryPause')   return tryPause(info, cfg, ctx);
+            if (name === 'tryBuff')    return tryBuff(info, cfg, ctx);
+            if (name === 'tryRefill')  return tryRefill(info, cfg, ctx);
+        } catch (e) {
+            S.kernel.warn('mining', name, 'threw for', info && info.name, ':', e);
+        }
     }
 
     function plan() {
