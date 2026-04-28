@@ -168,31 +168,51 @@
         }
     }
     function tryPause(info, cfg, ctx) {
-        // Declarative reconciliation: cfg.pause=true ⇒ ensure all mines of
-        // this type are paused; cfg.pause=false ⇒ ensure they're producing.
-        // Pause/resume is a state toggle (not a build), so no slot gate.
+        // Asymmetric reconciliation:
+        //   cfg.pause=true  ⇒ pause producing mines whose deposit has dropped
+        //                     below pauseThreshold (preserve mine longevity).
+        //   cfg.pause=false ⇒ resume any paused mine (unconditional).
+        // Pause/resume is a state toggle, not a construction — no slot gate.
         if (typeof cfg.pause !== 'boolean') return;
         if (!info.mineName) return;
 
-        var mines;
-        try { mines = S.core.buildings.byName(info.mineName); }
+        var settings  = readSettings();
+        var threshold = (typeof settings.pauseThreshold === 'number')
+            ? settings.pauseThreshold : 50;
+        var wantsActive = !cfg.pause;
+
+        // Walk deposits (not buildings) so we can read GetAmount() for the
+        // threshold gate. Mines on depleted shells (no on-map deposit) are
+        // intentionally skipped — we don't auto-resume a depleted shell.
+        var depos;
+        try { depos = S.core.deposits.byType(info.name); }
         catch (e) {
-            S.kernel.warn('mining', 'byName threw for', info.mineName, ':', e);
+            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
             return;
         }
-        if (!mines || !mines.length) return;
+        if (!depos || !depos.length) return;
 
-        var wantsActive = !cfg.pause;
-        for (var i = 0; i < mines.length; i++) {
-            var bld = mines[i];
-            if (!bld) continue;
-            var grid = S.core.buildings.grid(bld);
+        for (var i = 0; i < depos.length; i++) {
+            var depo = depos[i];
+            if (!depo) continue;
+            var grid = S.core.deposits.grid(depo);
             if (!grid) continue;
             if (ctx.assigned[grid]) continue;
+
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld) continue;
+            if (S.core.buildings.name(bld) !== info.mineName) continue;
 
             var isActive = (typeof bld.IsProductionActive === 'function')
                 ? !!bld.IsProductionActive() : true;
             if (isActive === wantsActive) continue;        // already in desired state
+
+            // Pause direction is gated on remaining amount; resume direction is not.
+            if (!wantsActive) {
+                var remaining = (typeof depo.GetAmount === 'function')
+                    ? depo.GetAmount() : 0;
+                if (remaining >= threshold) continue;       // still high-yield — leave it
+            }
 
             ctx.assigned[grid] = true;
             ctx.queued++;

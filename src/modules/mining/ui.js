@@ -112,6 +112,18 @@
             }
         }), 'ms — pause between sends'));
 
+        $panel.append(h.formRow('Pause threshold', h.input({
+            type:     'number',
+            value:    typeof s.pauseThreshold === 'number' ? s.pauseThreshold : 50,
+            width:    '90px',
+            onChange: function (val) {
+                var n = parseInt(val, 10);
+                if (!isNaN(n) && n >= 0) {
+                    h.update('mining', { pauseThreshold: n });
+                }
+            }
+        }), 'auto-pause when deposit remaining drops below this'));
+
         appendDepositTable($panel, h, s);
         appendStatusFooter($panel, h);
     }

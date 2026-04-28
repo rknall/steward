@@ -4,12 +4,18 @@
  * Stored under steward.mining. Shape:
  *
  *   {
- *     enabled:     false,
- *     actionDelay: 1500,
+ *     enabled:        false,
+ *     actionDelay:    1500,
+ *     pauseThreshold: 50,
  *     deposits: {
  *       <Name>: { enabled, build?, upgrade?, targetLevel?, pause?, buff, refill }
  *     }
  *   }
+ *
+ * `pauseThreshold` is global: when a deposit type has `pause: true`,
+ * tryPause only pauses producing mines once their deposit's remaining
+ * amount drops below this threshold. Resume direction (pause: false →
+ * setProduction(active)) is unconditional and ignores the threshold.
  *
  * Mine-bearing types (Bronze/Iron/Gold/Coal/Titanium/Salpeter) have the
  * full shape. Mason-only types (Stone/Marble/Granite) carry only
@@ -30,8 +36,9 @@
     if (!S.modules.mining) S.modules.mining = {};
 
     S.modules.mining.defaultSettings = {
-        enabled:     false,
-        actionDelay: 1500,
+        enabled:        false,
+        actionDelay:    1500,
+        pauseThreshold: 50,
         deposits: {
             Stone:       { enabled: true, buff: '', refill: '' },
             BronzeOre:   { enabled: true, build: true, upgrade: false, targetLevel: 3,
