@@ -98,16 +98,23 @@
 
     // ----- localization helpers ------------------------------------------
 
+    // Detects the host's "missing translation" sentinel — strings like
+    // "[undefined text]" or "[missing-key]" the host returns instead of
+    // null/undefined. We treat any bracketed placeholder as a miss.
+    function isPlaceholder(s) {
+        return typeof s === 'string' && /^\[.*\]$/.test(s);
+    }
+
     // displayName(b) — localized resource name from loca.GetText('RES', name).
-    // Falls back to the internal GetType() name if loca is unavailable or
-    // returns falsy (older host build, missing translation key, etc.).
+    // Falls back to the internal GetType() name if loca is unavailable,
+    // returns falsy, or returns a bracketed placeholder.
     function displayName(b) {
         var internal = name(b);
         if (!internal) return '';
         try {
             if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
                 var t = loca.GetText('RES', internal);
-                if (t) return t;
+                if (t && !isPlaceholder(t)) return t;
             }
         } catch (e) { /* fall through */ }
         return internal;
@@ -116,14 +123,15 @@
     // description(b) — localized description, truncated at the host's
     // 'Target' suffix (mirrors autoTSO/user_auto.js:4583). The DES text
     // continues past 'Target' with internal detail that's not useful in a
-    // user-facing picker. Returns '' if no description is available.
+    // user-facing picker. Returns '' if no description is available or the
+    // host returns a placeholder.
     function description(b) {
         var internal = name(b);
         if (!internal) return '';
         try {
             if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
                 var raw = loca.GetText('DES', internal);
-                if (raw) return String(raw).split('Target')[0];
+                if (raw && !isPlaceholder(raw)) return String(raw).split('Target')[0];
             }
         } catch (e) { /* fall through */ }
         return '';

@@ -78,6 +78,22 @@ t.test('displayName() falls back to internal name when loca returns falsy', func
     t.assert.strictEqual(H.Steward.core.resources.displayName('Leather'), 'Leather');
 });
 
+t.test('displayName() falls back when loca returns the host placeholder "[undefined text]"', function () {
+    var H = harness.boot({
+        sections: ['kernel', 'core'],
+        host: { loca: { GetText: function () { return '[undefined text]'; } } }
+    });
+    t.assert.strictEqual(H.Steward.core.resources.displayName('Leather'), 'Leather');
+});
+
+t.test('displayName() falls back on any bracketed placeholder shape', function () {
+    var H = harness.boot({
+        sections: ['kernel', 'core'],
+        host: { loca: { GetText: function () { return '[missing-translation]'; } } }
+    });
+    t.assert.strictEqual(H.Steward.core.resources.displayName('Banner'), 'Banner');
+});
+
 t.test('invalidate() forces a fresh inventory read', function () {
     var H = bootWithInventory({
         Leather: resource({ name: 'Leather', amount: 5 })

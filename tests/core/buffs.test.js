@@ -195,6 +195,19 @@ t.test('displayName() falls back to internal name when loca returns falsy', func
     t.assert.strictEqual(H.Steward.core.buffs.displayName(b), 'IronMineBuff');
 });
 
+t.test('displayName() falls back when loca returns the host placeholder "[undefined text]"', function () {
+    var H = harness.boot({
+        sections: ['kernel', 'core'],
+        host: { loca: { GetText: function () { return '[undefined text]'; } } }
+    });
+    var z = H.zone.zone()
+        .buffs([buff({ name: 'IronMineBuff', amount: 1, targets: 'IronMine' })])
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var b = H.Steward.core.buffs.byName('IronMineBuff');
+    t.assert.strictEqual(H.Steward.core.buffs.displayName(b), 'IronMineBuff');
+});
+
 t.test('description() returns DES text truncated at "Target"', function () {
     var H = harness.boot({
         sections: ['kernel', 'core'],

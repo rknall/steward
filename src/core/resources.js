@@ -75,14 +75,23 @@
         catch (e) { return 0; }
     }
 
+    // Detects the host's "missing translation" sentinel. TSO's loca
+    // returns strings like "[undefined text]" or "[missing-key]" rather
+    // than null/undefined when a key isn't found. Treat any bracketed
+    // placeholder as a miss so the caller falls back to the internal key.
+    function isPlaceholder(s) {
+        return typeof s === 'string' && /^\[.*\]$/.test(s);
+    }
+
     // displayName(name) — loca.GetText('RES', name). Falls back to the
-    // internal key when loca is missing or returns falsy.
+    // internal key when loca is missing, returns falsy, or returns a
+    // bracketed placeholder.
     function displayName(internal) {
         if (!internal) return '';
         try {
             if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
                 var t = loca.GetText('RES', internal);
-                if (t) return t;
+                if (t && !isPlaceholder(t)) return t;
             }
         } catch (e) { /* fall through */ }
         return internal;
