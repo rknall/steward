@@ -151,10 +151,31 @@
 
     function byName(targetName, opts) {
         opts = opts || {};
+        // Fast path: ask the host's named lookup. Mirrors byGrid's fast
+        // path. Some building categories (e.g. masons) appear in the
+        // host's getBuildingsByName_vector but not in GetBuildings_vector,
+        // so the snapshot fallback would miss them.
+        if (!opts.zone) {
+            try {
+                var z = S.core.zone.current();
+                if (z && z.mStreetDataMap &&
+                    typeof z.mStreetDataMap.getBuildingsByName_vector === 'function') {
+                    var v = z.mStreetDataMap.getBuildingsByName_vector(targetName);
+                    if (v) {
+                        var hits = [];
+                        var len = (typeof v.length === 'number') ? v.length : 0;
+                        for (var i = 0; i < len; i++) {
+                            if (v[i]) hits.push(v[i]);
+                        }
+                        return hits;
+                    }
+                }
+            } catch (e) { /* fall through to snapshot */ }
+        }
         var src = ensureSnapshot(opts.zone);
         var out = [];
-        for (var i = 0; i < src.length; i++) {
-            if (name(src[i]) === targetName) out.push(src[i]);
+        for (var j = 0; j < src.length; j++) {
+            if (name(src[j]) === targetName) out.push(src[j]);
         }
         return out;
     }
