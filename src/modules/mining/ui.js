@@ -124,7 +124,7 @@
 
         $panel.append(h.gridRow(
             [[3, 'Deposit'], [2, 'Build Mine'], [2, 'Upgrade Mine'],
-             [3, 'Target Lvl'], [2, 'Active']],
+             [2, 'Target Lvl'], [2, 'Pause'], [1, 'Active']],
             { headerCells: true }
         ));
 
@@ -134,7 +134,7 @@
             var active = activeCount(info);
 
             (function (depositName, currentCfg, activeNum, mineable) {
-                var $buildCell, $upgradeCell, $targetCell;
+                var $buildCell, $upgradeCell, $targetCell, $pauseCell;
                 if (mineable) {
                     $buildCell = h.toggle({
                         checked:  !!currentCfg.build,
@@ -160,17 +160,25 @@
                             }
                         }
                     });
+                    $pauseCell = h.toggle({
+                        checked:  !!currentCfg.pause,
+                        onChange: function (next) {
+                            updateDeposit(h, depositName, { pause: next });
+                        }
+                    });
                 } else {
                     $buildCell   = '—';
                     $upgradeCell = '—';
                     $targetCell  = '—';
+                    $pauseCell   = '—';
                 }
                 $panel.append(h.gridRow(
                     [[3, depositName],
                      [2, $buildCell],
                      [2, $upgradeCell],
-                     [3, $targetCell],
-                     [2, String(activeNum)]]
+                     [2, $targetCell],
+                     [2, $pauseCell],
+                     [1, String(activeNum)]]
                 ));
             })(info.name, cfg, active, !!info.mineName);
         }
