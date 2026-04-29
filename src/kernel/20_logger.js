@@ -285,4 +285,21 @@
     S.kernel.warn  = warn;
     S.kernel.error = error;
 
+    // Path accessors so other subsystems (diagnostics dumps, future
+    // exports) can co-locate output with the logs no matter which
+    // fallback ensureLogFile() landed on. Callers must tolerate `null`
+    // (host has no writable AIR runtime) and degrade gracefully.
+    S.kernel.logDir = function () {
+        ensureLogFile();
+        return state.logDir || null;
+    };
+    // Parent of logDir — the `steward/` folder. Useful for placing
+    // sibling directories like `dumps/`.
+    S.kernel.logBaseDir = function () {
+        ensureLogFile();
+        if (!state.logDir) return null;
+        try { return state.logDir.parent || null; }
+        catch (e) { return null; }
+    };
+
 }(Steward));

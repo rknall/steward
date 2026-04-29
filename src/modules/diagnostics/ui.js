@@ -166,7 +166,15 @@
     function dumpsDir() {
         try {
             if (typeof air === 'undefined' || !air || !air.File) return null;
-            var dir = air.File.applicationStorageDirectory.resolvePath('steward/dumps');
+            // Co-locate dumps with logs — sibling of `steward/logs/` under
+            // whatever base directory the logger settled on (app install
+            // round-trip / applicationStorage / documents fallback). If
+            // the logger hasn't resolved one yet, fall through to AppData.
+            var base = (typeof S.kernel.logBaseDir === 'function')
+                ? S.kernel.logBaseDir() : null;
+            var dir = base
+                ? base.resolvePath('dumps')
+                : air.File.applicationStorageDirectory.resolvePath('steward/dumps');
             if (!dir.exists) dir.createDirectory();
             return dir;
         } catch (e) {
@@ -525,27 +533,43 @@
                 var name = '';
                 try { name = (typeof b.GetBuildingName_string === 'function') ? b.GetBuildingName_string() : ''; }
                 catch (e) { /* skip */ }
+                // isWorkyard gates the production-specific probes —
+                // calling GetResourceCreation / GetResourceOutputFactor /
+                // IsUpgradeAllowed on non-workyard buildings (decorations,
+                // walls, residences, depleted shells) trips host-internal
+                // asserts like "GetUpgradeLevelBonuses() not found for ...",
+                // because the host expects these methods to be invoked
+                // only on production-capable buildings.
+                var workyard = false;
+                try {
+                    workyard = (typeof b.isWorkyard === 'function') && !!b.isWorkyard();
+                } catch (e) { workyard = false; }
+
                 var entry = {
-                    name:                 name,
-                    localized:            localizedText('BUI', name),
-                    grid:                 probeCall(b, 'GetGrid'),
-                    level:                probeCall(b, 'GetUpgradeLevel'),
-                    productionActive:     probeCall(b, 'IsProductionActive'),
-                    upgradeAllowed:       probeCall(b, 'IsUpgradeAllowed', [true]),
-                    upgradeInProgress:    probeCall(b, 'IsUpgradeInProgress'),
-                    inConstructionMode:   probeCall(b, 'IsInConstructionMode'),
-                    inDestruction:        probeCall(b, 'IsInDestruction'),
-                    isWorkyard:           probeCall(b, 'isWorkyard'),
-                    productionType:       (typeof b.productionType !== 'undefined') ? scalarize(b.productionType) : undefined,
-                    hasProductionBuff:    !!b.productionBuff,
-                    playerID:             probeCall(b, 'getPlayerID'),
-                    outputFactor:         probeCall(b, 'GetResourceOutputFactor'),
-                    inputFactor:          probeCall(b, 'GetResourceInputFactor')
+                    name:               name,
+                    localized:          localizedText('BUI', name),
+                    grid:               probeCall(b, 'GetGrid'),
+                    level:              probeCall(b, 'GetUpgradeLevel'),
+                    productionActive:   probeCall(b, 'IsProductionActive'),
+                    upgradeInProgress:  probeCall(b, 'IsUpgradeInProgress'),
+                    inConstructionMode: probeCall(b, 'IsInConstructionMode'),
+                    inDestruction:      probeCall(b, 'IsInDestruction'),
+                    isWorkyard:         workyard,
+                    productionType:     (typeof b.productionType !== 'undefined') ? scalarize(b.productionType) : undefined,
+                    hasProductionBuff:  !!b.productionBuff,
+                    playerID:           probeCall(b, 'getPlayerID')
                 };
-                var pq = dumpProductionQueue(b);
-                if (pq) entry.productionQueue = pq;
-                var rc = dumpResourceCreation(b);
-                if (rc) entry.resourceCreation = rc;
+
+                if (workyard) {
+                    entry.upgradeAllowed = probeCall(b, 'IsUpgradeAllowed', [true]);
+                    entry.outputFactor   = probeCall(b, 'GetResourceOutputFactor');
+                    entry.inputFactor    = probeCall(b, 'GetResourceInputFactor');
+                    var pq = dumpProductionQueue(b);
+                    if (pq) entry.productionQueue = pq;
+                    var rc = dumpResourceCreation(b);
+                    if (rc) entry.resourceCreation = rc;
+                }
+
                 buildings.push(entry);
             }
         } catch (e) {
