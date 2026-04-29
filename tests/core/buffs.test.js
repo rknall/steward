@@ -160,6 +160,39 @@ t.test('forBuilding() merges direct and Workyard matches without duplicating', f
     t.assert.deepStrictEqual(names, ['IronMineBuff', 'ProductivityBuff']);
 });
 
+// --- forDeposit -----------------------------------------------------------
+
+t.test('forDeposit() filters to FillDeposit_* buffs targeting the deposit name', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'FillDeposit_Iron',  amount: 5, targets: 'IronOre' }),
+        buff({ name: 'FillDeposit_Coal',  amount: 3, targets: 'Coal' }),
+        buff({ name: 'IronMineBuff',      amount: 2, targets: 'IronMine' }),  // not a refill
+        buff({ name: 'FillDeposit_Empty', amount: 0, targets: 'IronOre' })    // amount = 0
+    ]);
+    var iron = H.Steward.core.buffs.forDeposit('IronOre');
+    t.assert.strictEqual(iron.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.name(iron[0]), 'FillDeposit_Iron');
+
+    var coal = H.Steward.core.buffs.forDeposit('Coal');
+    t.assert.strictEqual(coal.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.name(coal[0]), 'FillDeposit_Coal');
+});
+
+t.test('forDeposit() returns [] when target is empty/missing', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'FillDeposit_Iron', amount: 1, targets: 'IronOre' })
+    ]);
+    t.assert.strictEqual(H.Steward.core.buffs.forDeposit('').length, 0);
+    t.assert.strictEqual(H.Steward.core.buffs.forDeposit(null).length, 0);
+});
+
+t.test('forDeposit() ignores buffs whose target does not include the deposit name', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'FillDeposit_Iron', amount: 1, targets: 'IronOre' })
+    ]);
+    t.assert.strictEqual(H.Steward.core.buffs.forDeposit('GoldOre').length, 0);
+});
+
 // --- localization helpers --------------------------------------------------
 
 t.test('displayName() returns localized text from loca.GetText("RES", name)', function () {

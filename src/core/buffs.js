@@ -224,6 +224,32 @@
         return out;
     }
 
+    // forDeposit(depositName) — refill items applicable to a deposit of
+    // the given name. TSO refill items are buffs named `FillDeposit_<X>`
+    // (e.g. FillDeposit_Iron, FillDeposit_Coal). They share the same
+    // SendServerAction(61, ...) call as building buffs but target the
+    // deposit's grid. Filter recipe:
+    //   - name begins with 'FillDeposit_'
+    //   - amount > 0
+    //   - target description includes the deposit name (e.g. 'IronOre')
+    function forDeposit(depositName) {
+        if (!depositName) return [];
+        var src = ensureSnapshot();
+        var out = [];
+        for (var i = 0; i < src.length; i++) {
+            var b = src[i];
+            if (!b) continue;
+            var nm = name(b);
+            if (!nm || nm.indexOf('FillDeposit_') !== 0) continue;
+            if (amount(b) <= 0) continue;
+            var t = targets(b);
+            for (var j = 0; j < t.length; j++) {
+                if (t[j] === depositName) { out.push(b); break; }
+            }
+        }
+        return out;
+    }
+
     // byName(name) — first inventory entry with the given GetType() name,
     // or null. Used by tryBuff to resolve the user-selected buff string.
     function byName(buffName) {
@@ -272,6 +298,7 @@
         // listing
         available:   available,
         forBuilding: forBuilding,
+        forDeposit:  forDeposit,
         byName:      byName,
         invalidate:  invalidate,
 
