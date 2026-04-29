@@ -348,8 +348,8 @@
                 try { typeName = (typeof b.GetType === 'function') ? b.GetType() : ''; } catch (e) { /* skip */ }
                 var entry = {
                     GetType:       typeName,
-                    localized:     loca('RES', typeName),
-                    description:   loca('DES', typeName),
+                    localized:     localizedText('RES', typeName),
+                    description:   localizedText('DES', typeName),
                     amount:        (typeof b.amount === 'number') ? b.amount : null,
                     GetResourceName_string: probeCall(b, 'GetResourceName_string'),
                     GetUniqueId:   probeCall(b, 'GetUniqueId')
@@ -394,8 +394,123 @@
         };
     }
 
-    // Buildings — every building on the current zone with its key fields
-    // and state predicates. Snapshot is fresh-read (invalidate first).
+    // Production state codes (autoTSO/user_auto.js:4776-4795). Captured
+    // here so the dump is self-explanatory.
+    var PRODUCTION_STATES = {
+        0: 'WORKING',
+        1: 'RESOURCE_MISSING',
+        2: 'WAREHOUSE_FULL',
+        5: 'STOPPED_PRODUCTION'
+    };
+
+    // Active production orders (mTimedProductions_vector). Each entry
+    // exposes the per-cycle ms (`GetProductionTime`), how many orders
+    // remain (`GetAmount` minus `GetProducedItems`), and elapsed time
+    // since last collection (`GetCollectedTime`). Time-to-finish is
+    // computed by the caller as needed; raw fields are dumped to keep
+    // the payload self-contained.
+    function dumpProductionQueue(b) {
+        try {
+            var pq = b.productionQueue;
+            if (!pq) return null;
+            var out = {
+                productionType: scalarize(pq.mProductionType),
+                queue: []
+            };
+            var tps = pq.mTimedProductions_vector;
+            var n = (tps && typeof tps.length === 'number') ? tps.length : 0;
+            for (var i = 0; i < n; i++) {
+                var tp = tps[i];
+                if (!tp) continue;
+                var item = {
+                    GetAmount:         probeCall(tp, 'GetAmount'),
+                    GetProductionTime: probeCall(tp, 'GetProductionTime'),
+                    GetProducedItems:  probeCall(tp, 'GetProducedItems'),
+                    GetCollectedTime:  probeCall(tp, 'GetCollectedTime')
+                };
+                // GetProductionOrder returns an order VO. Probe directly
+                // (probeCall would scalarize and lose nested fields).
+                var orderObj = null;
+                try {
+                    orderObj = (typeof tp.GetProductionOrder === 'function')
+                        ? tp.GetProductionOrder() : null;
+                } catch (e) { /* skip */ }
+                if (orderObj) {
+                    item.productionOrder = probeProps(orderObj, [
+                        'producedItems', 'amount', 'type_string',
+                        'orderId', 'orderId_int'
+                    ]);
+                    var vo = null;
+                    try {
+                        vo = (typeof orderObj.GetProductionVO === 'function')
+                            ? orderObj.GetProductionVO() : null;
+                    } catch (e) { /* skip */ }
+                    if (vo) {
+                        item.productionVO = probeProps(vo, [
+                            'type_string', 'amount', 'producedItems',
+                            'name_string', 'requiredAmount'
+                        ]);
+                    }
+                }
+                out.queue.push(item);
+            }
+            return out;
+        } catch (e) {
+            return { error: 'dumpProductionQueue threw: ' + (e && e.message ? e.message : e) };
+        }
+    }
+
+    // Resource creation: live state code + recipe (input resources, default
+    // output). Source: autoTSO/user_auto.js:4763-4796 + 5279.
+    function dumpResourceCreation(b) {
+        try {
+            var rc = (typeof b.GetResourceCreation === 'function')
+                ? b.GetResourceCreation() : null;
+            if (!rc) return null;
+            var stateInt = probeCall(rc, 'GetProductionState');
+            var out = {
+                productionState_int: stateInt,
+                productionState:     (typeof stateInt === 'number')
+                    ? (PRODUCTION_STATES[stateInt] || ('UNKNOWN_' + stateInt))
+                    : null
+            };
+            var rcd = null;
+            try {
+                rcd = (typeof rc.GetResourceCreationDefinition === 'function')
+                    ? rc.GetResourceCreationDefinition() : null;
+            } catch (e) { /* skip */ }
+            if (rcd) {
+                out.definition = {};
+                try {
+                    if (rcd.defaultSetting) {
+                        out.definition.defaultResource = scalarize(rcd.defaultSetting.resourceName_string);
+                        out.definition.defaultAmount   = scalarize(rcd.defaultSetting.amount);
+                    }
+                } catch (e) { /* skip */ }
+                try {
+                    var nr = rcd.necessaryResources_vector;
+                    var nlen = (nr && typeof nr.length === 'number') ? nr.length : 0;
+                    if (nlen > 0) {
+                        out.definition.necessaryResources = [];
+                        for (var j = 0; j < nlen; j++) {
+                            if (!nr[j]) continue;
+                            out.definition.necessaryResources.push({
+                                name_string: scalarize(nr[j].name_string),
+                                amount:      scalarize(nr[j].amount)
+                            });
+                        }
+                    }
+                } catch (e) { /* skip */ }
+            }
+            return out;
+        } catch (e) {
+            return { error: 'dumpResourceCreation threw: ' + (e && e.message ? e.message : e) };
+        }
+    }
+
+    // Buildings — every building on the current zone with its key fields,
+    // state predicates, and (where applicable) production queue + resource
+    // creation recipe + level multipliers. Snapshot is fresh-read.
     function buildBuildingsPayload() {
         var buildings = [];
         try {
@@ -412,7 +527,7 @@
                 catch (e) { /* skip */ }
                 var entry = {
                     name:                 name,
-                    localized:            loca('BUI', name),
+                    localized:            localizedText('BUI', name),
                     grid:                 probeCall(b, 'GetGrid'),
                     level:                probeCall(b, 'GetUpgradeLevel'),
                     productionActive:     probeCall(b, 'IsProductionActive'),
@@ -423,17 +538,24 @@
                     isWorkyard:           probeCall(b, 'isWorkyard'),
                     productionType:       (typeof b.productionType !== 'undefined') ? scalarize(b.productionType) : undefined,
                     hasProductionBuff:    !!b.productionBuff,
-                    playerID:             probeCall(b, 'getPlayerID')
+                    playerID:             probeCall(b, 'getPlayerID'),
+                    outputFactor:         probeCall(b, 'GetResourceOutputFactor'),
+                    inputFactor:          probeCall(b, 'GetResourceInputFactor')
                 };
+                var pq = dumpProductionQueue(b);
+                if (pq) entry.productionQueue = pq;
+                var rc = dumpResourceCreation(b);
+                if (rc) entry.resourceCreation = rc;
                 buildings.push(entry);
             }
         } catch (e) {
             return { error: 'dumpBuildings threw: ' + (e && e.message ? e.message : e) };
         }
         return {
-            generated: new Date().toISOString(),
-            count:     buildings.length,
-            buildings: buildings
+            generated:        new Date().toISOString(),
+            count:            buildings.length,
+            productionStates: PRODUCTION_STATES,    // legend
+            buildings:        buildings
         };
     }
 
