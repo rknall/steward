@@ -155,6 +155,309 @@
         notify('Zone dumped to log.');
     }
 
+    // ---------------------------------------------------------------
+    // JSON dumps to <appStorage>/steward/dumps/<name>.json — for
+    // investigating host data shapes when the dashboard's filters miss
+    // something (refills not firing, buffs not appearing, etc.). Each
+    // probe captures every attribute we can synchronously read off the
+    // host VO without a server round-trip.
+    // ---------------------------------------------------------------
+
+    function dumpsDir() {
+        try {
+            if (typeof air === 'undefined' || !air || !air.File) return null;
+            var dir = air.File.applicationStorageDirectory.resolvePath('steward/dumps');
+            if (!dir.exists) dir.createDirectory();
+            return dir;
+        } catch (e) {
+            S.kernel.error('diag:dump', 'dumpsDir threw:', e);
+            return null;
+        }
+    }
+
+    function writeJson(name, payload) {
+        var dir = dumpsDir();
+        if (!dir) {
+            S.kernel.warn('diag:dump', 'no writable dumps directory; skipping', name);
+            return null;
+        }
+        var f = dir.resolvePath(name);
+        try {
+            var stream = new air.FileStream();
+            stream.open(f, air.FileMode.WRITE);
+            stream.writeUTFBytes(JSON.stringify(payload, null, 2));
+            stream.close();
+            return f.nativePath;
+        } catch (e) {
+            S.kernel.error('diag:dump', 'write failed for', name, ':', e);
+            return null;
+        }
+    }
+
+    // Probe for a method call. Returns the value (or a sentinel string
+    // describing the failure) so the dump shows what the host actually
+    // returned without serializing host VOs by reference.
+    function probeCall(obj, methodName, args) {
+        if (!obj || typeof obj[methodName] !== 'function') return undefined;
+        try {
+            var rv = (args && args.length)
+                ? obj[methodName].apply(obj, args)
+                : obj[methodName]();
+            return scalarize(rv);
+        } catch (e) {
+            return '<<threw: ' + (e && e.message ? e.message : e) + '>>';
+        }
+    }
+
+    // Reduce a host VO to a JSON-friendly representation. Strings, numbers,
+    // booleans pass through; vectors/arrays become arrays of scalarized
+    // entries; everything else collapses to its constructor name + a
+    // sample of probed scalar fields.
+    function scalarize(v) {
+        if (v === null || typeof v === 'undefined') return v;
+        var t = typeof v;
+        if (t === 'string' || t === 'number' || t === 'boolean') return v;
+        if (t === 'function') return '<<function>>';
+        // Array-like
+        if (typeof v.length === 'number' && v.length >= 0) {
+            var out = [];
+            var n = v.length;
+            for (var i = 0; i < n && i < 50; i++) out.push(scalarize(v[i]));
+            if (n > 50) out.push('<<+' + (n - 50) + ' more>>');
+            return out;
+        }
+        // Generic object — return its toString or a class hint.
+        try {
+            var s = String(v);
+            if (s && s !== '[object Object]') return s;
+        } catch (e) { /* ignore */ }
+        return '<<object>>';
+    }
+
+    // Try a curated list of getter names; build {field: value, ...} for
+    // those that returned something useful. Keeps the dump compact and
+    // human-readable.
+    function probeGetters(obj, names) {
+        var out = {};
+        if (!obj) return out;
+        for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            var v = probeCall(obj, n);
+            if (typeof v === 'undefined') continue;
+            out[n] = v;
+        }
+        return out;
+    }
+
+    function probeProps(obj, names) {
+        var out = {};
+        if (!obj) return out;
+        for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            try {
+                if (typeof obj[n] === 'undefined') continue;
+                if (typeof obj[n] === 'function') continue;
+                out[n] = scalarize(obj[n]);
+            } catch (e) { /* skip */ }
+        }
+        return out;
+    }
+
+    function localizedText(cat, key) {
+        try {
+            if (typeof loca === 'undefined' || !loca || typeof loca.GetText !== 'function') return '';
+            var t = loca.GetText(cat, key);
+            return (typeof t === 'string') ? t : '';
+        } catch (e) { return ''; }
+    }
+
+    // Storehouse — every player resource with its default-definition
+    // metadata, current amount, and event-binding (if any).
+    function buildStorehousePayload() {
+        var resources = [];
+        var skipped = 0;
+        try {
+            var p = game.getResources();
+            var src = (p && typeof p.GetPlayerResources_vector === 'function')
+                ? p.GetPlayerResources_vector('') : [];
+            var defs = null;
+            try {
+                defs = game.def('ServerState::gEconomics');
+            } catch (e) { /* host not ready */ }
+            for (var i = 0; i < src.length; i++) {
+                var r = src[i];
+                if (!r) { skipped++; continue; }
+                var name = r.name_string || '';
+                var entry = {
+                    name_string:    name,
+                    localized:      localizedText('RES', name),
+                    amount:         (typeof r.amount === 'number') ? r.amount : null,
+                    producedAmount: (typeof r.producedAmount === 'number') ? r.producedAmount : null
+                };
+                if (defs) {
+                    try {
+                        var def = (typeof defs.GetResourcesDefaultDefinition === 'function')
+                            ? defs.GetResourcesDefaultDefinition(name) : null;
+                        if (def) {
+                            entry.definition = probeProps(def, [
+                                'tradable', 'isCommodity', 'maxAmount', 'storeyardLimit',
+                                'category', 'category_int', 'category_string',
+                                'requiredEventName_string'
+                            ]);
+                        }
+                        if (defs.mMap_EventResourceDefaultDefinition &&
+                            defs.mMap_EventResourceDefaultDefinition[name]) {
+                            entry.event = probeProps(
+                                defs.mMap_EventResourceDefaultDefinition[name],
+                                ['requiredEventName_string', 'eventName_string']
+                            );
+                        }
+                    } catch (e) { /* skip */ }
+                }
+                resources.push(entry);
+            }
+        } catch (e) {
+            return { error: 'dumpStorehouse threw: ' + (e && e.message ? e.message : e) };
+        }
+        return {
+            generated:  new Date().toISOString(),
+            count:      resources.length,
+            skipped:    skipped,
+            resources:  resources
+        };
+    }
+
+    // Buffs — every buff in the player's inventory with full definition
+    // metadata. Captures BuffType, TargetType, target description /
+    // group, name, amount, uniqueId. This is the dump that should reveal
+    // where deposit refills actually live.
+    function buildBuffsPayload() {
+        var buffs = [];
+        var skipped = 0;
+        try {
+            var p = (typeof game !== 'undefined' && game && game.gi)
+                ? game.gi.mCurrentPlayer : null;
+            if (!p || typeof p.getAvailableBuffs_vector !== 'function') {
+                return { error: 'getAvailableBuffs_vector unavailable' };
+            }
+            var src = p.getAvailableBuffs_vector();
+            for (var i = 0; i < src.length; i++) {
+                var b = src[i];
+                if (!b) { skipped++; continue; }
+                var typeName = '';
+                try { typeName = (typeof b.GetType === 'function') ? b.GetType() : ''; } catch (e) { /* skip */ }
+                var entry = {
+                    GetType:       typeName,
+                    localized:     loca('RES', typeName),
+                    description:   loca('DES', typeName),
+                    amount:        (typeof b.amount === 'number') ? b.amount : null,
+                    GetResourceName_string: probeCall(b, 'GetResourceName_string'),
+                    GetUniqueId:   probeCall(b, 'GetUniqueId')
+                };
+                var def = null;
+                try { def = (typeof b.GetBuffDefinition === 'function') ? b.GetBuffDefinition() : null; }
+                catch (e) { /* skip */ }
+                if (def) {
+                    entry.definition = probeGetters(def, [
+                        'GetName_string', 'GetBuffType', 'GetTargetType',
+                        'GetTargetDescription_string', 'GetTargetGroup_string',
+                        'GetGroup_string', 'GetCategory', 'GetCategory_int',
+                        'GetIsApplicable', 'GetCooldown_int', 'GetDuration_int',
+                        'GetAmount', 'GetAmount_int'
+                    ]);
+                    // Effect summary — probe each effect for its key fields.
+                    try {
+                        if (typeof def.GetBuffEfficiencies_vector === 'function') {
+                            var effs = def.GetBuffEfficiencies_vector();
+                            var elen = (effs && typeof effs.length === 'number') ? effs.length : 0;
+                            var effOut = [];
+                            for (var e = 0; e < elen && e < 20; e++) {
+                                effOut.push(probeProps(effs[e], [
+                                    'buffName', 'efficiency', 'modifier_string',
+                                    'multiplier', 'adder', 'value', 'type_string'
+                                ]));
+                            }
+                            if (effOut.length) entry.effects = effOut;
+                        }
+                    } catch (e2) { /* skip */ }
+                }
+                buffs.push(entry);
+            }
+        } catch (e) {
+            return { error: 'dumpBuffs threw: ' + (e && e.message ? e.message : e) };
+        }
+        return {
+            generated: new Date().toISOString(),
+            count:     buffs.length,
+            skipped:   skipped,
+            buffs:     buffs
+        };
+    }
+
+    // Buildings — every building on the current zone with its key fields
+    // and state predicates. Snapshot is fresh-read (invalidate first).
+    function buildBuildingsPayload() {
+        var buildings = [];
+        try {
+            if (S.core.buildings && S.core.buildings.invalidate) {
+                S.core.buildings.invalidate();
+            }
+            var src = (S.core.buildings && S.core.buildings.list)
+                ? S.core.buildings.list() : [];
+            for (var i = 0; i < src.length; i++) {
+                var b = src[i];
+                if (!b) continue;
+                var name = '';
+                try { name = (typeof b.GetBuildingName_string === 'function') ? b.GetBuildingName_string() : ''; }
+                catch (e) { /* skip */ }
+                var entry = {
+                    name:                 name,
+                    localized:            loca('BUI', name),
+                    grid:                 probeCall(b, 'GetGrid'),
+                    level:                probeCall(b, 'GetUpgradeLevel'),
+                    productionActive:     probeCall(b, 'IsProductionActive'),
+                    upgradeAllowed:       probeCall(b, 'IsUpgradeAllowed', [true]),
+                    upgradeInProgress:    probeCall(b, 'IsUpgradeInProgress'),
+                    inConstructionMode:   probeCall(b, 'IsInConstructionMode'),
+                    inDestruction:        probeCall(b, 'IsInDestruction'),
+                    isWorkyard:           probeCall(b, 'isWorkyard'),
+                    productionType:       (typeof b.productionType !== 'undefined') ? scalarize(b.productionType) : undefined,
+                    hasProductionBuff:    !!b.productionBuff,
+                    playerID:             probeCall(b, 'getPlayerID')
+                };
+                buildings.push(entry);
+            }
+        } catch (e) {
+            return { error: 'dumpBuildings threw: ' + (e && e.message ? e.message : e) };
+        }
+        return {
+            generated: new Date().toISOString(),
+            count:     buildings.length,
+            buildings: buildings
+        };
+    }
+
+    function dumpAllInventories() {
+        var dir = dumpsDir();
+        if (!dir) {
+            return notify('No writable dumps directory — see log.');
+        }
+        var written = [];
+        var paths = {
+            'storehouse.json': buildStorehousePayload(),
+            'buffs.json':      buildBuffsPayload(),
+            'buildings.json':  buildBuildingsPayload()
+        };
+        for (var fname in paths) {
+            var p = writeJson(fname, paths[fname]);
+            if (p) {
+                written.push(fname);
+                S.kernel.log('diag:dump', 'wrote', fname, '→', p);
+            }
+        }
+        notify('Dumped ' + written.length + ' file(s) to ' + dir.nativePath);
+    }
+
     // Dumps every resource in the player's inventory with internal name +
     // localized label + amount, sorted by display name. Useful for
     // identifying the right `name_string` keys when curating the
@@ -543,6 +846,8 @@
             h.button('Run', { onClick: inspectCurrentZone })));
         $rows.append(h.formRow('Dump player resource inventory',
             h.button('Run', { onClick: dumpResources })));
+        $rows.append(h.formRow('Write inventory JSON dumps (storehouse / buffs / buildings)',
+            h.button('Run', { onClick: dumpAllInventories })));
         $rows.append(h.formRow('Dump host snapshot',
             h.button('Run', { onClick: dumpHostSnapshot })));
         $rows.append(h.formRow('Dump kernel state',
@@ -556,6 +861,7 @@
     S.modules.diagnostics.dumpHostSnapshot          = dumpHostSnapshot;
     S.modules.diagnostics.dumpKernelState           = dumpKernelState;
     S.modules.diagnostics.dumpResources             = dumpResources;
+    S.modules.diagnostics.dumpAllInventories        = dumpAllInventories;
     S.modules.diagnostics.deepInspectExplorerTypes  = deepInspectExplorerTypes;
     S.modules.diagnostics.deepInspectGeologistTypes = deepInspectGeologistTypes;
 
