@@ -107,6 +107,19 @@ The "Verified?" column indicates how the row was confirmed:
 | 49 | Thorough Geologist | 178 | `thorough` | 18 effects on every deposit: `searchTime mul=3` (penalty) + `searchDepositCapacity mul=3` | wiki: "takes three times as long on deposit searches but finds three times bigger deposits". Universal capacity tripler at 3× time cost. In current scoring, capacity wins over time, so this geo ranks above vanilla on every deposit | wiki |
 | 95 | Stargazing Geologist | 336 | `Stargazinggeology` | 23 effects on every deposit: `searchTime mul=2` + `searchDepositCapacity mul=2`; modifierEffect chances Coal/Gold=0.25, Granite/Titanium/Salpeter=0.5 | wiki: "−50% task speed, +100% deposit size, chance to find Star Shards on successful searches for Coal, Gold Ore, Granite, Titanium Ore and Saltpeter". Christmas Event 2025. Like `GingerbreadGeology` but cap×2 instead of cap×1.5; better on premium deposits than tier-1 | wiki |
 
+### Newly catalogued from external dump (2026-04-29, corsair)
+
+Sourced from `docs/analysis/user_provided/corsair_specialists-20260428-194029.json`.
+Display names cross-referenced with
+[settlersonlinewiki.eu](https://settlersonlinewiki.eu/en/guides/geologist/).
+
+| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias | Verified? |
+|---|---|---|---|---|---|---|
+| 71 | Sophisticated Geologist | — | (no trait) | `friendpremiumbuff1` only; `description.GetTimeBonus = 300` | wiki: "+200% task speed" — pure-speed vanilla tier-3 (Anniversary Event 2021-2023). Encodes the bonus on `description` only; `geologistScoreFor` returns 1.0/1.0 (tied with vanilla) since the time bonus is not a trait-skill `searchTime` modifier. See open question on `description.GetTimeBonus` below | wiki |
+| 73 | Mummified Geologist | 290 | `mummified` | 18 effects on every deposit: `searchTime mul=3` (penalty) + `searchDepositCapacity mul=4` | wiki: "He takes three times as long on deposit searches. But he finds four times bigger deposits!" Halloween Event 2021-2023, 2025. **Strongest universal capacity trait observed** — beats `thorough` (×3) and `Stargazinggeology` (×2) at the same 3× time cost. In current scoring (capacity primary, time tiebreak), Mummified ranks above every prior trait on every deposit. See "Trait → recommended deposit" below | wiki |
+| 89 | Marathon Geologist | 328 | `marathon` | 18 effects on every deposit: `searchDepositCapacity mul=0.5` + `modifierEffect chance=1` | wiki: "completes tasks three times faster, but the discovered deposit is half as small. Has a chance to find random refills after a successful search." Valentine Event 2025. The 3× speed-up lives in `description.GetTimeBonus = 500`, NOT in a trait `searchTime` modifier — so `geologistScoreFor` sees only the cap×0.5 penalty and ranks Marathon **below vanilla**. The `modifierEffect` rolls a refill on success but is also unscored. Match the wiki guidance manually if you want to use it for refill farming | wiki |
+| 91 | Vesy, The Clueless Digger | 331 | `AAAAGeology` *(internal sort key — icon `trait_vesy.png` is the giveaway)* | 8 effects on Stone/Marble/Granite/Coal only: `searchTime mul=3` + `modifierEffect` (chances 10/20/40/45%) | wiki: "−67% task speed for stone, marble, coal and granite searches; chance of returning from successful searches with an adventure." Football Event 2025. Adventures-from-mining is a `modifierEffect` payload — unscored today, so Vesy ranks at cap×1, time×3 = strictly below vanilla on the four building deposits and tied-vanilla on the rest. Adventure drop only fires on Stone/Marble/Granite/Coal | wiki |
+
 ## Effect modifier vocabulary (observed)
 
 | Modifier | Meaning | Steward scoring? |
@@ -132,9 +145,14 @@ The "Verified?" column indicates how the row was confirmed:
 3. **`description.GetTimeBonus` discrepancy.** Most special geologists
    report `100` (i.e. 1.0× = vanilla baseline), even when their trait
    speeds up searches. The bonus appears to be a tier indicator (200% on
-   `buriedTreasure`, vanilla `Geologist GetType=5`) rather than a real
-   speed multiplier. Mining-trait `iron_willed2`'s 100% with `mul=0.5`
-   confirms time bonus is independent from trait modifiers.
+   `buriedTreasure`, vanilla `Geologist GetType=5`, 300% on Sophisticated
+   `GetType=71`, 500% on `marathon`) rather than a real speed multiplier.
+   Mining-trait `iron_willed2`'s 100% with `mul=0.5` confirms time bonus
+   is independent from trait modifiers. Marathon's 500% is the most
+   visible victim today: the wiki advertises "3× faster", but
+   `geologistScoreFor` doesn't read `GetTimeBonus`, so Marathon ranks at
+   cap×0.5 / time×1 — strictly below vanilla. Folding `GetTimeBonus`
+   into the score is the obvious next step.
 
 4. **`thorough` and `Stargazinggeology` time penalty.** `mul=3` and
    `mul=2` searchTime, paired with capacity multipliers, look like a
@@ -157,14 +175,22 @@ ranking falls back to insertion order in that case.
 
 The rough per-deposit "best trait" map (from current data):
 
-| Deposit | Best trait | Notes |
-|---|---|---|
-| Stone | `stone_cold` (cap×2, time×0.5) | tied with `versed` (cap×1.5, time×0.5 + extra finds) |
-| BronzeOre | `versed` | only universal cap-boosting trait that touches Bronze |
-| Marble | `stone_cold` | matches Stone |
-| IronOre | `iron_willed2` (Iron-Willed Geologist, wiki-verified) | cap×2 + time×0.5 on Iron; `versed` is the safe fallback when no Iron-Willed available |
-| GoldOre | `gold_hearted` (cap×2, time×0.5, modifier guaranteed) | best single-deposit trait observed |
-| Coal | `sooty` (cap×3, time×0.75, modifier 75%) | strongest observed trait by raw factor |
-| Granite | `stone_cold` | tied with `versed` |
-| TitaniumOre | `Trait_LovelyGeologist` (cap×2, modifier guaranteed) | best premium-deposit trait |
-| Salpeter | `Trait_LovelyGeologist` | matches Titanium |
+| Deposit | Best by capacity (current scorer) | Best by speed/yield trade-off | Notes |
+|---|---|---|---|
+| Stone | `mummified` (cap×4, time×3) | `stone_cold` (cap×2, time×0.5) | `mummified` wins the current scorer outright; `stone_cold` is preferable when search throughput matters |
+| BronzeOre | `mummified` (cap×4, time×3) | `versed` (cap×1.5, time×0.5) | only `mummified` and `versed` boost capacity on Bronze |
+| Marble | `mummified` (cap×4, time×3) | `stone_cold` (cap×2, time×0.5) | matches Stone |
+| IronOre | `mummified` (cap×4, time×3) | `iron_willed2` (cap×2, time×0.5) | wiki-verified Iron-Willed remains the throughput pick |
+| GoldOre | `mummified` (cap×4, time×3) | `gold_hearted` (cap×2, time×0.5, modifier guaranteed) | `gold_hearted` is the best single-deposit specialist when you also want the modifier |
+| Coal | `mummified` (cap×4, time×3) | `sooty` (cap×3, time×0.75, modifier 75%) | `sooty` is faster and adds a near-guaranteed modifier; `mummified` only wins on raw size |
+| Granite | `mummified` (cap×4, time×3) | `stone_cold` (cap×2, time×0.5) | matches Stone |
+| TitaniumOre | `mummified` (cap×4, time×3) | `Trait_LovelyGeologist` (cap×2, modifier guaranteed) | `Lovely` keeps the guaranteed modifier; `mummified` overtakes only on capacity |
+| Salpeter | `mummified` (cap×4, time×3) | `Trait_LovelyGeologist` (cap×2, modifier guaranteed) | matches Titanium |
+
+> Note: with `mummified` in the roster, `bestGeologistForDeposit(D)`
+> picks it for every deposit because the scorer ranks `capacityFactor`
+> primary and only uses `timeFactor` as a tiebreak. If you want
+> single-deposit specialists like `iron_willed2` or `gold_hearted` to
+> win on their deposit, you'll need a scoring change (e.g. fold a
+> normalised time penalty into the primary key). Documented as a
+> follow-up; not in scope here.

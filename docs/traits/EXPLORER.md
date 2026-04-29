@@ -102,6 +102,17 @@ The "Verified?" column indicates how the row was confirmed:
 | 68 | Motherly Explorer | 286 | `Trait_MotherlyExplorer` | 7 effects, **`mul=4 ChangeLoottableRolls` on every `FindTreasure*` size + Erudite + BeanACollada** (with all event suffixes). `description.GetTimeBonus = 100` | **Treasure (very strong)** — wiki: "loves to bring back lots of loot". Same shape as Emphatic (GetType=48) but `mul=4` instead of `mul=3`. Year-round score ≈ 21 (7 × ((4-1) chance=1)). Strong recommendation regardless of events | wiki |
 | 69 | Benevolent Explorer | 287 | `Trait_BenevolentExplorer` | 2 effects: `+1 ChangeLoottableRolls` on `FindTreasureEvenLonger` private `FindTreasure_Benevolent_Buffs1`, and on `FindTreasureProlonged` private `FindTreasure_Benevolent_Buffs2`. `description.GetTimeBonus = 200` | **Long-form buff finder** — wiki: "+100% speed, always finds an extra buff (sometimes a Medipack) on EvenLonger and Prolonged treasure searches". Football Event 2021. Bias is "extra buff loot rolls on the two longest variants"; family-wise lean is treasure (slight) | wiki |
 
+### Newly catalogued from external dump (2026-04-29, corsair)
+
+Sourced from `docs/analysis/user_provided/corsair_specialists-20260428-194029.json`.
+Display names cross-referenced with
+[settlersonlinewiki.eu](https://settlersonlinewiki.eu/en/guides/explorer/).
+
+| GetType | Display name | Trait id | Trait name_string | Effect summary | Implied bias | Verified? |
+|---|---|---|---|---|---|---|
+| 46 | Adventurous Explorer | 201 | `Trait_Soccer2019Explorer` | 11 effects: `searchCost mul=0.5` on every `FindAdventureZone[Short..VeryLong]`; `ChangeLootCount mul=1.5` on every `FindTreasure*` size + Erudite + BeanACollada (year-round + every event suffix). `description.GetTimeBonus = 400` | **Treasure (year-round) + adventure-cost discount** — wiki: "Four times as fast, and with 50% more rewards when sent on treasure searches, with lower travel costs for adventure searches." Soccer Event 2018, also Black Market. Internal `name_string` retained the 2019 placeholder; wiki name is **Adventurous Explorer**. Treasure scoring lands her firmly in that bucket; the `searchCost` discount on adventures is a silent side benefit (`biasFromTrait` doesn't score `searchCost`) | wiki |
+| 81 | Rina, The Explorer | 318 | `Trait_RinaTheExplorer` | 1 effect, `ChangeLoottableRolls add=1` on private `FindTreasure_Rina_Adventures` (matched by `name_string`; `type_string` empty). `description.GetTimeBonus = 400` | **Treasure (extra adventure rolls)** — wiki: "+300% task speed and a chance of finding adventures even on treasure searches" ("Search for Ancestors"). Anniversary Event 2023. The `_Adventures` suffix is misleading: the loot table is `FindTreasure_…`, so the family classifier puts her in treasure — which is correct, since she's *dispatched on* a treasure task and the *roll result* may be an adventure | wiki |
+
 Note: the host's own modifier name is **`ChangeLoottableRolls`** (not
 `changeloottablerolls`); autoTSO at `user_auto.js:4456` lower-cases before
 comparing. Our matcher will do the same.
