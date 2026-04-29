@@ -81,9 +81,31 @@
         state.cursors[priority] = (cursor + 1) % inTier.length;
     }
 
+    // Per-tick cache invalidation. The snapshot caches in core/{buildings,
+    // buffs, resources} are designed to be "valid for the duration of one
+    // tick" — multiple plan() calls within the same tick share the same
+    // snapshot, then the next tick gets a fresh read. Without explicit
+    // invalidation here, read-only modules (mining's tryUpgrade, tryPause)
+    // would let a snapshot survive across thousands of ticks, holding
+    // stale host-VO references that the AIR GC can't reclaim. Long-session
+    // memory pressure builds and the host eventually crashes.
+    //
+    // Each invalidate() is just `snapshot = null`; the next read repopulates
+    // from the live host. Defensively wrapped — a missing core subsystem or
+    // a thrown invalidate must not abort the tick.
+    function invalidateCaches() {
+        try { if (S.core.buildings && S.core.buildings.invalidate) S.core.buildings.invalidate(); }
+        catch (e) { S.kernel.warn('scheduler', 'buildings.invalidate threw:', e); }
+        try { if (S.core.buffs     && S.core.buffs.invalidate)     S.core.buffs.invalidate(); }
+        catch (e) { S.kernel.warn('scheduler', 'buffs.invalidate threw:', e); }
+        try { if (S.core.resources && S.core.resources.invalidate) S.core.resources.invalidate(); }
+        catch (e) { S.kernel.warn('scheduler', 'resources.invalidate threw:', e); }
+    }
+
     function tick() {
         if (!state.running) return;
         state.tickCount++;
+        invalidateCaches();
         var ctx = buildContext();
         S.kernel.debug('scheduler', 'tick', state.tickCount, 'modules:', S.kernel.registry.count());
 
