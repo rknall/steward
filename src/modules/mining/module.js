@@ -141,6 +141,7 @@
             if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
         }
     }
+
     function tryUpgrade(info, cfg, ctx) {
         if (!cfg.upgrade) return;
         if (ctx.slotsRemaining <= 0) return;
@@ -183,6 +184,7 @@
             if (ctx.slotsRemaining <= 0) return;
         }
     }
+
     function tryPause(info, cfg, ctx) {
         // Pause-only. Steward only undoes what Steward did:
         //   cfg.pause=true  ⇒ pause producing mines whose deposit has
@@ -209,12 +211,16 @@
         var threshold = (typeof settings.pauseThreshold === 'number')
             ? settings.pauseThreshold : 50;
 
-        // Will we be refilling this type? If so, skip pause.
+        // Will we be refilling this type? If so, skip pause. cfg.refill is
+        // a yes/no toggle — the planner auto-picks the specific refill
+        // item via core/buffs.forDeposit (deposit-targeted buffs in
+        // inventory). If anything matches, refill will fire.
         var refillAvailable = false;
-        if (cfg.refill && typeof cfg.refill === 'string' &&
-            S.core.buffs && S.core.buffs.byName) {
-            var rb = S.core.buffs.byName(cfg.refill);
-            refillAvailable = !!(rb && S.core.buffs.amount(rb) > 0);
+        if (cfg.refill === true && S.core.buffs && S.core.buffs.forDeposit) {
+            try {
+                var matches = S.core.buffs.forDeposit(info.name) || [];
+                refillAvailable = matches.length > 0;
+            } catch (e) { refillAvailable = false; }
         }
 
         // Walk deposits (not buildings) so we can read GetAmount() for the
@@ -263,6 +269,7 @@
                 delay);
         }
     }
+
     function tryBuff(info, cfg, ctx) {
         // Apply the user-selected buff (cfg.buff) to every eligible
         // building of this deposit type. Mine-bearing types target the
@@ -300,17 +307,32 @@
                 delay);
         }
     }
+
     function tryRefill(info, cfg, ctx) {
         // Refill triggers when a deposit drops below pauseThreshold,
-        // regardless of cfg.pause. cfg.refill names the buff to apply
-        // (string, picked via UI dropdown filtered to FillDeposit_*).
-        // No buff selected, no buff in inventory → silent no-op.
-        if (!cfg.refill || typeof cfg.refill !== 'string') return;
-        if (!S.core.buffs || !S.core.buffs.byName) return;
+        // regardless of cfg.pause. cfg.refill is a boolean toggle —
+        // we auto-detect the deposit-specific refill via core/buffs.forDeposit
+        // (TargetType=1 buffs whose target description matches info.name).
+        // We deliberately avoid the generic deposit refiller; only items
+        // specific to this deposit type are picked.
+        if (cfg.refill !== true) return;
+        if (!S.core.buffs || !S.core.buffs.forDeposit) return;
 
-        var rb = S.core.buffs.byName(cfg.refill);
-        if (!rb) return;
-        var stockLeft = S.core.buffs.amount(rb);
+        var matches = [];
+        try { matches = S.core.buffs.forDeposit(info.name) || []; }
+        catch (e) {
+            S.kernel.warn('mining', 'forDeposit threw for', info.name, ':', e);
+            return;
+        }
+        if (!matches.length) return;
+
+        // Pick the first match. If multiple specific refills exist for the
+        // same deposit, the user can pick a more curated list later via the
+        // UI; for now any match is "good enough".
+        var refillBuff = matches[0];
+        var refillName = S.core.buffs.name(refillBuff);
+        if (!refillName) return;
+        var stockLeft = S.core.buffs.amount(refillBuff);
         if (stockLeft <= 0) return;
 
         var settings  = readSettings();
@@ -347,7 +369,7 @@
             // info.mineName may be null for mason types — pass it through
             // so the queue action can decide whether to attempt unpause.
             S.kernel.queue.add('mining.refillDeposit',
-                [grid, info.name, cfg.refill, info.mineName, threshold, remaining],
+                [grid, info.name, refillName, info.mineName, threshold, remaining],
                 delay);
         }
     }

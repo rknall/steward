@@ -125,7 +125,6 @@
         }), 'auto-pause when deposit remaining drops below this'));
 
         appendDepositTable($panel, h, s);
-        appendStatusFooter($panel, h);
     }
 
     function appendDepositTable($panel, h, s) {
@@ -135,8 +134,8 @@
         var depCfg = (s && s.deposits) || {};
 
         $panel.append(h.gridRow(
-            [[2, 'Deposit'], [1, 'Build'], [1, 'Upgrade'], [1, 'Lvl'],
-             [1, 'Pause'], [2, 'Buff'], [3, 'Refill'], [1, 'Active']],
+            [[3, 'Deposit'], [1, 'Build'], [1, 'Upgrade'], [1, 'Lvl'],
+             [1, 'Pause'], [1, 'Refill'], [3, 'Buff'], [1, 'Active']],
             { headerCells: true }
         ));
 
@@ -186,68 +185,28 @@
                     $targetCell  = '—';
                     $pauseCell   = '—';
                 }
-                $buffCell   = renderBuffDropdown(h, depositName, currentCfg, target);
-                $refillCell = renderRefillDropdown(h, depositName, currentCfg);
+                $buffCell = renderBuffDropdown(h, depositName, currentCfg, target);
+                // Refill: yes/no toggle. The planner auto-detects the
+                // matching deposit-specific refill buff via core/buffs.forDeposit
+                // (TargetType=1, target description includes deposit name).
+                $refillCell = h.toggle({
+                    checked:  currentCfg.refill === true,
+                    onChange: function (next) {
+                        updateDeposit(h, depositName, { refill: !!next });
+                    }
+                });
                 $panel.append(h.gridRow(
-                    [[2, depositName],
+                    [[3, depositName],
                      [1, $buildCell],
                      [1, $upgradeCell],
                      [1, $targetCell],
                      [1, $pauseCell],
-                     [2, $buffCell],
-                     [3, $refillCell],
+                     [1, $refillCell],
+                     [3, $buffCell],
                      [1, String(activeNum)]]
                 ));
             })(info.name, cfg, active, !!info.mineName, buffTarget);
         }
-    }
-
-    // Build the per-row Buff dropdown. Pulls the inventory snapshot once
-    // per render, filters by target building name, and wires the change
-    // handler back through updateDeposit so the partial write preserves
-    // every other field.
-    // Refill dropdown — populated from S.core.buffs.forDeposit (filters
-    // FillDeposit_* buffs targeting the deposit's name). Same selection
-    // pattern as the buff dropdown; the value stored in cfg.refill is
-    // the buff's internal name string.
-    function renderRefillDropdown(h, depositName, cfg) {
-        if (!S.core.buffs || !S.core.buffs.forDeposit) return '—';
-        var inv = [];
-        try { inv = S.core.buffs.forDeposit(depositName) || []; }
-        catch (e) { inv = []; }
-
-        var entries = [];
-        for (var i = 0; i < inv.length; i++) {
-            var b = inv[i];
-            var internal = S.core.buffs.name(b);
-            if (!internal) continue;
-            var label = S.core.buffs.displayName(b);
-            var amt   = S.core.buffs.amount(b);
-            entries.push({
-                value:   internal,
-                sortKey: label,
-                label:   label + ' (' + amt + ')'
-            });
-        }
-        entries.sort(function (a, b) {
-            var ak = (a.sortKey || '').toLowerCase();
-            var bk = (b.sortKey || '').toLowerCase();
-            if (ak < bk) return -1;
-            if (ak > bk) return 1;
-            return 0;
-        });
-
-        var options = [{ value: '', label: 'None' }];
-        for (var j = 0; j < entries.length; j++) {
-            options.push({ value: entries[j].value, label: entries[j].label });
-        }
-        return h.dropdown(options, {
-            selected: typeof cfg.refill === 'string' ? cfg.refill : '',
-            width:    '180px',
-            onChange: function (val) {
-                updateDeposit(h, depositName, { refill: val || '' });
-            }
-        });
     }
 
     function renderBuffDropdown(h, depositName, cfg, target) {

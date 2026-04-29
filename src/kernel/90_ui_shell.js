@@ -659,6 +659,35 @@
 
         $panel.append($('<div>').css({ height: '10px' }));
 
+        // ---- Section: Player resources ----
+        // Build queue + license counts. Used by tryBuild's gating logic and
+        // worth surfacing here so users can see capacity at a glance without
+        // opening the host's own building UI.
+        try {
+            var p  = (typeof game !== 'undefined' && game && game.gi)
+                ? game.gi.mCurrentPlayer : null;
+            var bq = (p && p.mBuildQueue) || null;
+            var slotsTotal = (bq && typeof bq.GetTotalAvailableSlots === 'function')
+                ? bq.GetTotalAvailableSlots() : null;
+            var slotsUsed  = (bq && typeof bq.GetQueue_vector === 'function')
+                ? bq.GetQueue_vector().length : null;
+            var licMax     = (p && typeof p.GetMaxBuildingCount === 'function')
+                ? p.GetMaxBuildingCount() : null;
+            var licUsed    = (p && typeof p.mCurrentBuildingsCountAll === 'number')
+                ? p.mCurrentBuildingsCountAll : null;
+            $panel.append(h.headerRow('Player resources', { icon: '⚒' }));
+            if (slotsTotal !== null && slotsUsed !== null) {
+                $panel.append(h.formRow('Build queue',
+                    slotsUsed + ' / ' + slotsTotal + ' slots used'));
+            }
+            if (licMax !== null && licUsed !== null) {
+                $panel.append(h.formRow('Building licenses',
+                    licUsed + ' / ' + licMax + ' used'));
+            }
+        } catch (e) { /* host not ready */ }
+
+        $panel.append($('<div>').css({ height: '10px' }));
+
         // ---- Section: Active events ----
         try {
             if (S.core.events && S.core.events.active) {

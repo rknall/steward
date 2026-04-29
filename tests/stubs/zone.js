@@ -62,6 +62,7 @@ function buff(opts) {
     opts = opts || {};
     var def = {
         GetBuffType:                function () { return typeof opts.buffType === 'number' ? opts.buffType : 0; },
+        GetTargetType:               function () { return typeof opts.targetType === 'number' ? opts.targetType : 0; },
         GetTargetDescription_string: function () { return opts.targets || ''; },
         GetTargetGroup_string:       function () { return opts.targetGroup || ''; },
         GetName_string:              function () { return opts.name || ''; },

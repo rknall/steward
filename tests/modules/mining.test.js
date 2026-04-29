@@ -440,10 +440,13 @@ function withRefillFixture(opts) {
     var buffs = [];
     var stockSpec = (typeof opts.refillStock === 'number') ? opts.refillStock : 5;
     if (stockSpec > 0 || opts.alwaysIncludeBuff) {
+        // Stage a deposit-specific refill: TargetType=1 (deposit-targeted),
+        // target description includes the deposit name.
         buffs.push(H.zone.buff({
-            name:    'FillDeposit_Iron',
-            amount:  stockSpec,
-            targets: depositName
+            name:       'IronOreRefill',
+            amount:     stockSpec,
+            targets:    depositName,
+            targetType: 1
         }));
     }
     var z = H.zone.zone()
@@ -458,7 +461,7 @@ function withRefillFixture(opts) {
     settings.actionDelay = 0;
     settings.pauseThreshold = (typeof opts.threshold === 'number') ? opts.threshold : 50;
     settings.deposits[depositName].refill = (typeof opts.refill === 'undefined')
-        ? 'FillDeposit_Iron' : opts.refill;
+        ? true : opts.refill;
     if (typeof opts.pause !== 'undefined') {
         settings.deposits[depositName].pause = opts.pause;
     }
@@ -466,13 +469,13 @@ function withRefillFixture(opts) {
     return H;
 }
 
-t.test('tryRefill skips when cfg.refill is empty', function () {
-    var H = withRefillFixture({ refill: '', amount: 10 });
+t.test('tryRefill skips when cfg.refill is false', function () {
+    var H = withRefillFixture({ refill: false, amount: 10 });
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
 
-t.test('tryRefill skips when refill buff is not in inventory', function () {
+t.test('tryRefill skips when no deposit-specific refill is in inventory', function () {
     var H = withRefillFixture({ refillStock: 0, amount: 10 });
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
@@ -484,26 +487,20 @@ t.test('tryRefill skips when deposit is at or above threshold', function () {
     t.assert.strictEqual(H.queued().length, 0);
 });
 
-t.test('tryRefill queues mining.refillDeposit when below threshold and stock available', function () {
+t.test('tryRefill queues mining.refillDeposit when below threshold and refill in stock', function () {
     var H = withRefillFixture({ amount: 10, threshold: 50 });
     H.module('mining').plan({ zone: { isHome: true } });
-    var q = H.queued();
-    // tryRefill queues at least the refill action. tryPause runs first
-    // for the same deposit type, but it skips because refill is available.
-    var refillEntries = q.filter(function (e) { return e.name === 'mining.refillDeposit'; });
+    var refillEntries = H.queued().filter(function (e) { return e.name === 'mining.refillDeposit'; });
     t.assert.strictEqual(refillEntries.length, 1);
-    t.assert.strictEqual(refillEntries[0].params[0], 12);                  // grid
-    t.assert.strictEqual(refillEntries[0].params[1], 'IronOre');           // depoName
-    t.assert.strictEqual(refillEntries[0].params[2], 'FillDeposit_Iron');  // buffName
-    t.assert.strictEqual(refillEntries[0].params[3], 'IronMine');          // mineName
-    t.assert.strictEqual(refillEntries[0].params[4], 50);                  // threshold
-    t.assert.strictEqual(refillEntries[0].params[5], 10);                  // preRefillAmount
+    t.assert.strictEqual(refillEntries[0].params[0], 12);              // grid
+    t.assert.strictEqual(refillEntries[0].params[1], 'IronOre');        // depoName
+    t.assert.strictEqual(refillEntries[0].params[2], 'IronOreRefill');  // auto-detected refill name
+    t.assert.strictEqual(refillEntries[0].params[3], 'IronMine');       // mineName
+    t.assert.strictEqual(refillEntries[0].params[4], 50);               // threshold
+    t.assert.strictEqual(refillEntries[0].params[5], 10);               // preRefillAmount
 });
 
-t.test('tryPause skips pause when a refill is available for the type', function () {
-    // cfg.pause=true, deposit below threshold, mine producing — would
-    // normally queue a pause. With refill available, the pause is skipped
-    // (refill will keep the deposit producing; no flicker).
+t.test('tryPause skips pause when a deposit-specific refill is available for the type', function () {
     var H = withRefillFixture({
         pause:    true,
         amount:   10,
@@ -511,18 +508,16 @@ t.test('tryPause skips pause when a refill is available for the type', function 
         threshold: 50
     });
     H.module('mining').plan({ zone: { isHome: true } });
-    var q = H.queued();
-    var pauseEntries = q.filter(function (e) {
+    var pauseEntries = H.queued().filter(function (e) {
         return e.name === 'mining.setProduction' && e.params[2] === false;
     });
     t.assert.strictEqual(pauseEntries.length, 0);
 });
 
 t.test('tryPause records grid in stewardPausedGrids when pausing without refill', function () {
-    // No refill (empty cfg.refill) — tryPause should pause AND record.
     var H = withRefillFixture({
         pause:    true,
-        refill:   '',
+        refill:   false,
         amount:   10,
         producing: true,
         threshold: 50,
@@ -534,7 +529,6 @@ t.test('tryPause records grid in stewardPausedGrids when pausing without refill'
 });
 
 t.test('tryRefill stops queueing when stock runs out across multiple deposits', function () {
-    // Two IronOre deposits both below threshold, only 1 refill in stock.
     var H = harness.boot();
     var depo1 = H.zone.deposit({ name: 'IronOre', grid: 12, amount: 10 });
     var depo2 = H.zone.deposit({ name: 'IronOre', grid: 13, amount: 5  });
@@ -544,14 +538,16 @@ t.test('tryRefill stops queueing when stock runs out across multiple deposits', 
         .deposits('IronOre', [depo1, depo2])
         .building(mine1)
         .building(mine2)
-        .buffs([H.zone.buff({ name: 'FillDeposit_Iron', amount: 1, targets: 'IronOre' })])
+        .buffs([H.zone.buff({
+            name: 'IronOreRefill', amount: 1, targets: 'IronOre', targetType: 1
+        })])
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
     var settings = onlyMiningEnabled('IronOre', false);
     settings.actionDelay = 0;
     settings.pauseThreshold = 50;
-    settings.deposits.IronOre.refill = 'FillDeposit_Iron';
+    settings.deposits.IronOre.refill = true;
     H.settings.write('mining', settings);
     H.module('mining').plan({ zone: { isHome: true } });
     var refills = H.queued().filter(function (e) { return e.name === 'mining.refillDeposit'; });

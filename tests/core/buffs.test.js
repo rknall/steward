@@ -162,25 +162,25 @@ t.test('forBuilding() merges direct and Workyard matches without duplicating', f
 
 // --- forDeposit -----------------------------------------------------------
 
-t.test('forDeposit() filters to FillDeposit_* buffs targeting the deposit name', function () {
+t.test('forDeposit() filters to TargetType=1 buffs targeting the deposit name', function () {
     var H = bootWithBuffs([
-        buff({ name: 'FillDeposit_Iron',  amount: 5, targets: 'IronOre' }),
-        buff({ name: 'FillDeposit_Coal',  amount: 3, targets: 'Coal' }),
-        buff({ name: 'IronMineBuff',      amount: 2, targets: 'IronMine' }),  // not a refill
-        buff({ name: 'FillDeposit_Empty', amount: 0, targets: 'IronOre' })    // amount = 0
+        buff({ name: 'TitaniumRefill', amount: 5, targets: 'TitaniumOre', targetType: 1 }),
+        buff({ name: 'CoalRefill',     amount: 3, targets: 'Coal',         targetType: 1 }),
+        buff({ name: 'IronMineBuff',   amount: 2, targets: 'IronMine',     targetType: 0 }),  // building buff
+        buff({ name: 'EmptyRefill',    amount: 0, targets: 'TitaniumOre', targetType: 1 })   // amount=0
     ]);
-    var iron = H.Steward.core.buffs.forDeposit('IronOre');
-    t.assert.strictEqual(iron.length, 1);
-    t.assert.strictEqual(H.Steward.core.buffs.name(iron[0]), 'FillDeposit_Iron');
+    var ti = H.Steward.core.buffs.forDeposit('TitaniumOre');
+    t.assert.strictEqual(ti.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.name(ti[0]), 'TitaniumRefill');
 
     var coal = H.Steward.core.buffs.forDeposit('Coal');
     t.assert.strictEqual(coal.length, 1);
-    t.assert.strictEqual(H.Steward.core.buffs.name(coal[0]), 'FillDeposit_Coal');
+    t.assert.strictEqual(H.Steward.core.buffs.name(coal[0]), 'CoalRefill');
 });
 
 t.test('forDeposit() returns [] when target is empty/missing', function () {
     var H = bootWithBuffs([
-        buff({ name: 'FillDeposit_Iron', amount: 1, targets: 'IronOre' })
+        buff({ name: 'TitaniumRefill', amount: 1, targets: 'TitaniumOre', targetType: 1 })
     ]);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit('').length, 0);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit(null).length, 0);
@@ -188,9 +188,18 @@ t.test('forDeposit() returns [] when target is empty/missing', function () {
 
 t.test('forDeposit() ignores buffs whose target does not include the deposit name', function () {
     var H = bootWithBuffs([
-        buff({ name: 'FillDeposit_Iron', amount: 1, targets: 'IronOre' })
+        buff({ name: 'TitaniumRefill', amount: 1, targets: 'TitaniumOre', targetType: 1 })
     ]);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit('GoldOre').length, 0);
+});
+
+t.test('forDeposit() rejects buffs whose definition has no GetTargetType', function () {
+    // Defensive — a stub buff whose definition lacks GetTargetType should
+    // not slip through the filter as if it were deposit-targeted.
+    var H = bootWithBuffs([
+        buff({ name: 'Mystery', amount: 1, targets: 'IronOre' })   // no targetType opt → 0
+    ]);
+    t.assert.strictEqual(H.Steward.core.buffs.forDeposit('IronOre').length, 0);
 });
 
 // --- localization helpers --------------------------------------------------

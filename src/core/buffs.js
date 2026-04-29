@@ -224,14 +224,25 @@
         return out;
     }
 
+    // True when the buff is deposit-targeted (TSO TargetType === 1, per
+    // autoTSO/user_auto.js:4617). Refill items live here. Building buffs
+    // are TargetType === 0 and surface via `forBuilding`.
+    function isDepositBuff(b) {
+        var def = definition(b);
+        if (!def || typeof def.GetTargetType !== 'function') return false;
+        try { return def.GetTargetType() === 1; }
+        catch (e) { return false; }
+    }
+
     // forDeposit(depositName) — refill items applicable to a deposit of
-    // the given name. TSO refill items are buffs named `FillDeposit_<X>`
-    // (e.g. FillDeposit_Iron, FillDeposit_Coal). They share the same
-    // SendServerAction(61, ...) call as building buffs but target the
-    // deposit's grid. Filter recipe:
-    //   - name begins with 'FillDeposit_'
+    // the given name. Filter recipe:
+    //   - definition's TargetType === 1 (deposit-targeted)
     //   - amount > 0
-    //   - target description includes the deposit name (e.g. 'IronOre')
+    //   - target description includes the deposit name (e.g. 'TitaniumOre')
+    //
+    // Buff name patterns (FillDeposit_*, RefillTitanium, etc.) are ignored —
+    // TSO doesn't enforce a naming convention here, but TargetType is
+    // authoritative.
     function forDeposit(depositName) {
         if (!depositName) return [];
         var src = ensureSnapshot();
@@ -239,8 +250,7 @@
         for (var i = 0; i < src.length; i++) {
             var b = src[i];
             if (!b) continue;
-            var nm = name(b);
-            if (!nm || nm.indexOf('FillDeposit_') !== 0) continue;
+            if (!isDepositBuff(b)) continue;
             if (amount(b) <= 0) continue;
             var t = targets(b);
             for (var j = 0; j < t.length; j++) {
