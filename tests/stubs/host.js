@@ -81,7 +81,21 @@ function makeGame() {
                 SendMessagetoServer: noop
             }
         },
-        def:          function () { return null; },
+        def: function (key) {
+            // Minimal stub for game.def("Communication.VO::dUniqueID") used by
+            // S.core.buffs.freshUniqueId. Real host returns a host VO factory;
+            // here we return a plain Create() that builds an object with the
+            // same shape so the action code can pass it through to the noop
+            // SendServerAction stub without throwing.
+            if (key === 'Communication.VO::dUniqueID') {
+                return {
+                    Create: function (p1, p2) {
+                        return { uniqueID1: p1, uniqueID2: p2, _stubFresh: true };
+                    }
+                };
+            }
+            return null;
+        },
         getResources: function () {
             var inv = g._resourceInventory || {};
             return {

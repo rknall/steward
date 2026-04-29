@@ -421,6 +421,10 @@ t.test('tryBuff applies to mason buildings via masonName for non-mine deposit ty
 
 function withRefillFixture(opts) {
     var H = harness.boot();
+    // Refill is feature-gated off in production (host rejects programmatic
+    // FillDeposit applications — see docs/superpowers/mining/refill-investigation.md).
+    // Tests flip the gate to exercise the planner / queue paths.
+    H.Steward.modules.mining._REFILL_ENABLED = true;
     opts = opts || {};
     var depositName = 'IronOre';
     var bldName     = 'IronMine';
@@ -440,13 +444,14 @@ function withRefillFixture(opts) {
     var buffs = [];
     var stockSpec = (typeof opts.refillStock === 'number') ? opts.refillStock : 5;
     if (stockSpec > 0 || opts.alwaysIncludeBuff) {
-        // Stage a deposit-specific refill: TargetType=1 (deposit-targeted),
-        // target description includes the deposit name.
+        // Live-host shape: every refill carries GetType='FillDeposit' with an
+        // empty target-description; only GetResourceName_string identifies
+        // the deposit. core/buffs.forDeposit gates strictly on that field.
         buffs.push(H.zone.buff({
-            name:       'IronOreRefill',
-            amount:     stockSpec,
-            targets:    depositName,
-            targetType: 1
+            name:         'FillDeposit',
+            amount:       stockSpec,
+            resourceName: depositName,
+            targetType:   1
         }));
     }
     var z = H.zone.zone()
@@ -468,6 +473,23 @@ function withRefillFixture(opts) {
     H.settings.write('mining', settings);
     return H;
 }
+
+t.test('refill feature gate: readSettings sanitizes refill=true to false when disabled', function () {
+    // Default state of the module is _REFILL_ENABLED=false (production).
+    // Persisted cfg.refill=true must be normalized to false on read so
+    // it cannot reach the planner via stale settings.
+    var H = harness.boot();
+    // Fixture writes refill=true into settings:
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay = 0;
+    settings.deposits.IronOre.refill = true;          // attempt to enable
+    H.settings.write('mining', settings);
+    // Plan with the gate OFF (default). No refill action should queue
+    // even though settings have refill=true.
+    H.module('mining').plan({ zone: { isHome: true } });
+    var refills = H.queued().filter(function (e) { return e.name === 'mining.refillDeposit'; });
+    t.assert.strictEqual(refills.length, 0);
+});
 
 t.test('tryRefill skips when cfg.refill is false', function () {
     var H = withRefillFixture({ refill: false, amount: 10 });
@@ -492,12 +514,11 @@ t.test('tryRefill queues mining.refillDeposit when below threshold and refill in
     H.module('mining').plan({ zone: { isHome: true } });
     var refillEntries = H.queued().filter(function (e) { return e.name === 'mining.refillDeposit'; });
     t.assert.strictEqual(refillEntries.length, 1);
-    t.assert.strictEqual(refillEntries[0].params[0], 12);              // grid
-    t.assert.strictEqual(refillEntries[0].params[1], 'IronOre');        // depoName
-    t.assert.strictEqual(refillEntries[0].params[2], 'IronOreRefill');  // auto-detected refill name
-    t.assert.strictEqual(refillEntries[0].params[3], 'IronMine');       // mineName
-    t.assert.strictEqual(refillEntries[0].params[4], 50);               // threshold
-    t.assert.strictEqual(refillEntries[0].params[5], 10);               // preRefillAmount
+    t.assert.strictEqual(refillEntries[0].params[0], 12);          // grid
+    t.assert.strictEqual(refillEntries[0].params[1], 'IronOre');    // depoName
+    t.assert.strictEqual(refillEntries[0].params[2], 'IronMine');   // mineName
+    t.assert.strictEqual(refillEntries[0].params[3], 50);           // threshold
+    t.assert.strictEqual(refillEntries[0].params[4], 10);           // preRefillAmount
 });
 
 t.test('tryPause skips pause when a deposit-specific refill is available for the type', function () {
@@ -528,8 +549,46 @@ t.test('tryPause records grid in stewardPausedGrids when pausing without refill'
     t.assert.strictEqual(paused[12], true);
 });
 
+t.test('tryRefill ignores FillDeposit entries for other resources (no GetType collision)', function () {
+    // Live-host trap: every refill in the player's inventory shares
+    // GetType='FillDeposit'. If the planner or queue action ever resolved
+    // by name alone, an IronOre refill would silently grab the Meat stack.
+    var H = harness.boot();
+    H.Steward.modules.mining._REFILL_ENABLED = true;
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12, amount: 10 });
+    var mine = H.zone.building({ name: 'IronMine', grid: 12, producing: true });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .building(mine)
+        .buffs([
+            H.zone.buff({ name: 'FillDeposit', amount: 1300600, resourceName: 'Meat',    targetType: 1 }),
+            H.zone.buff({ name: 'FillDeposit', amount: 1004600, resourceName: 'Fish',    targetType: 1 }),
+            H.zone.buff({ name: 'FillDeposit', amount: 7,       resourceName: 'IronOre', targetType: 1 })
+        ])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var settings = onlyMiningEnabled('IronOre', false);
+    settings.actionDelay = 0;
+    settings.pauseThreshold = 50;
+    settings.deposits.IronOre.refill = true;
+    H.settings.write('mining', settings);
+    H.module('mining').plan({ zone: { isHome: true } });
+
+    var refills = H.queued().filter(function (e) { return e.name === 'mining.refillDeposit'; });
+    t.assert.strictEqual(refills.length, 1);
+    t.assert.strictEqual(refills[0].params[1], 'IronOre');   // depoName carried through
+
+    // forDeposit must isolate the correct stack regardless of inventory order.
+    var picked = H.Steward.core.buffs.forDeposit('IronOre');
+    t.assert.strictEqual(picked.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.amount(picked[0]), 7);
+    t.assert.strictEqual(H.Steward.core.buffs.resourceName(picked[0]), 'IronOre');
+});
+
 t.test('tryRefill stops queueing when stock runs out across multiple deposits', function () {
     var H = harness.boot();
+    H.Steward.modules.mining._REFILL_ENABLED = true;
     var depo1 = H.zone.deposit({ name: 'IronOre', grid: 12, amount: 10 });
     var depo2 = H.zone.deposit({ name: 'IronOre', grid: 13, amount: 5  });
     var mine1 = H.zone.building({ name: 'IronMine', grid: 12, producing: true });
@@ -539,7 +598,7 @@ t.test('tryRefill stops queueing when stock runs out across multiple deposits', 
         .building(mine1)
         .building(mine2)
         .buffs([H.zone.buff({
-            name: 'IronOreRefill', amount: 1, targets: 'IronOre', targetType: 1
+            name: 'FillDeposit', amount: 1, resourceName: 'IronOre', targetType: 1
         })])
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));

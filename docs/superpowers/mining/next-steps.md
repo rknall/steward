@@ -5,8 +5,8 @@ Pickup notes for resuming work on the mining module after a context reset. Self-
 ## Current State (as of 2026-04-29)
 
 **Branch:** `main` (working directly).
-**Tests:** 91 passing, 0 failing, lint 0 errors / 3 unrelated warnings.
-**Bundle:** `build/user_steward.js` (~138 KB).
+**Tests:** 99 passing, 0 failing, lint 0 errors / 3 unrelated warnings.
+**Bundle:** `build/user_steward.js` (~147 KB).
 
 Mining module phases:
 
@@ -15,8 +15,8 @@ Mining module phases:
 | `tryBuild` | shipped (v1) — places mines on fresh deposits, gated on slots/licenses/affordability |
 | `tryUpgrade` | shipped — auto-upgrade to per-type `targetLevel`, defensive re-check |
 | `tryBuff` | shipped — auto-applies user-selected buff (per-type dropdown), `canApply` gate respects `productionBuff`/upgrade/destruction/paused |
-| `tryPause` | shipped — pauses producing mines below `pauseThreshold`, skips when refill available, records `stewardPausedGrids` for later auto-unpause |
-| `tryRefill` | **shipped but not firing on live host** — see below |
+| `tryPause` | shipped — pauses producing mines below `pauseThreshold`, records `stewardPausedGrids` for later auto-unpause |
+| `tryRefill` | **disabled** — code preserved behind `S.modules.mining._REFILL_ENABLED` flag (default false). Host silently rejects programmatic deposit refills regardless of call shape we tried. See `docs/superpowers/mining/refill-investigation.md`. |
 
 Other recent work:
 - `core/resources.js` (player inventory wrapper)
@@ -26,35 +26,30 @@ Other recent work:
 - Diagnostics dump button (Tools → Diagnostics → "Write inventory JSON dumps") writes `storehouse.json`, `buffs.json`, `buildings.json` to `<appStorage>/steward/dumps/`.
 - Trait doc: `docs/traits/EXPLORER.md` GetType=4 confirmed as Savage Scout.
 
-## Open Issue: tryRefill does not fire on the live host
+## Resolved: tryRefill on the live host (2026-04-29)
 
-User's reproduction: TitaniumOre at 49 (below threshold 50), Refill toggle ON for TitaniumOre, refill items in inventory ("in star"). Expected: refill fires. Actual: mine gets paused instead, no refill action.
+The dump (`docs/analysis/dump/buffs.json:5250-5266`) revealed two bugs.
 
-### What we know
+### Bug 1 — `forDeposit` filter never matched FillDeposit buffs
 
-1. `S.core.buffs.forDeposit('TitaniumOre')` returns `[]`. Filter is `def.GetTargetType() === 1` AND target description contains the deposit name AND amount > 0.
-2. The user clarified: **star items are buffs**, not a separate inventory. autoTSO `user_auto.js:4819-4842` (`transferFromStarToStore`) shows star items are `getAvailableBuffs_vector` entries with `GetType() === 'AddResource'` and `GetResourceName_string()` distinguishing them.
-3. User clarified: **refills stay in star, never get transferred to the storehouse**. So the path is: buff in star → applied directly on a deposit. NOT: claim → use.
-4. We currently don't know the actual `GetType` / `GetTargetType` / `GetResourceName_string` shape of TSO's deposit refill items. The default-naming guess (`FillDeposit_*`) was wrong (`FillDeposit_Fishfood` is a quest helper).
+The live host's refill items all share `GetType: "FillDeposit"` (one entry per resource: TitaniumOre, Salpeter, Meat, Fish, …) with `GetTargetDescription_string: ""` (empty). The deposit name lives in `GetResourceName_string` on the *outer* buff object, not in the definition's target list.
 
-### What's left
+Old filter (`src/core/buffs.js`): `TargetType === 1 && target list includes depositName` — second clause never satisfied → empty result → `tryPause` ran instead.
 
-1. **User runs the diagnostics dump** on the live host: Tools → Diagnostics → "Write inventory JSON dumps". Three files appear in `<appStorage>/steward/dumps/`.
-2. **Inspect `buffs.json`** for entries that represent the user's titanium refill. Things to look for:
-   - `GetType === 'AddResource'` with `GetResourceName_string` containing "Titanium" or "Refill"
-   - Any entry with `definition.GetTargetType === 1`
-   - Any entry whose `GetResourceName_string` matches `TitaniumOre` exactly
-3. **Patch `S.core.buffs.forDeposit`** in `src/core/buffs.js` to match the actual shape.
-4. **Possibly patch the queue action** (`mining.refillDeposit` in `src/modules/mining/module.js`) if the host call differs from `SendServerAction(61, 0, grid, 0, uniqueId, null)`.
+Fix: strict-equality match on `GetResourceName_string`. Target-description path was retired (Option B) so a tolerant fallback can't accidentally pick the wrong stack. New `resourceName(b)` accessor on `S.core.buffs`.
 
-### Patch fork — three likely outcomes
+### Bug 2 — `mining.refillDeposit` action could grab the wrong stack
 
-| What buffs.json reveals | Fix |
-|---|---|
-| Entry with `GetType: 'AddResource'`, `GetResourceName_string: 'TitaniumOreRefill'` (or similar), `GetTargetType: 1` and target description includes `TitaniumOre` | Bug is just our filter — adjust `forDeposit` to match `GetResourceName_string` or relax the target-description match. |
-| Entry with `GetType: 'AddResource'`, target description **doesn't** include `TitaniumOre` (only the resource name) | `forDeposit` filter changes to match against `GetResourceName_string` containing the deposit name (or against a hard-coded mapping deposit→refill resource name). |
-| Entry's `GetTargetType` is **not 1** (e.g. 0 or unset) | Drop the `TargetType=1` requirement; rely on naming convention or `GetResourceName_string` match instead. |
-| No matching entry at all in buffs.json | Refill items live in a different inventory (mailbox?). Need a server roundtrip via `SendMessagetoServer(1175, ...)` — defer until that's in scope. |
+Every FillDeposit shares `GetType: "FillDeposit"`. The action's `S.core.buffs.byName(buffName)` lookup would have returned the *first* FillDeposit entry in inventory (in our dump, that was Meat — at line 4207). Even with bug 1 fixed, queueing a TitaniumOre refill could have sent a Meat buff to the deposit.
+
+Fix: drop `buffName` from the queue params. The action re-resolves via `S.core.buffs.forDeposit(depoName)[0]` at send-time, which is collision-resistant by construction (resourceName equality).
+
+### Test coverage added
+
+- `forDeposit() filters to TargetType=1 buffs by GetResourceName_string` — live-host shape, resourceName-only match.
+- `forDeposit() does not fall back to GetTargetDescription_string` — locks Option B's strict semantics.
+- `forDeposit() does not collide across FillDeposit entries with same GetType` — Meat/Fish/Iron multi-entry inventory, only Iron matches a `forDeposit('IronOre')` query.
+- `tryRefill ignores FillDeposit entries for other resources (no GetType collision)` — planner-side end-to-end.
 
 ## Test Recipe Once Patched
 
@@ -80,6 +75,12 @@ These were debated and locked in — don't reopen without checking:
 
 ## Side Tickets / Backlog
 
+- **Generic host-VO introspection helper + Diagnostics dumper** (NEW 2026-04-29): The mining module currently inlines a `describeType` + named-property probe (`probeCursorShape` in `src/modules/mining/module.js`) — useful for any host VO whose properties are invisible to `for-in` (every Flash-bridged object). Promote to `src/core/host-introspect.js` exposing `describeVO(obj)` returning `{classMetadata, candidateProbes, knownAccessors}`, and add a Diagnostics button "Dump host VO" that writes JSON dumps for a curated list (`game.gi.mCurrentCursor`, `mCurrentPlayer`, `mClientMessages`, `mCurrentPlayerZone`, `channels.BUFF`). Cuts ~70 lines from the mining-module diagnostic and gives us a reusable tool when the next "what shape is this host VO?" question shows up. Defer until refill fix lands.
+- **Bootup readiness gate** (NEW 2026-04-29): autoTSO defers initialization until host VOs are reachable. Pattern in `autoTSO/user_auto.js:8073` (`auto.load(count)`):
+  1. Try the boot work inside try/catch.
+  2. On exception: `if (count < 6) auto.load(++count); else setTimeout(auto.load, 10000);` — six fast retries, then 10s gap, repeating.
+  3. Only after `auto.update.fetchReleaseData()` completes does `auto.init()` register `game.gi.channels.ZONE` observers etc.
+  Steward currently registers modules and starts the scheduler at script load, on the assumption that `game.gi.mCurrentPlayer` etc. are already populated. If the user enables Steward early in a session — or the host has a slow first paint — `boot()` hooks may fire against half-initialized state and silently misbehave (e.g. an empty `getAvailableBuffs_vector`, missing `mStreetDataMap`). Implement at `src/kernel/lifecycle.js` (or wherever boot is sequenced): poll readiness probes (`game?.gi?.mCurrentPlayer?.getAvailableBuffs_vector`, `mCurrentPlayerZone?.mStreetDataMap`) on a setTimeout backoff before invoking module `boot` hooks. Defer until after the refill investigation is closed.
 - **Collections section "Tracked items"**: defaults seeded with the user's items (`CollectibleFurs`, `CollectibleScarecrow`, `CollectibleWineBarrel`, `CollectibleHerbs`, `CollectibleAdamantium`, `CollectibleFoodCart`, `CollectibleBanner`, `CollectibleGrainSacks`, `CollectibleBronzeCauldron`, `CollectibleKettle`). Existing users with the old names in their persisted `collect.inventory.items` need to either delete that field (defaults reseed) or update to the `Collectible*` keys manually.
 - **Star menu (mailbox) dump**: skipped because it requires `SendMessagetoServer(1175, ...)` async response. Add when needed.
 - **UI editor for Collections tracked-items list**: currently requires editing `settings.json`. Low priority.

@@ -53,16 +53,54 @@ function isoDate() {
 	return new Date().toISOString().slice(0, 10);
 }
 
-function readVersion() {
-	if (process.env.STEWARD_VERSION) return process.env.STEWARD_VERSION;
+function readPackage() {
 	try {
-		const pkg = JSON.parse(
+		return JSON.parse(
 			fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"),
 		);
-		return pkg.version || "0.0.0";
 	} catch (e) {
-		return "0.0.0";
+		return {};
 	}
+}
+
+function readVersion(pkg) {
+	if (process.env.STEWARD_VERSION) return process.env.STEWARD_VERSION;
+	return (pkg && pkg.version) || "0.0.0";
+}
+
+// Manifest snippet for the TSO standalone client's script manager UI.
+// Format documented at:
+//   https://github.com/fedorovvl/tso_client/blob/master/userscripts/README.md
+// The "Advanced" section: scripts can dynamically register themselves by
+// assigning to customScripts[<filename>]. Defensive try/catch + typeof
+// check so the script doesn't break when loaded outside the script
+// manager (e.g. straight into AIR for development).
+function manifestSnippet(pkg) {
+	const repoUrl =
+		(pkg && pkg.repository && pkg.repository.url) ||
+		"https://github.com/rknall/steward";
+	const cleanUrl = repoUrl.replace(/^git\+/, "").replace(/\.git$/, "");
+	const author = (pkg && pkg.author) || "Roland Knall";
+	const version = readVersion(pkg);
+	const entry = {
+		name: "Steward",
+		author: author,
+		title: "Steward — TSO automation framework v" + version,
+		description:
+			(pkg && pkg.description) ||
+			"Modular automation framework for The Settlers Online.",
+		url: cleanUrl,
+	};
+	return [
+		"/* TSO standalone client script-manager manifest. See",
+		" * https://github.com/fedorovvl/tso_client/blob/master/userscripts/README.md */",
+		"try {",
+		"    if (typeof customScripts !== 'undefined' && customScripts) {",
+		"        customScripts['user_steward.js'] = " + JSON.stringify(entry, null, 4) + ";",
+		"    }",
+		"} catch (e) { /* no script manager — running standalone is fine */ }",
+		"",
+	].join("\n");
 }
 
 function banner(version, sha, date, fileCount, byteCount) {
@@ -86,8 +124,15 @@ function banner(version, sha, date, fileCount, byteCount) {
 async function build() {
 	if (!fs.existsSync(BUILD_DIR)) fs.mkdirSync(BUILD_DIR, { recursive: true });
 
+	const pkg = readPackage();
+
 	const parts = [];
 	let totalFiles = 0;
+
+	// Manifest snippet first — must run before kernel sources so the
+	// script manager has the entry registered as soon as the bundle loads.
+	parts.push("/* ===== manifest ===== */");
+	parts.push(manifestSnippet(pkg));
 
 	for (let i = 0; i < SECTION_NAMES.length; i++) {
 		const sectionName = SECTION_NAMES[i];
@@ -131,7 +176,7 @@ async function build() {
 		console.error("Minification failed, using raw body:", err);
 	}
 
-	const version = readVersion();
+	const version = readVersion(pkg);
 	const sha = gitShortSha();
 	const date = isoDate();
 	const head = banner(

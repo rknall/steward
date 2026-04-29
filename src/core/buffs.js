@@ -66,10 +66,44 @@
         catch (e) { return null; }
     }
 
+    // freshUniqueId(b) — return a NEWLY-CONSTRUCTED dUniqueID VO for the buff,
+    // not the host-managed one returned by b.GetUniqueId(). The host's
+    // SendServerAction(61, ...) silently rejects stale/cached uid references
+    // — see tso_client/.../6-buffs.js:sendBuffPacket for the reference
+    // implementation. Pulls the two integer parts (uniqueID1, uniqueID2) off
+    // the original VO, then calls game.def("Communication.VO::dUniqueID").
+    // Create(part1, part2) to produce a fresh VO. Returns null on miss.
+    function freshUniqueId(b) {
+        var raw = uniqueId(b);
+        if (!raw) return null;
+        var part1 = raw.uniqueID1;
+        var part2 = raw.uniqueID2;
+        if (typeof part1 === 'undefined' || typeof part2 === 'undefined') return null;
+        try {
+            if (typeof game === 'undefined' || !game || typeof game.def !== 'function') return null;
+            var ctor = game.def('Communication.VO::dUniqueID');
+            if (!ctor || typeof ctor.Create !== 'function') return null;
+            return ctor.Create(part1, part2);
+        } catch (e) {
+            S.kernel.warn('buffs', 'freshUniqueId Create threw:', e);
+            return null;
+        }
+    }
+
     function definition(b) {
         if (!b) return null;
         try { return (typeof b.GetBuffDefinition === 'function') ? b.GetBuffDefinition() : null; }
         catch (e) { return null; }
+    }
+
+    // resourceName(b) — outer GetResourceName_string(). For FillDeposit and
+    // other category-style consumables the GetType() name is shared across
+    // every entry ('FillDeposit' for Titanium, Meat, Fish, …); the resource
+    // string is the only field that distinguishes them. Returns '' on miss.
+    function resourceName(b) {
+        if (!b) return '';
+        try { return (typeof b.GetResourceName_string === 'function') ? (b.GetResourceName_string() || '') : ''; }
+        catch (e) { return ''; }
     }
 
     // Mine/mason buffs are GetBuffType() === 0. Other types (zone-wide,
@@ -238,11 +272,13 @@
     // the given name. Filter recipe:
     //   - definition's TargetType === 1 (deposit-targeted)
     //   - amount > 0
-    //   - target description includes the deposit name (e.g. 'TitaniumOre')
+    //   - GetResourceName_string() === depositName (exact match)
     //
-    // Buff name patterns (FillDeposit_*, RefillTitanium, etc.) are ignored —
-    // TSO doesn't enforce a naming convention here, but TargetType is
-    // authoritative.
+    // The live host's FillDeposit entries share GetType='FillDeposit' across
+    // every resource and leave GetTargetDescription_string empty — only
+    // GetResourceName_string identifies which deposit the buff applies to.
+    // Strict equality intentionally: a tolerant fallback would risk picking
+    // a Meat refill for a TitaniumOre request.
     function forDeposit(depositName) {
         if (!depositName) return [];
         var src = ensureSnapshot();
@@ -252,10 +288,7 @@
             if (!b) continue;
             if (!isDepositBuff(b)) continue;
             if (amount(b) <= 0) continue;
-            var t = targets(b);
-            for (var j = 0; j < t.length; j++) {
-                if (t[j] === depositName) { out.push(b); break; }
-            }
+            if (resourceName(b) === depositName) out.push(b);
         }
         return out;
     }
@@ -313,13 +346,15 @@
         invalidate:  invalidate,
 
         // accessors
-        name:        name,
-        displayName: displayName,
-        description: description,
-        amount:      amount,
-        uniqueId:    uniqueId,
-        targets:     targets,
-        targetGroup: targetGroup,
+        name:          name,
+        displayName:   displayName,
+        description:   description,
+        amount:        amount,
+        uniqueId:      uniqueId,
+        freshUniqueId: freshUniqueId,
+        resourceName:  resourceName,
+        targets:       targets,
+        targetGroup:   targetGroup,
 
         // matchers / gate
         matches:     matches,

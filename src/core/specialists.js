@@ -378,15 +378,41 @@
     // for queue payloads, exclude maps, and any "re-find this exact
     // specialist later" need — display names can collide across multiple
     // specimens of the same GetType. Returns null when the host doesn't
-    // expose a uniqueID. core.specialists.dispatch.uniqueId returns the
-    // dUniqueID *object* (for the server packet); this helper returns
-    // the .toKeyString() form (for use as a JS map key).
+    // expose a usable uniqueID at all. core.specialists.dispatch.uniqueId
+    // returns the dUniqueID *object* (for the server packet); this helper
+    // returns a string form for use as a JS map key.
+    //
+    // Two extraction paths, tried in order:
+    //   1. uid.toKeyString() — convenience method when present.
+    //   2. uid.uniqueID1 + '.' + uid.uniqueID2 — the underlying integer
+    //      parts. This is the SAME format toKeyString produces (e.g.
+    //      "135415.0") so both paths produce equivalent keys, and an
+    //      exclude-map populated by one is comparable to the other.
+    //
+    // We need both because some specialist subtypes / host builds /
+    // localized init orders expose only the integer parts without the
+    // toKeyString method. The strict-method-only path was producing
+    // intermittent null uids on Dutch builds, breaking re-find at action
+    // time. See refill-investigation.md for the related buff case at
+    // tso_client/6-buffs.js:119 which uses the same uniqueID1/uniqueID2
+    // pattern.
     function uniqueIdKey(spec) {
         if (!spec) return null;
         try {
-            if (typeof spec.GetUniqueID === 'function') {
-                var uid = spec.GetUniqueID();
-                if (uid && typeof uid.toKeyString === 'function') return uid.toKeyString();
+            if (typeof spec.GetUniqueID !== 'function') return null;
+            var uid = spec.GetUniqueID();
+            if (!uid) return null;
+            if (typeof uid.toKeyString === 'function') {
+                try {
+                    var ks = uid.toKeyString();
+                    if (ks) return ks;
+                } catch (e1) { /* fall through to fields */ }
+            }
+            // Field-level fallback. Both parts may be 0 — check that the
+            // properties exist (typeof check handles 0 correctly).
+            if (typeof uid.uniqueID1 !== 'undefined' &&
+                typeof uid.uniqueID2 !== 'undefined') {
+                return uid.uniqueID1 + '.' + uid.uniqueID2;
             }
         } catch (e) { /* fall through */ }
         return null;

@@ -22,6 +22,33 @@
 
     if (!S.modules.mining) S.modules.mining = {};
 
+    // Refill feature gate. The deposit-refill SendServerAction(61, ...)
+    // path is silently rejected by the host; even SendMessagetoServer with
+    // a dServerAction VO reaches the server but fails server-side
+    // validation. See docs/superpowers/mining/refill-investigation.md for
+    // the full investigation chronology. Until a workable wire format is
+    // found (likely needs cracked-client / decompile work), we keep the
+    // code intact but gate the user-visible feature off:
+    //   - tryRefill phase short-circuits at entry
+    //   - readSettings sanitizes any persisted cfg.refill=true to false
+    //   - ui.js hides the Refill column when this is false
+    //   - tryPause's "skip when refill available" branch is therefore
+    //     never reached (refillAvailable always false)
+    //
+    // Stored on the module namespace (not as a closure var) so tests can
+    // flip the gate via `H.Steward.modules.mining._REFILL_ENABLED = true`
+    // without rebuilding. Production toggle: edit this line and rebuild.
+    S.modules.mining._REFILL_ENABLED = false;
+
+    // Diagnostic logging for refill paths. Independent of _REFILL_ENABLED
+    // so a re-investigation can run with diagnostics off, or a partial
+    // probe (cursor / host-VO / buffApplied observer) can run without
+    // queueing any refill actions.
+    S.modules.mining._REFILL_DEBUG = false;
+
+    function refillEnabled() { return !!S.modules.mining._REFILL_ENABLED; }
+    function refillDebug()   { return !!S.modules.mining._REFILL_DEBUG;   }
+
     // Module-private state. Survives across ticks but resets on reboot.
     // tryPause records grids it queued a pause for; tryRefill's queue
     // action consults this map to auto-unpause ONLY mines paused by
@@ -53,6 +80,22 @@
         for (key in defaultDeps) depMerged[key] = defaultDeps[key];
         for (key in storedDeps)  depMerged[key] = storedDeps[key];
         merged.deposits = depMerged;
+        // Sanitize refill flags. The feature is gated off (see REFILL_ENABLED
+        // at top of file) — any persisted cfg.refill=true must not reach the
+        // planner or be exposed to the UI as enabled state. We rewrite at
+        // read time so partial migrations / stale settings can't accidentally
+        // turn it back on.
+        if (!refillEnabled()) {
+            for (key in depMerged) {
+                if (depMerged[key] && depMerged[key].refill === true) {
+                    // Clone to avoid mutating shared default objects.
+                    var copy = {};
+                    for (var k2 in depMerged[key]) copy[k2] = depMerged[key][k2];
+                    copy.refill = false;
+                    depMerged[key] = copy;
+                }
+            }
+        }
         return merged;
     }
 
@@ -309,6 +352,12 @@
     }
 
     function tryRefill(info, cfg, ctx) {
+        // Feature gate. See REFILL_ENABLED at top of file. The phase body
+        // below is preserved for future re-investigation but never runs
+        // while the gate is off — readSettings also forces cfg.refill to
+        // false in that mode, so this check is belt-and-suspenders.
+        if (!refillEnabled()) return;
+
         // Refill triggers when a deposit drops below pauseThreshold,
         // regardless of cfg.pause. cfg.refill is a boolean toggle —
         // we auto-detect the deposit-specific refill via core/buffs.forDeposit
@@ -324,16 +373,33 @@
             S.kernel.warn('mining', 'forDeposit threw for', info.name, ':', e);
             return;
         }
-        if (!matches.length) return;
+        if (!matches.length) {
+            if (refillDebug()) {
+                S.kernel.log('mining', '[diag] tryRefill:', info.name,
+                             '— no matching refill in inventory (forDeposit=[])');
+            }
+            return;
+        }
+        if (refillDebug()) {
+            S.kernel.log('mining', '[diag] tryRefill:', info.name,
+                         '— matched refill, resourceName=',
+                         S.core.buffs.resourceName(matches[0]),
+                         'amount=', S.core.buffs.amount(matches[0]));
+        }
 
         // Pick the first match. If multiple specific refills exist for the
         // same deposit, the user can pick a more curated list later via the
         // UI; for now any match is "good enough".
         var refillBuff = matches[0];
-        var refillName = S.core.buffs.name(refillBuff);
-        if (!refillName) return;
+        if (!refillBuff) return;
         var stockLeft = S.core.buffs.amount(refillBuff);
-        if (stockLeft <= 0) return;
+        if (stockLeft <= 0) {
+            if (refillDebug()) {
+                S.kernel.log('mining', '[diag] tryRefill:', info.name,
+                             '— stock<=0, skipping');
+            }
+            return;
+        }
 
         var settings  = readSettings();
         var threshold = (typeof settings.pauseThreshold === 'number')
@@ -347,6 +413,7 @@
         }
         if (!depos || !depos.length) return;
 
+        var depositsBelowThreshold = 0;
         for (var i = 0; i < depos.length; i++) {
             var depo = depos[i];
             if (!depo) continue;
@@ -356,6 +423,7 @@
 
             var remaining = S.core.deposits.amount(depo);
             if (remaining >= threshold) continue;
+            depositsBelowThreshold++;
 
             // Don't queue more refills than we have items in stock —
             // multiple deposits below threshold could each reserve one.
@@ -366,11 +434,23 @@
             ctx.queued++;
 
             var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            if (refillDebug()) {
+                S.kernel.log('mining', '[diag] tryRefill: queueing refill for',
+                             info.name, 'grid', grid, 'remaining', remaining);
+            }
             // info.mineName may be null for mason types — pass it through
             // so the queue action can decide whether to attempt unpause.
+            // The action re-resolves the matching refill buff via forDeposit
+            // at send-time — we deliberately don't pass a buff name through
+            // because every FillDeposit shares GetType='FillDeposit' on the
+            // live host; the deposit name is the unambiguous handle.
             S.kernel.queue.add('mining.refillDeposit',
-                [grid, info.name, refillName, info.mineName, threshold, remaining],
+                [grid, info.name, info.mineName, threshold, remaining],
                 delay);
+        }
+        if (depositsBelowThreshold === 0 && refillDebug()) {
+            S.kernel.log('mining', '[diag] tryRefill:', info.name,
+                         '— no deposits below threshold (have refill, all full)');
         }
     }
 
@@ -427,9 +507,221 @@
         }
     }
 
+    // [diag-host] Install a buffApplied observer on game.gi.channels.BUFF.
+    // Fires on EVERY buff that the host's buff system processes — both
+    // manual refills (UI click) and programmatic ones (SendServerAction
+    // that the host accepts). Lets us decide whether our refill calls
+    // reach the buff system at all, and observe the live target/buff
+    // shape on a known-working manual refill.
+    //
+    // Reference: tso_client/.../6-buffs.js:1,74,187 (the Buffs feature).
+    function installBuffAppliedObserver() {
+        try {
+            if (typeof game === 'undefined' || !game || !game.gi ||
+                !game.gi.channels || !game.gi.channels.BUFF ||
+                typeof game.getTracker !== 'function') {
+                S.kernel.log('mining',
+                             '[diag] buffApplied observer skipped — channels.BUFF unavailable');
+                return;
+            }
+            var tracker = game.getTracker('stewardBuffDiag', function (event) {
+                try {
+                    var d = (event && event.data) || {};
+                    var buffType = '';
+                    var buffDefName = '';
+                    var buffResource = '';
+                    if (d.buff) {
+                        try { if (typeof d.buff.GetType === 'function') buffType = d.buff.GetType(); } catch (e1) {}
+                        try { if (typeof d.buff.GetResourceName_string === 'function') buffResource = d.buff.GetResourceName_string() || ''; } catch (e2) {}
+                        try {
+                            if (typeof d.buff.GetBuffDefinition === 'function') {
+                                var def = d.buff.GetBuffDefinition();
+                                if (def && typeof def.GetName_string === 'function') buffDefName = def.GetName_string();
+                            }
+                        } catch (e3) {}
+                    }
+                    var tGrid = '?', tBuildingName = '', tDepositName = '';
+                    if (d.target) {
+                        try { if (typeof d.target.GetGrid === 'function') tGrid = d.target.GetGrid(); } catch (e4) {}
+                        try { if (typeof d.target.GetBuildingName_string === 'function') tBuildingName = d.target.GetBuildingName_string() || ''; } catch (e5) {}
+                        try { if (typeof d.target.GetName_string === 'function') tDepositName = d.target.GetName_string() || ''; } catch (e6) {}
+                    }
+                    S.kernel.log('buff',
+                                 '[diag] buffApplied:',
+                                 'type=', buffType,
+                                 'def=', buffDefName,
+                                 'resource=', buffResource,
+                                 'target_grid=', tGrid,
+                                 'building=', tBuildingName,
+                                 'deposit=', tDepositName,
+                                 'ownerID=', d.buffOwnerID);
+                } catch (logErr) {
+                    S.kernel.warn('buff', '[diag] tracker callback threw:', logErr);
+                }
+            });
+            game.gi.channels.BUFF.addPropertyObserver('buffApplied', tracker);
+            S.kernel.log('mining', '[diag] buffApplied observer installed on channels.BUFF');
+        } catch (e) {
+            var msg = (e && (e.message || e.toString())) || 'unknown';
+            S.kernel.warn('mining',
+                          '[diag] buffApplied observer install failed:', msg);
+        }
+    }
+
+    // [diag-host] Probe game.gi.mCurrentCursor for slots that might
+    // hold a "selected buff" the host reads before processing
+    // SendServerAction(61). for-in is empty on AIR Flash bridges so we
+    // probe by name. mCurrentSpecialist is our positive control — its
+    // presence proves the probe works.
+    // [diag-host] describeType in chunks. Some host VO types have several
+    // KB of metadata; logging lines are size-limited so we split at line
+    // boundaries and emit each as a separate log event.
+    function logDescribeType(label, obj) {
+        try {
+            var rt = (typeof window !== 'undefined') ? window.runtime : null;
+            var fu = rt && rt.flash && rt.flash.utils;
+            if (!fu || typeof fu.describeType !== 'function' || !obj) {
+                S.kernel.log('mining', '[diag] describeType', label,
+                             '— unavailable (obj=null or flash.utils missing)');
+                return;
+            }
+            var raw;
+            try { raw = String(fu.describeType(obj)); }
+            catch (e1) { raw = '(toString threw)'; }
+            S.kernel.log('mining', '[diag] describeType', label, 'length=', raw.length);
+            // Split into ~600-char chunks aligned to whitespace.
+            var i = 0;
+            while (i < raw.length) {
+                var end = Math.min(i + 600, raw.length);
+                S.kernel.log('mining', '[diag] dt', label, raw.substring(i, end));
+                i = end;
+            }
+        } catch (e) {
+            var msg = (e && (e.message || e.toString())) || 'unknown';
+            S.kernel.warn('mining', '[diag] describeType', label, 'threw:', msg);
+        }
+    }
+
+    // [diag-host] One-time describeType dump for the host VOs whose
+    // method/property surface we still don't fully know. Each gets logged
+    // in chunks. Searchable in the resulting log via [diag] dt <label>.
+    function probeHostVOs() {
+        try {
+            // mCurrentPlayer — for any "applyBuffToDeposit"-style methods.
+            if (game && game.gi && game.gi.mCurrentPlayer) {
+                logDescribeType('mCurrentPlayer', game.gi.mCurrentPlayer);
+            }
+            // First available buff — for cBuff methods (Apply, etc.).
+            try {
+                if (game && game.gi && game.gi.mCurrentPlayer &&
+                    typeof game.gi.mCurrentPlayer.getAvailableBuffs_vector === 'function') {
+                    var buffs = game.gi.mCurrentPlayer.getAvailableBuffs_vector();
+                    if (buffs && buffs.length) logDescribeType('cBuff', buffs[0]);
+                }
+            } catch (e2) { S.kernel.warn('mining', '[diag] buff probe threw:', (e2 && (e2.message || e2.toString())) || 'unknown'); }
+            // First deposit in current zone — for cDeposit methods.
+            try {
+                var zone = game && game.gi && game.gi.mCurrentPlayerZone;
+                var sdm = zone && zone.mStreetDataMap;
+                var deps = sdm && sdm.mDepositContainer;
+                if (deps && deps.length) logDescribeType('cDeposit', deps[0]);
+            } catch (e3) { S.kernel.warn('mining', '[diag] deposit probe threw:', (e3 && (e3.message || e3.toString())) || 'unknown'); }
+        } catch (e) {
+            var msg = (e && (e.message || e.toString())) || 'unknown';
+            S.kernel.warn('mining', '[diag] probeHostVOs failed:', msg);
+        }
+    }
+
+    function probeCursorShape() {
+        try {
+            if (typeof game === 'undefined' || !game || !game.gi) return;
+
+            var candidates = [
+                'mCurrentSpecialist',     // positive control (5-battle.js:174)
+                'mCurrentBuff',           // analogue for buffs
+                'mSelectedBuff',
+                'mCurrentItem',
+                'mActiveBuff',
+                'mPendingBuff',
+                'mSelectedItem',
+                'mCurrentBuilding',
+                'mCurrentDeposit',
+                'mCurrentTarget',
+                'mSelected',
+                'GetGridPosition'         // known method (5-army.js:146)
+            ];
+
+            var subjects = [
+                ['game.gi.mCurrentCursor', game.gi.mCurrentCursor],
+                ['game.gi.mMouseCursor',   game.gi.mMouseCursor]
+            ];
+
+            for (var s = 0; s < subjects.length; s++) {
+                var label = subjects[s][0];
+                var obj = subjects[s][1];
+                if (!obj) {
+                    S.kernel.log('mining', '[diag] cursor probe', label, '— null/undefined');
+                    continue;
+                }
+                var found = [];
+                for (var i = 0; i < candidates.length; i++) {
+                    var nm = candidates[i];
+                    var v;
+                    try { v = obj[nm]; }
+                    catch (rerr) { v = '<threw>'; }
+                    if (typeof v !== 'undefined') {
+                        var t = typeof v;
+                        // Don't try to stringify the value — bridged
+                        // objects can be huge and may throw on toString.
+                        // Just record name + type.
+                        found.push(nm + ':' + t);
+                    }
+                }
+                S.kernel.log('mining', '[diag] cursor probe', label, '—',
+                             found.length ? found.join(', ') : 'no candidate slots present');
+            }
+
+            // Try flash.utils.describeType on mCurrentCursor for full
+            // class metadata. window.runtime.flash exposes the AIR Flash
+            // namespace per autoTSO patterns (line 1791, 326).
+            try {
+                var rt = (typeof window !== 'undefined') ? window.runtime : null;
+                var fu = rt && rt.flash && rt.flash.utils;
+                if (fu && typeof fu.describeType === 'function' && game.gi.mCurrentCursor) {
+                    var desc = fu.describeType(game.gi.mCurrentCursor);
+                    var descStr = '';
+                    try { descStr = String(desc); } catch (estr) { descStr = '(toString threw)'; }
+                    S.kernel.log('mining', '[diag] describeType(mCurrentCursor) length=',
+                                 descStr.length, 'first 800 chars:',
+                                 descStr.substring(0, 800));
+                } else {
+                    S.kernel.log('mining', '[diag] describeType unavailable',
+                                 '— window.runtime.flash.utils not reachable');
+                }
+            } catch (derr) {
+                var dmsg = (derr && (derr.message || derr.toString())) || 'unknown';
+                S.kernel.warn('mining', '[diag] describeType threw:', dmsg);
+            }
+        } catch (e) {
+            var msg = (e && (e.message || e.toString())) || 'unknown';
+            S.kernel.warn('mining', '[diag] cursor probe failed:', msg);
+        }
+    }
+
     function boot() {
         if (!S.kernel.settings.read('mining')) {
             S.kernel.settings.write('mining', S.modules.mining.defaultSettings);
+        }
+
+        // Diagnostic probes for the deposit-refill investigation. Gated
+        // behind REFILL_DEBUG so the noise doesn't fire on every boot —
+        // these dump cursor shape, host-VO describeType, and a buffApplied
+        // observer that captures every host buff event. Set REFILL_DEBUG=true
+        // at the top of the file when re-investigating.
+        if (refillDebug()) {
+            installBuffAppliedObserver();
+            probeCursorShape();
+            probeHostVOs();
         }
 
         S.kernel.queue.action('mining.buildMine', function (params) {
@@ -526,34 +818,183 @@
         S.kernel.queue.action('mining.refillDeposit', function (params) {
             var grid             = params[0];
             var depoName         = params[1];
-            var buffName         = params[2];
-            var mineName         = params[3];
-            var threshold        = params[4];
-            var preRefillAmount  = params[5];
+            var mineName         = params[2];
+            var threshold        = params[3];
+            var preRefillAmount  = params[4];
 
-            // Re-check: deposit still on map under the same name?
-            var depo = S.core.deposits.byGrid(grid);
-            if (!depo || S.core.deposits.name(depo) !== depoName) return;
+            if (refillDebug()) {
+                S.kernel.log('mining', '[diag] refillDeposit: entered for',
+                             depoName, 'grid', grid);
+            }
 
-            // Buff still in inventory?
-            var b = S.core.buffs.byName(buffName);
-            if (!b || S.core.buffs.amount(b) <= 0) return;
-            var uid = S.core.buffs.uniqueId(b);
-            if (!uid) return;
-
-            // Apply the refill. Same SendServerAction(61, ...) call as
-            // building buffs but the grid is the deposit's (mine sits on
-            // its deposit so the grids coincide). Source:
-            // autoTSO/user_auto.js:4661.
+            // Re-verify the grid still hosts the right deposit type. We
+            // search via byType (getDeposits_vectorByType) rather than
+            // byGrid (mDepositContainer) because the live host excludes
+            // deposits sitting under a mine building from mDepositContainer
+            // — they only surface through getDeposits_vectorByType. The
+            // planner used byType to find this grid in the first place, so
+            // mirroring that lookup here keeps the two paths consistent.
+            var depo = null;
             try {
-                game.gi.SendServerAction(61, 0, grid, 0, uid, null);
-                S.kernel.log('mining', 'refilled', depoName, 'on grid', grid,
-                             'with', buffName);
-                S.core.buffs.invalidate();
+                var typeList = S.core.deposits.byType(depoName) || [];
+                for (var ti = 0; ti < typeList.length; ti++) {
+                    if (S.core.deposits.grid(typeList[ti]) === grid) {
+                        depo = typeList[ti];
+                        break;
+                    }
+                }
             } catch (e) {
-                S.kernel.error('mining',
-                               'SendServerAction(61) refill threw for', buffName, ':', e);
+                S.kernel.warn('mining',
+                              'refillDeposit: byType threw for', depoName, ':', e);
                 return;
+            }
+            if (!depo) {
+                if (refillDebug()) {
+                    S.kernel.log('mining',
+                                 '[diag] refillDeposit: deposit no longer at grid',
+                                 grid, 'for type', depoName);
+                }
+                return;
+            }
+
+            // Re-resolve the refill buff against current inventory. Force a
+            // fresh inventory read first — the planner's snapshot may hold
+            // stale buff VO references that the host has recycled.
+            S.core.buffs.invalidate();
+            var matches = S.core.buffs.forDeposit(depoName) || [];
+            var b = matches[0];
+            if (!b) {
+                if (refillDebug()) {
+                    S.kernel.log('mining', '[diag] refillDeposit: forDeposit',
+                                 depoName, 'returned [] at action time');
+                }
+                return;
+            }
+            var stock = S.core.buffs.amount(b);
+            if (stock <= 0) {
+                if (refillDebug()) {
+                    S.kernel.log('mining', '[diag] refillDeposit: stock<=0 for', depoName);
+                }
+                return;
+            }
+            // Use the live VO's GetUniqueId() directly. We tried
+            // Create-reconstructed dUniqueIDs and the host silently
+            // rejected them; passing the live VO matches the working
+            // path for building buffs (autoTSO/user_auto.js:4661).
+            var uid = S.core.buffs.uniqueId(b);
+            if (!uid) {
+                if (refillDebug()) {
+                    S.kernel.log('mining', '[diag] refillDeposit: uniqueId',
+                                 'returned null for', depoName,
+                                 '— buff has no GetUniqueId');
+                }
+                return;
+            }
+            var uidParts = '(' + uid.uniqueID1 + ',' + uid.uniqueID2 + ')';
+
+            // Set cursor preconditions. cCursor.mCurrentBuff exists per
+            // boot probe; setting it before the action mirrors the
+            // specialist pattern (5-battle.js:174). On its own this is
+            // not sufficient — the deposit-refill server validation still
+            // rejects — but we keep the writes here as a hypothesis
+            // baseline for re-investigation.
+            var bld = null;
+            try { bld = S.core.buildings.byGrid(grid); } catch (e) { bld = null; }
+            var cursorBuffSet = false;
+            try {
+                if (game.gi.mCurrentCursor) {
+                    game.gi.mCurrentCursor.mCurrentBuff = b;
+                    if (bld) game.gi.mCurrentCursor.mCurrentBuilding = bld;
+                    cursorBuffSet = (game.gi.mCurrentCursor.mCurrentBuff === b);
+                }
+            } catch (cursorErr) {
+                S.kernel.warn('mining',
+                              'refillDeposit: cursor assignment threw:',
+                              (cursorErr && (cursorErr.message || cursorErr.toString())) || 'unknown');
+            }
+            if (refillDebug()) {
+                S.kernel.log('mining', '[diag] refillDeposit: cursor write took=',
+                             cursorBuffSet, '. mCurrentBuilding=',
+                             bld ? S.core.buildings.name(bld) : 'null');
+            }
+
+            // SendMessagetoServer(61, zoneID, dServerAction, responder).
+            // This reaches the server (responder fires) but server-side
+            // validation rejects with empty data. See refill investigation
+            // doc for details. Code retained for future re-investigation.
+            var dispatched = false;
+            try {
+                if (typeof game.def === 'function' &&
+                    game.gi.mClientMessages &&
+                    typeof game.gi.mClientMessages.SendMessagetoServer === 'function') {
+                    var dSA = game.def('Communication.VO::dServerAction', true);
+                    if (dSA) {
+                        dSA.type    = 0;
+                        dSA.grid    = grid;
+                        dSA.endGrid = 0;
+                        dSA.data    = uid;
+                        var responder = null;
+                        if (refillDebug() && typeof game.createResponder === 'function') {
+                            responder = game.createResponder(function (ev, dat) {
+                                S.kernel.log('mining',
+                                             '[diag] refillDeposit: responder fired for',
+                                             depoName, '— event=', ev && (ev.type || ''),
+                                             ', data=', dat);
+                            });
+                        }
+                        if (refillDebug()) {
+                            S.kernel.log('mining',
+                                         '[diag] refillDeposit: SendMessagetoServer(61,',
+                                         'zoneID,', 'dSA{type=0,grid=' + grid + ',endGrid=0,data=uid' + uidParts + '},',
+                                         responder ? 'responder' : 'null', ')');
+                        }
+                        game.gi.mClientMessages.SendMessagetoServer(
+                            61, game.gi.mCurrentViewedZoneID, dSA, responder
+                        );
+                        dispatched = true;
+                    } else if (refillDebug()) {
+                        S.kernel.warn('mining',
+                                      '[diag] refillDeposit: game.def(dServerAction) returned null');
+                    }
+                } else if (refillDebug()) {
+                    S.kernel.warn('mining',
+                                  '[diag] refillDeposit: SendMessagetoServer unavailable');
+                }
+            } catch (sendErr) {
+                S.kernel.error('mining',
+                               'refillDeposit SendMessagetoServer threw for',
+                               depoName, ':',
+                               (sendErr && (sendErr.message || sendErr.toString())) || 'unknown');
+            }
+            if (dispatched) {
+                S.kernel.log('mining', 'refilled', depoName, 'on grid', grid);
+                S.core.buffs.invalidate();
+            } else {
+                return;
+            }
+
+            // [diag-host] Re-read inventory immediately after the call.
+            // If host accepted: stock_after === stock_before - 1 (host
+            // consumed one). If stock unchanged, the call was silently
+            // rejected — likely the wrong action code or wrong arg shape
+            // for TargetType=1 (deposit) buffs. Note that the host may
+            // process the action async, so a same-tick read can still be
+            // stale; the next tick's planner gives the authoritative count.
+            if (refillDebug()) {
+                try {
+                    var afterMatches = S.core.buffs.forDeposit(depoName) || [];
+                    var afterStock = afterMatches.length ?
+                        S.core.buffs.amount(afterMatches[0]) : 0;
+                    S.kernel.log('mining', '[diag] refillDeposit: post-call stock=',
+                                 afterStock, '(was', stock, ', delta',
+                                 (afterStock - stock) + ').',
+                                 afterStock === stock ?
+                                     'host appears to have rejected the call' :
+                                     'host accepted (stock changed)');
+                } catch (err2) {
+                    S.kernel.warn('mining',
+                                  '[diag] refillDeposit: post-call read threw:', err2);
+                }
             }
 
             // Auto-unpause: only if Steward paused this grid AND the mine

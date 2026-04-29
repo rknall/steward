@@ -68,9 +68,13 @@ function buff(opts) {
         GetName_string:              function () { return opts.name || ''; },
         GetBuffEfficiencies_vector:  function () { return opts.efficiencies || []; }
     };
+    var rawUid = (opts.uniqueId && typeof opts.uniqueId === 'object') ? opts.uniqueId : {
+        uniqueID1: (typeof opts.uniqueID1 !== 'undefined') ? opts.uniqueID1 : ((opts.name || 'buff') + '_p1'),
+        uniqueID2: (typeof opts.uniqueID2 !== 'undefined') ? opts.uniqueID2 : 0
+    };
     return {
         GetType:           function () { return opts.name || 'UnnamedBuff'; },
-        GetUniqueId:       function () { return opts.uniqueId || (opts.name + '_id'); },
+        GetUniqueId:       function () { return rawUid; },
         GetBuffDefinition: function () { return def; },
         GetResourceName_string: function () { return opts.resourceName || ''; },
         amount:            (typeof opts.amount === 'number') ? opts.amount : 1

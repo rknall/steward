@@ -161,45 +161,131 @@ t.test('forBuilding() merges direct and Workyard matches without duplicating', f
 });
 
 // --- forDeposit -----------------------------------------------------------
+//
+// Live-host shape: every FillDeposit buff carries GetType='FillDeposit' and
+// an empty GetTargetDescription_string. Only GetResourceName_string identifies
+// the resource. Filter must be strict on resourceName equality — a tolerant
+// fallback would risk picking a Meat refill for a TitaniumOre request.
 
-t.test('forDeposit() filters to TargetType=1 buffs targeting the deposit name', function () {
+t.test('forDeposit() filters to TargetType=1 buffs by GetResourceName_string', function () {
     var H = bootWithBuffs([
-        buff({ name: 'TitaniumRefill', amount: 5, targets: 'TitaniumOre', targetType: 1 }),
-        buff({ name: 'CoalRefill',     amount: 3, targets: 'Coal',         targetType: 1 }),
-        buff({ name: 'IronMineBuff',   amount: 2, targets: 'IronMine',     targetType: 0 }),  // building buff
-        buff({ name: 'EmptyRefill',    amount: 0, targets: 'TitaniumOre', targetType: 1 })   // amount=0
+        buff({ name: 'FillDeposit', amount: 1400, resourceName: 'TitaniumOre', targetType: 1 }),
+        buff({ name: 'FillDeposit', amount: 2000, resourceName: 'Salpeter',    targetType: 1 }),
+        buff({ name: 'IronMineBuff', amount: 2,   targets: 'IronMine',         targetType: 0 }),  // building buff
+        buff({ name: 'FillDeposit', amount: 0,    resourceName: 'TitaniumOre', targetType: 1 })   // amount=0
     ]);
     var ti = H.Steward.core.buffs.forDeposit('TitaniumOre');
     t.assert.strictEqual(ti.length, 1);
-    t.assert.strictEqual(H.Steward.core.buffs.name(ti[0]), 'TitaniumRefill');
+    t.assert.strictEqual(H.Steward.core.buffs.resourceName(ti[0]), 'TitaniumOre');
+    t.assert.strictEqual(H.Steward.core.buffs.amount(ti[0]), 1400);
 
-    var coal = H.Steward.core.buffs.forDeposit('Coal');
-    t.assert.strictEqual(coal.length, 1);
-    t.assert.strictEqual(H.Steward.core.buffs.name(coal[0]), 'CoalRefill');
+    var sa = H.Steward.core.buffs.forDeposit('Salpeter');
+    t.assert.strictEqual(sa.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.resourceName(sa[0]), 'Salpeter');
 });
 
 t.test('forDeposit() returns [] when target is empty/missing', function () {
     var H = bootWithBuffs([
-        buff({ name: 'TitaniumRefill', amount: 1, targets: 'TitaniumOre', targetType: 1 })
+        buff({ name: 'FillDeposit', amount: 1, resourceName: 'TitaniumOre', targetType: 1 })
     ]);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit('').length, 0);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit(null).length, 0);
 });
 
-t.test('forDeposit() ignores buffs whose target does not include the deposit name', function () {
+t.test('forDeposit() ignores buffs whose resourceName does not match', function () {
     var H = bootWithBuffs([
-        buff({ name: 'TitaniumRefill', amount: 1, targets: 'TitaniumOre', targetType: 1 })
+        buff({ name: 'FillDeposit', amount: 1, resourceName: 'TitaniumOre', targetType: 1 })
     ]);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit('GoldOre').length, 0);
+});
+
+t.test('forDeposit() does not fall back to GetTargetDescription_string', function () {
+    // Strict filter: resourceName is the only accepted match. A buff with
+    // the deposit name only in its target description must NOT match —
+    // that path was retired with Option B because it risked false positives.
+    var H = bootWithBuffs([
+        buff({ name: 'LegacyShape', amount: 1, targets: 'TitaniumOre', targetType: 1 })
+    ]);
+    t.assert.strictEqual(H.Steward.core.buffs.forDeposit('TitaniumOre').length, 0);
 });
 
 t.test('forDeposit() rejects buffs whose definition has no GetTargetType', function () {
     // Defensive — a stub buff whose definition lacks GetTargetType should
     // not slip through the filter as if it were deposit-targeted.
     var H = bootWithBuffs([
-        buff({ name: 'Mystery', amount: 1, targets: 'IronOre' })   // no targetType opt → 0
+        buff({ name: 'Mystery', amount: 1, resourceName: 'IronOre' })   // no targetType opt → 0
     ]);
     t.assert.strictEqual(H.Steward.core.buffs.forDeposit('IronOre').length, 0);
+});
+
+t.test('forDeposit() does not collide across FillDeposit entries with same GetType', function () {
+    // The live host's anti-pattern: GetType collides across every refill,
+    // resourceName is the only discriminator. forDeposit must return the
+    // correct stack even if Meat sorts before Titanium in inventory.
+    var H = bootWithBuffs([
+        buff({ name: 'FillDeposit', amount: 1300600, resourceName: 'Meat',        targetType: 1 }),
+        buff({ name: 'FillDeposit', amount: 1004600, resourceName: 'Fish',        targetType: 1 }),
+        buff({ name: 'FillDeposit', amount: 1400,    resourceName: 'TitaniumOre', targetType: 1 })
+    ]);
+    var ti = H.Steward.core.buffs.forDeposit('TitaniumOre');
+    t.assert.strictEqual(ti.length, 1);
+    t.assert.strictEqual(H.Steward.core.buffs.amount(ti[0]), 1400);
+});
+
+t.test('resourceName() returns "" when buff has no GetResourceName_string', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'IronMineBuff', amount: 1, targets: 'IronMine' })
+    ]);
+    var b = H.Steward.core.buffs.byName('IronMineBuff');
+    t.assert.strictEqual(H.Steward.core.buffs.resourceName(b), '');
+    t.assert.strictEqual(H.Steward.core.buffs.resourceName(null), '');
+});
+
+// --- freshUniqueId --------------------------------------------------------
+//
+// The host silently no-ops SendServerAction(61, ..., uid, null) when uid is
+// a stale/cached host VO. Both tso_client/.../6-buffs.js:sendBuffPacket and
+// autoTSO read the buff fresh and pass either a freshly-constructed
+// dUniqueID or a fresh GetUniqueId(). freshUniqueId(b) is our equivalent of
+// the former.
+
+t.test('freshUniqueId() reconstructs via game.def("Communication.VO::dUniqueID").Create', function () {
+    var H = bootWithBuffs([
+        buff({ name: 'FillDeposit', amount: 1, resourceName: 'TitaniumOre', targetType: 1,
+               uniqueID1: 868865, uniqueID2: 0 })
+    ]);
+    var b = H.Steward.core.buffs.forDeposit('TitaniumOre')[0];
+    t.assert.ok(b);
+    var fresh = H.Steward.core.buffs.freshUniqueId(b);
+    t.assert.ok(fresh);
+    t.assert.strictEqual(fresh.uniqueID1, 868865);
+    t.assert.strictEqual(fresh.uniqueID2, 0);
+    t.assert.strictEqual(fresh._stubFresh, true);   // came from Create, not the cached VO
+});
+
+t.test('freshUniqueId() returns null when game.def is unavailable', function () {
+    var H = harness.boot({
+        sections: ['kernel', 'core'],
+        host: { game: { gi: { mCurrentPlayer: {} }, def: function () { return null; } } }
+    });
+    var z = H.zone.zone()
+        .buffs([buff({ name: 'FillDeposit', amount: 1, resourceName: 'TitaniumOre',
+                       targetType: 1, uniqueID1: 1, uniqueID2: 2 })])
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    var b = H.Steward.core.buffs.forDeposit('TitaniumOre')[0];
+    t.assert.strictEqual(H.Steward.core.buffs.freshUniqueId(b), null);
+});
+
+t.test('freshUniqueId() returns null when uniqueID parts are missing', function () {
+    var H = bootWithBuffs([
+        // uniqueId override with neither part — simulates a buff whose
+        // GetUniqueId() returned a malformed/empty VO.
+        buff({ name: 'FillDeposit', amount: 1, resourceName: 'TitaniumOre',
+               targetType: 1, uniqueId: { /* no uniqueID1 / uniqueID2 */ } })
+    ]);
+    var b = H.Steward.core.buffs.forDeposit('TitaniumOre')[0];
+    t.assert.strictEqual(H.Steward.core.buffs.freshUniqueId(b), null);
 });
 
 // --- localization helpers --------------------------------------------------

@@ -133,11 +133,18 @@
         var types = d.types();
         var depCfg = (s && s.deposits) || {};
 
-        $panel.append(h.gridRow(
+        // Refill column visibility tracks the module's REFILL_ENABLED gate.
+        // When the feature is disabled (current state), the column is omitted
+        // from both the header and per-row cells. See docs/superpowers/mining/
+        // refill-investigation.md for why.
+        var refillEnabled = !!(S.modules.mining && S.modules.mining._REFILL_ENABLED);
+
+        var headerCells = refillEnabled ?
             [[3, 'Deposit'], [1, 'Build'], [1, 'Upgrade'], [1, 'Lvl'],
-             [1, 'Pause'], [1, 'Refill'], [3, 'Buff'], [1, 'Active']],
-            { headerCells: true }
-        ));
+             [1, 'Pause'], [1, 'Refill'], [3, 'Buff'], [1, 'Active']] :
+            [[3, 'Deposit'], [1, 'Build'], [1, 'Upgrade'], [1, 'Lvl'],
+             [1, 'Pause'], [3, 'Buff'], [1, 'Active']];
+        $panel.append(h.gridRow(headerCells, { headerCells: true }));
 
         for (var i = 0; i < types.length; i++) {
             var info = types[i];
@@ -186,16 +193,16 @@
                     $pauseCell   = '—';
                 }
                 $buffCell = renderBuffDropdown(h, depositName, currentCfg, target);
-                // Refill: yes/no toggle. The planner auto-detects the
-                // matching deposit-specific refill buff via core/buffs.forDeposit
-                // (TargetType=1, target description includes deposit name).
-                $refillCell = h.toggle({
-                    checked:  currentCfg.refill === true,
-                    onChange: function (next) {
-                        updateDeposit(h, depositName, { refill: !!next });
-                    }
-                });
-                $panel.append(h.gridRow(
+                // Refill cell only constructed when feature is enabled.
+                if (refillEnabled) {
+                    $refillCell = h.toggle({
+                        checked:  currentCfg.refill === true,
+                        onChange: function (next) {
+                            updateDeposit(h, depositName, { refill: !!next });
+                        }
+                    });
+                }
+                var rowCells = refillEnabled ?
                     [[3, depositName],
                      [1, $buildCell],
                      [1, $upgradeCell],
@@ -203,8 +210,15 @@
                      [1, $pauseCell],
                      [1, $refillCell],
                      [3, $buffCell],
-                     [1, String(activeNum)]]
-                ));
+                     [1, String(activeNum)]] :
+                    [[3, depositName],
+                     [1, $buildCell],
+                     [1, $upgradeCell],
+                     [1, $targetCell],
+                     [1, $pauseCell],
+                     [3, $buffCell],
+                     [1, String(activeNum)]];
+                $panel.append(h.gridRow(rowCells));
             })(info.name, cfg, active, !!info.mineName, buffTarget);
         }
     }

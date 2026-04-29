@@ -1,10 +1,10 @@
 {
   "name": "steward",
-  "version": "0.4.0",
+  "version": "0.5.0-alpha3",
   "description": "Modular automation framework for The Settlers Online — kernel, core library, and pluggable task modules. Adobe AIR userscript.",
   "private": true,
   "license": "GPL-3.0-or-later",
-  "author": "Roland Knall",
+  "author": "rpk",
   "repository": {
     "type": "git",
     "url": "https://github.com/rknall/steward.git"

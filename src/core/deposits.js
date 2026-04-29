@@ -81,6 +81,12 @@
         return filtered;
     }
 
+    // byGrid walks mDepositContainer, which on the live host *excludes*
+    // deposits sitting under a mine building (those only surface through
+    // sdm.getDeposits_vectorByType). If you need to verify a grid still
+    // hosts a known deposit type, prefer byType(typeName) and filter by
+    // grid — see src/modules/mining/module.js mining.refillDeposit for the
+    // pattern.
     function byGrid(targetGrid, opts) {
         opts = opts || {};
         var src = readDepositsFromZone(currentZone(opts.zone));
