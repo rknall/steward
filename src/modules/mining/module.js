@@ -22,6 +22,22 @@
 
     if (!S.modules.mining) S.modules.mining = {};
 
+    // Module-private state. Survives across ticks but resets on reboot.
+    // tryPause records grids it queued a pause for; tryRefill's queue
+    // action consults this map to auto-unpause ONLY mines paused by
+    // Steward — manual user pauses are left alone. No settings persistence
+    // (cheap to lose; an across-reboot Steward-paused mine just stays
+    // paused until the user touches it).
+    var stewardPausedGrids = {};
+    S.modules.mining._stewardPausedGrids = stewardPausedGrids;
+
+    // The +N units a single FillDeposit_* item adds to a deposit. TSO's
+    // refill items add 100 — used as a predictor in the queue action to
+    // decide whether refill brings us back above threshold (fresh
+    // deposit.amount() reads stale right after SendServerAction since the
+    // host updates asynchronously).
+    var ASSUMED_REFILL_AMOUNT = 100;
+
     function readSettings() {
         var stored = S.kernel.settings.read('mining') || {};
         var defaults = S.modules.mining.defaultSettings || {};
@@ -173,6 +189,11 @@
         //                     dropped below pauseThreshold (mine longevity).
         //   cfg.pause=false ⇒ inert. Manual user pauses stay intact.
         //
+        // Refill coordination: if cfg.refill names a buff that's currently
+        // available in inventory, we skip pausing — the refill will keep
+        // the deposit producing and avoids a flicker (pause → refill →
+        // unpause in the same drain).
+        //
         // Auto-unpause is NOT a tryPause job. It belongs to tryRefill: when
         // a Steward-initiated refill brings a deposit's remaining back above
         // pauseThreshold, that phase queues the unpause as a side-step. This
@@ -187,6 +208,14 @@
         var settings  = readSettings();
         var threshold = (typeof settings.pauseThreshold === 'number')
             ? settings.pauseThreshold : 50;
+
+        // Will we be refilling this type? If so, skip pause.
+        var refillAvailable = false;
+        if (cfg.refill && typeof cfg.refill === 'string' &&
+            S.core.buffs && S.core.buffs.byName) {
+            var rb = S.core.buffs.byName(cfg.refill);
+            refillAvailable = !!(rb && S.core.buffs.amount(rb) > 0);
+        }
 
         // Walk deposits (not buildings) so we can read GetAmount() for the
         // threshold gate. Mines on depleted shells (no on-map deposit) are
@@ -219,6 +248,11 @@
             // but whose call throws (Flash/AIR GC behaviour).
             var remaining = S.core.deposits.amount(depo);
             if (remaining >= threshold) continue;          // still high-yield
+            if (refillAvailable) continue;                 // refill will handle this
+
+            // Record so tryRefill's queue action can later auto-unpause us
+            // (and only us) when a future refill restores the deposit.
+            stewardPausedGrids[grid] = true;
 
             ctx.assigned[grid] = true;
             ctx.queued++;
@@ -266,7 +300,57 @@
                 delay);
         }
     }
-    function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
+    function tryRefill(info, cfg, ctx) {
+        // Refill triggers when a deposit drops below pauseThreshold,
+        // regardless of cfg.pause. cfg.refill names the buff to apply
+        // (string, picked via UI dropdown filtered to FillDeposit_*).
+        // No buff selected, no buff in inventory → silent no-op.
+        if (!cfg.refill || typeof cfg.refill !== 'string') return;
+        if (!S.core.buffs || !S.core.buffs.byName) return;
+
+        var rb = S.core.buffs.byName(cfg.refill);
+        if (!rb) return;
+        var stockLeft = S.core.buffs.amount(rb);
+        if (stockLeft <= 0) return;
+
+        var settings  = readSettings();
+        var threshold = (typeof settings.pauseThreshold === 'number')
+            ? settings.pauseThreshold : 50;
+
+        var depos;
+        try { depos = S.core.deposits.byType(info.name); }
+        catch (e) {
+            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
+            return;
+        }
+        if (!depos || !depos.length) return;
+
+        for (var i = 0; i < depos.length; i++) {
+            var depo = depos[i];
+            if (!depo) continue;
+            var grid = S.core.deposits.grid(depo);
+            if (!grid) continue;
+            if (ctx.assigned[grid]) continue;
+
+            var remaining = S.core.deposits.amount(depo);
+            if (remaining >= threshold) continue;
+
+            // Don't queue more refills than we have items in stock —
+            // multiple deposits below threshold could each reserve one.
+            if (stockLeft <= 0) return;
+            stockLeft--;
+
+            ctx.assigned[grid] = true;
+            ctx.queued++;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            // info.mineName may be null for mason types — pass it through
+            // so the queue action can decide whether to attempt unpause.
+            S.kernel.queue.add('mining.refillDeposit',
+                [grid, info.name, cfg.refill, info.mineName, threshold, remaining],
+                delay);
+        }
+    }
 
     function phase(name, info, cfg, ctx) {
         // Per-phase try/catch: a broken phase logs and the planner moves on
@@ -415,6 +499,64 @@
             } catch (e) {
                 S.kernel.error('mining', 'SendServerAction(107) threw for', mineName, ':', e);
             }
+        });
+
+        S.kernel.queue.action('mining.refillDeposit', function (params) {
+            var grid             = params[0];
+            var depoName         = params[1];
+            var buffName         = params[2];
+            var mineName         = params[3];
+            var threshold        = params[4];
+            var preRefillAmount  = params[5];
+
+            // Re-check: deposit still on map under the same name?
+            var depo = S.core.deposits.byGrid(grid);
+            if (!depo || S.core.deposits.name(depo) !== depoName) return;
+
+            // Buff still in inventory?
+            var b = S.core.buffs.byName(buffName);
+            if (!b || S.core.buffs.amount(b) <= 0) return;
+            var uid = S.core.buffs.uniqueId(b);
+            if (!uid) return;
+
+            // Apply the refill. Same SendServerAction(61, ...) call as
+            // building buffs but the grid is the deposit's (mine sits on
+            // its deposit so the grids coincide). Source:
+            // autoTSO/user_auto.js:4661.
+            try {
+                game.gi.SendServerAction(61, 0, grid, 0, uid, null);
+                S.kernel.log('mining', 'refilled', depoName, 'on grid', grid,
+                             'with', buffName);
+                S.core.buffs.invalidate();
+            } catch (e) {
+                S.kernel.error('mining',
+                               'SendServerAction(61) refill threw for', buffName, ':', e);
+                return;
+            }
+
+            // Auto-unpause: only if Steward paused this grid AND the mine
+            // is currently paused AND the (estimated) post-refill amount
+            // clears the threshold. Estimate is `preRefill + 100` because
+            // depo.GetAmount() reads stale immediately after the async
+            // server action lands; the host updates on a later host tick.
+            if (!stewardPausedGrids[grid] || !mineName) return;
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld || S.core.buildings.name(bld) !== mineName) {
+                delete stewardPausedGrids[grid];
+                return;
+            }
+            var isActive = (typeof bld.IsProductionActive === 'function')
+                ? !!bld.IsProductionActive() : true;
+            if (isActive) {
+                delete stewardPausedGrids[grid];
+                return;
+            }
+            var expected = (typeof preRefillAmount === 'number' ? preRefillAmount : 0)
+                + ASSUMED_REFILL_AMOUNT;
+            if (expected < threshold) return;            // still low — leave paused
+
+            delete stewardPausedGrids[grid];
+            S.kernel.queue.add('mining.setProduction', [grid, mineName, true], 0);
         });
 
         S.kernel.queue.action('mining.applyBuff', function (params) {
