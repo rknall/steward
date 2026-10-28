@@ -100,7 +100,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | `getActiveEvent(type)` (substring match against host event names) | `core/events.active()` + `liveEventNames()` | ✓ |
 | `isEventWithDepos()` | `core/events/refill.js` `depositEvent()`: the live event whose `depositInfo` (in `core/events/data.js`) names workyard buildings | ✓ |
 | `calculateDailyItems` (per-explorer skill-aware items/hour estimate) | `core/specialists.estimateEventItems()`: best task per explorer, summed, shown in the Events tab. Loot-count traits are not modelled, as in autoTSO | ✓ |
-| `calculateDeposits` (Valentine flowers / HW pumpkins for the rest of event) | `core/events/refill.js` `rows()` / `compute()`: one row per placed field with its current deposit subtracted, shown in the Events tab by the `eventcalc` module | ✓ |
+| `calculateDeposits` (Valentine flowers / HW pumpkins for the rest of event) | `core/events/refill.js` `rows()` / `compute()`: one row per placed field, shown in the Events tab by the `eventcalc` module with its deposit, production per 12 h and production until the shop closes (buffed value in parentheses while a production buff is active), and the refill with the current deposit subtracted | ✓ |
 
 ### aBuffs — Buffs System
 | autoTSO | Steward | Status |

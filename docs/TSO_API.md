@@ -217,9 +217,37 @@ assets.GetResourceIcon('Coin');
 ## Time
 
 ```js
-swmmo.application.mGameInterface.GetClientTime();   // server-synced epoch ms
+swmmo.application.mGameInterface.GetClientTime();   // game time base, not epoch
 new window.runtime.Date(timestamp);                 // game's Date constructor
 ```
+
+`GetClientTime()` is the same time base as a buff appliance's `GetStartTime()` and
+`mBuildingCreationTime`. It is not epoch milliseconds, so only differences between two
+values from this base are meaningful.
+
+## Building production buffs
+
+Read from the client bytecode of one client build; re-check after a client update.
+
+```js
+b.GetResourceOutputFactor();   // pumpkins etc. delivered per cycle, buffs included
+b.GetExactOutputFactor();      // upgrade-level base only (Number), no buffs
+b.mBuffs_vector;               // BuffAppliance list of the building
+b.productionBuff;              // single appliance, used by host scripts
+```
+
+- `GetResourceOutputFactor()` is `ceil(base + base*(timed/100 - 1) + base*(zone - 1))`.
+  `base` is the upgrade bonus percent / 100 truncated to an integer, `timed` multiplies
+  `percent/100 * buffMultiplier` over every timed or zone appliance, `zone` sums the zone
+  buffs. Delivery multiplies the definition's `amountRemoved` by this factor; the deposit
+  consumption is not changed by an output buff.
+- `buffMultiplier` is a game-wide server effect that scales productivity buffs on
+  workyards. It can start or end independently of a buff, so never hard-code it: read
+  the factor from the host.
+- Appliance members: `GetBuffDefinition()` (`getProductivityOutputPercent()`,
+  `getDuration(mode)`), `GetStartTime()`, `GetApplicanceMode()` (host spelling).
+- Remaining time, as the in-game label computes it:
+  `getDuration(GetApplicanceMode()) - (GetClientTime() - GetStartTime())`, milliseconds.
 
 ## Where to look in autoTSO for working examples
 

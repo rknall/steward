@@ -244,22 +244,109 @@
         return out;
     }
 
+    // Resource-creation definition of a building type from the economy
+    // definitions, or null when the host cannot answer. Shared by every
+    // accessor that reads per-type production data, so there is one lookup path.
+    function creationDef(buildingName) {
+        try {
+            if (typeof game === 'undefined' || !game.def) return null;
+            var econ = game.def('ServerState::gEconomics');
+            if (!econ || typeof econ.GetResourcesCreationDefinitionForBuilding !== 'function') return null;
+            return econ.GetResourcesCreationDefinitionForBuilding(buildingName) || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     // Seconds per produced unit, read from the economy definition rather than
     // from a placed building, so it is available for any building type even when
     // none is on the current island. Mirrors how autoTSO derives production time.
     // Returns null when the host cannot answer, so callers can fall back safely.
     function workTime(buildingName) {
+        var def = creationDef(buildingName);
+        if (!def) return null;
+        var wt = def.workTime;
+        return (typeof wt === 'number' && wt > 0) ? wt : null;
+    }
+
+    // Units delivered per production cycle before any buff (amountRemoved),
+    // or null when the definition is unavailable.
+    function amountPerCycle(buildingName) {
+        var def = creationDef(buildingName);
+        if (!def) return null;
+        var a = def.amountRemoved;
+        return (typeof a === 'number' && a > 0) ? a : null;
+    }
+
+    // Factor the host applies to a delivery, buffs included. Null when missing.
+    function outputFactor(b) {
+        if (!b) return null;
         try {
-            if (typeof game === 'undefined' || !game.def) return null;
-            var econ = game.def('ServerState::gEconomics');
-            if (!econ || typeof econ.GetResourcesCreationDefinitionForBuilding !== 'function') return null;
-            var def = econ.GetResourcesCreationDefinitionForBuilding(buildingName);
-            if (!def) return null;
-            var wt = def.workTime;
-            return (typeof wt === 'number' && wt > 0) ? wt : null;
-        } catch (e) {
-            return null;
+            if (typeof b.GetResourceOutputFactor !== 'function') return null;
+            var f = b.GetResourceOutputFactor();
+            return (typeof f === 'number' && f > 0) ? f : null;
+        } catch (e) { return null; }
+    }
+
+    // Unbuffed factor from the upgrade level. The host truncates it to an
+    // integer before applying buffs, so do the same.
+    function baseOutputFactor(b) {
+        if (!b) return null;
+        try {
+            if (typeof b.GetExactOutputFactor !== 'function') return null;
+            var f = Math.floor(b.GetExactOutputFactor());
+            return (typeof f === 'number' && f > 0) ? f : null;
+        } catch (e) { return null; }
+    }
+
+    // Host game clock. Same time base as buff start times; not epoch, so only
+    // differences against it are meaningful.
+    function clientTime() {
+        try {
+            if (typeof swmmo === 'undefined' || !swmmo) return null;
+            var gi = swmmo.application && swmmo.application.mGameInterface;
+            if (!gi || typeof gi.GetClientTime !== 'function') return null;
+            var t = gi.GetClientTime();
+            return typeof t === 'number' ? t : null;
+        } catch (e) { return null; }
+    }
+
+    // Milliseconds left on one buff appliance if it raises output, else null.
+    // Duration minus elapsed time, as the client's own time-left label does.
+    function applianceOutputRemainingMs(a, now) {
+        try {
+            if (!a || typeof a.GetBuffDefinition !== 'function') return null;
+            var def = a.GetBuffDefinition();
+            if (!def || typeof def.getProductivityOutputPercent !== 'function') return null;
+            if (!(def.getProductivityOutputPercent() > 100)) return null;
+            if (typeof def.getDuration !== 'function' ||
+                typeof a.GetApplicanceMode !== 'function' ||
+                typeof a.GetStartTime !== 'function') return null;
+            var left = def.getDuration(a.GetApplicanceMode()) - (now - a.GetStartTime());
+            return (typeof left === 'number' && left > 0) ? left : null;
+        } catch (e) { return null; }
+    }
+
+    // Remaining milliseconds of the shortest active output buff on a building,
+    // or null when none is running or the clock/host cannot answer.
+    function buffRemainingMs(b) {
+        if (!b) return null;
+        var now = clientTime();
+        if (now === null) return null;
+        var best = null;
+        var v = null;
+        try { v = b.mBuffs_vector; } catch (e) { v = null; }
+        var len = (v && typeof v.length === 'number') ? v.length : 0;
+        for (var i = 0; i < len; i++) {
+            var left = applianceOutputRemainingMs(v[i], now);
+            if (left !== null && (best === null || left < best)) best = left;
         }
+        if (best === null) {
+            var single = null;
+            try { single = b.productionBuff; } catch (e2) { single = null; }
+            best = applianceOutputRemainingMs(single, now);
+        }
+        return best;
     }
 
     S.core.buildings = {
@@ -278,6 +365,10 @@
         level:        level,
         playerId:     playerId,
         workTime:     workTime,
+        amountPerCycle:    amountPerCycle,
+        outputFactor:      outputFactor,
+        baseOutputFactor:  baseOutputFactor,
+        buffRemainingMs:   buffRemainingMs,
 
         // state predicates
         isMine:       isMine,

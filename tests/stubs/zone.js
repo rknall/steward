@@ -32,7 +32,7 @@ function building(opts) {
         mIsAttackable:    !!opts.attackable,
         mIsLeaderCamp:    !!opts.leaderCamp
     };
-    return {
+    var b = {
         GetBuildingName_string: function () { return opts.name || 'Unknown'; },
         GetGrid:                function () { return typeof opts.grid === 'number' ? opts.grid : 0; },
         GetUpgradeLevel:        function () { return typeof opts.level === 'number' ? opts.level : 0; },
@@ -45,6 +45,32 @@ function building(opts) {
         },
         IsUpgradeAllowed:       function () { return !!opts.upgradable; },
         IsProductionActive:     function () { return opts.producing !== false; }
+    };
+    // Production-buff reads exist only when a test asks for them, so a plain
+    // building behaves like one the host cannot answer for.
+    if (typeof opts.outputFactor === 'number') {
+        b.GetResourceOutputFactor = function () { return opts.outputFactor; };
+    }
+    if (typeof opts.exactOutputFactor === 'number') {
+        b.GetExactOutputFactor = function () { return opts.exactOutputFactor; };
+    }
+    if (opts.buffs) b.mBuffs_vector = opts.buffs;
+    if (opts.productionBuff) b.productionBuff = opts.productionBuff;
+    return b;
+}
+
+// Buff appliance: pct is the output percent of its definition, duration and
+// start are on the host game clock (ms).
+function buff(opts) {
+    opts = opts || {};
+    var def = {
+        getProductivityOutputPercent: function () { return opts.pct; },
+        getDuration:                  function () { return opts.duration; }
+    };
+    return {
+        GetBuffDefinition:  function () { return def; },
+        GetStartTime:       function () { return opts.start; },
+        GetApplicanceMode:  function () { return 0; }
     };
 }
 
@@ -142,5 +168,6 @@ function makeZone() {
 module.exports = {
     zone:     makeZone,
     deposit:  deposit,
-    building: building
+    building: building,
+    buff:     buff
 };

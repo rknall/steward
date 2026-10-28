@@ -4,9 +4,10 @@
  * Renders inside the Events tab with two parts:
  *   - Explorer event items: the core estimate (best task per explorer,
  *     summed) as items per day and until the item-drop phase ends.
- *   - Refill calculator: one row per event field with its production time,
- *     the deposit left, and the units / refill items still needed to keep
- *     it producing until the event shop closes, plus a total row.
+ *   - Refill calculator: one row per event field with the deposit left, its
+ *     production per 12 h and until the event shop closes if kept refilled
+ *     (buffed value in parentheses while a production buff is active), and
+ *     the refill units / items still needed, plus a total row.
  *
  * Route seconds and units per item are settings (dashboard buffer, Save
  * persists). The remaining time and per-field deposit edits describe the
@@ -54,6 +55,18 @@
 
     function textOrDash(v) {
         return (v === null || typeof v === 'undefined') ? '—' : String(v);
+    }
+
+    // A production figure, with the buffed value appended when a buff is active.
+    function buffedText(v, b) {
+        var text = textOrDash(v);
+        if (b !== null && typeof b !== 'undefined') text += ' (' + b + ')';
+        return text;
+    }
+
+    function buffedCell(v, b, bold) {
+        var $c = $(bold ? '<strong>' : '<span>').text(buffedText(v, b));
+        return $c;
     }
 
     // gridRow renders strings as HTML, so names from the host go in as text.
@@ -258,26 +271,31 @@
             currentRemaining(ev), s.routeSeconds, s.unitsPerItem);
 
         $wrap.append(h.gridRow(
-            [[4, 'Field'], [2, 'Production s'], [2, 'Deposit left'],
-             [2, 'Units'], [2, 'Items']],
+            [[3, 'Field'], [2, 'Deposit'], [2, 'Per 12 h'],
+             [2, 'Until end'], [2, 'Refill'], [1, 'Items']],
             { headerCells: true }
         ));
+        $wrap.append(h.indentRow('Deposit, per 12 h and until end in ' +
+            resName(ev.resource) + '; (…) = with the active production buff. ' +
+            'Refill in deposit units, if kept refilled.'));
         for (var i = 0; i < result.rows.length; i++) {
             var row = result.rows[i];
             $wrap.append(h.gridRow(
-                [[4, textCell(fieldLabel(row))],
-                 [2, textCell(row.workTime)],
+                [[3, textCell(fieldLabel(row))],
                  [2, depositCell(h, row, redraw)],
+                 [2, buffedCell(row.rate12h, row.rate12hBuffed, false)],
+                 [2, buffedCell(row.untilEnd, row.untilEndBuffed, false)],
                  [2, textCell(row.units)],
-                 [2, textCell(row.items)]]
+                 [1, textCell(row.items)]]
             ));
         }
         $wrap.append(h.gridRow(
-            [[4, $('<strong>').text('Total')],
-             [2, ''],
-             [2, ''],
+            [[3, $('<strong>').text('Total')],
+             [2, $('<strong>').text(String(result.totalDeposit))],
+             [2, buffedCell(result.totalRate12h, result.totalRate12hBuffed, true)],
+             [2, buffedCell(result.totalUntilEnd, result.totalUntilEndBuffed, true)],
              [2, $('<strong>').text(String(result.totalUnits))],
-             [2, $('<strong>').text(String(result.totalItems))]]
+             [1, $('<strong>').text(String(result.totalItems))]]
         ));
 
         var $btns = $('<span>');
