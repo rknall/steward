@@ -39,3 +39,6 @@ docs/**/*txt
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Claude Code mod types (written by the engine at load)
+.claude/skills/*/.claude-plugin/types/

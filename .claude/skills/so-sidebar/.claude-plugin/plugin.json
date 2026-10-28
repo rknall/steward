@@ -1,0 +1,6 @@
+{
+  "name": "so-sidebar",
+  "version": "0.1.0",
+  "description": "steward sidebar: branch diff vs main, issue/PR, so-pipeline progress, running agents and session usage",
+  "types": "./types/index.d.ts"
+}
