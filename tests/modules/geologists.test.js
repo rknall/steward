@@ -137,3 +137,24 @@ t.test('plan with only ghost geologists enqueues nothing and stays quiet', funct
     });
     t.assert.strictEqual(ghostWarns.length, 0);
 });
+
+t.test('plan dispatches nothing for a type whose byType fails', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .deposits('IronOre', [])
+        .specialists([H.specs.geologist({ name: 'irongut', uid: 'g1' })])
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    z.zone.mStreetDataMap.getDeposits_vectorByType = function () {
+        throw new Error('[undefined] is not a function');
+    };
+
+    H.settings.write('geologists', onlyEnable('IronOre', 3));
+    H.module('geologists').plan({ zone: { isHome: true } });
+
+    t.assert.strictEqual(H.queued().length, 0);
+    var warns = H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'geologists';
+    });
+    t.assert.ok(warns.length >= 1, 'a geologists warning should be logged');
+});

@@ -144,8 +144,11 @@ zone.SendDestructBuildingCommand(building, source);
 zone.GetSpecialists_vector();
 
 // Deposits
-zone.mStreetDataMap.mDepositContainer;                       // iterate
+// mDepositContainer is a NotifyingIndexedContainer in the AIR client. It does not
+// index or enumerate, so do not walk it. Read deposits per type instead.
 zone.mStreetDataMap.getDeposits_vectorByType('IronOre');
+// The AIR bridge can throw a transient "[undefined] is not a function" from this
+// call. Wrap it and retry once before treating the count as unknown.
 ```
 
 ### Building accessors

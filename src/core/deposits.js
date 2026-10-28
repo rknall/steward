@@ -1,8 +1,21 @@
 /*
  * Deposit search and listing.
  *
- * Returns raw deposit-VO objects from the zone's mDepositContainer (or
- * getDeposits_vectorByType when filtering by name).
+ * The only source is mStreetDataMap.getDeposits_vectorByType(name), read
+ * once per deposit type. The street-data deposit container (a
+ * NotifyingIndexedContainer in the AIR client) neither indexes nor
+ * enumerates, so walking it always yields nothing; there is deliberately no
+ * container fallback, because an empty fallback reads as "no deposits".
+ *
+ * The AIR bridge sometimes throws a transient "[undefined] is not a
+ * function" from inside getDeposits_vectorByType. byType retries the call
+ * once, synchronously (no Promise or deferral in AIR), and logs a recovery.
+ *
+ * Contract: byType, list and byGrid return what the host reports, or THROW
+ * when the host read failed or cannot be done (no zone, no street-data map,
+ * method missing, or two failed calls). They never return [] to mean
+ * "unknown", so callers can tell an unknown count from zero. Callers own
+ * the warning: byType itself does not warn, so one failure is one line.
  */
 
 (function (S) {
@@ -12,20 +25,15 @@
         return S.core.zone.current();
     }
 
-    function readDepositsFromZone(zone) {
+    // A falsy vector means the host answered and reported nothing, so it is
+    // an empty result, not a failure.
+    function readTypeVector(sdm, typeName) {
+        var v = sdm.getDeposits_vectorByType(typeName);
         var out = [];
-        if (!zone) return out;
-        try {
-            var sdm = zone.mStreetDataMap;
-            if (!sdm) return out;
-            var src = sdm.mDepositContainer;
-            if (!src) return out;
-            var len = (typeof src.length === 'number') ? src.length : 0;
-            for (var i = 0; i < len; i++) {
-                if (src[i]) out.push(src[i]);
-            }
-        } catch (e) {
-            S.kernel.warn('deposits', 'readDepositsFromZone threw:', e);
+        if (!v) return out;
+        var len = (typeof v.length === 'number') ? v.length : 0;
+        for (var i = 0; i < len; i++) {
+            if (v[i]) out.push(v[i]);
         }
         return out;
     }
@@ -48,42 +56,44 @@
         catch (e) { return 0; }
     }
 
-    function list(opts) {
-        opts = opts || {};
-        return readDepositsFromZone(currentZone(opts.zone));
-    }
-
     function byType(typeName, opts) {
         opts = opts || {};
         var zone = currentZone(opts.zone);
-        if (!zone) return [];
+        var sdm = zone ? zone.mStreetDataMap : null;
+        if (!sdm || typeof sdm.getDeposits_vectorByType !== 'function') {
+            throw new Error('deposits.byType: host deposit lookup unavailable');
+        }
+        var firstErr;
         try {
-            var sdm = zone.mStreetDataMap;
-            if (sdm && typeof sdm.getDeposits_vectorByType === 'function') {
-                var v = sdm.getDeposits_vectorByType(typeName);
-                if (!v) return [];
-                var out = [];
-                var len = (typeof v.length === 'number') ? v.length : 0;
-                for (var i = 0; i < len; i++) {
-                    if (v[i]) out.push(v[i]);
-                }
-                return out;
-            }
-        } catch (e) {
-            S.kernel.warn('deposits', 'byType threw for', typeName, ':', e);
+            return readTypeVector(sdm, typeName);
+        } catch (e1) {
+            firstErr = e1;
         }
-        // Fallback — manual filter.
-        var all = readDepositsFromZone(zone);
-        var filtered = [];
-        for (var j = 0; j < all.length; j++) {
-            if (name(all[j]) === typeName) filtered.push(all[j]);
+        var result;
+        try {
+            result = readTypeVector(sdm, typeName);
+        } catch (e2) {
+            throw new Error('deposits.byType failed twice for ' + typeName + ': ' +
+                (e2 && e2.message ? e2.message : e2));
         }
-        return filtered;
+        S.kernel.log('deposits', 'byType recovered on retry for', typeName, ':', firstErr);
+        return result;
+    }
+
+    // Built from byType over the deposit-type enum, so a failed read of any
+    // type propagates instead of shrinking the list.
+    function list(opts) {
+        opts = opts || {};
+        var rows = S.core.deposits.types();
+        var out = [];
+        for (var i = 0; i < rows.length; i++) {
+            out = out.concat(byType(rows[i].name, opts));
+        }
+        return out;
     }
 
     function byGrid(targetGrid, opts) {
-        opts = opts || {};
-        var src = readDepositsFromZone(currentZone(opts.zone));
+        var src = list(opts);
         for (var i = 0; i < src.length; i++) {
             if (grid(src[i]) === targetGrid) return src[i];
         }

@@ -145,8 +145,10 @@
             var onMap;
             try { onMap = S.core.deposits.byType(info.name).length; }
             catch (e) {
-                S.kernel.warn('geologists', 'byType threw for', info.name, ':', e);
-                onMap = 0;
+                // An unknown count must not read as zero: wanted would then equal
+                // max and over-dispatch, so this type is skipped for this tick.
+                S.kernel.warn('geologists', 'byType failed for', info.name, '- skipping this tick:', e);
+                continue;
             }
             var onTask = busyOnDeposit(allGeos, info.index);
             var wanted = max - onMap - onTask;

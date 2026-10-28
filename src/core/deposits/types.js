@@ -2,7 +2,7 @@
  * Curated deposit-type enum.
  *
  * The value stored in S.Deposit.<Name> is the host's internal deposit name
- * (matches what `mDepositContainer[i].GetName_string()` returns and what
+ * (matches what a deposit VO's `GetName_string()` returns and what
  * `mStreetDataMap.getDeposits_vectorByType(name)` accepts). Same convention
  * as core/buildings/types.js.
  *

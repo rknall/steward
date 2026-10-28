@@ -289,3 +289,18 @@ t.test('tryPause skips when cfg.pause is undefined', function () {
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
 });
+
+t.test('tryBuild enqueues nothing when byType fails', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .deposits('IronOre', [])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    z.zone.mStreetDataMap.getDeposits_vectorByType = function () {
+        throw new Error('[undefined] is not a function');
+    };
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});
