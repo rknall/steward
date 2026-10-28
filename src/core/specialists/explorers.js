@@ -9,6 +9,10 @@
  *     skill-aware items/hour scoring used by bestTaskForEvent
  *   - biasFromTrait + classifyEffect / classifyEntry / familyForEffect —
  *     trait-skill scoring documented in docs/traits/EXPLORER.md
+ *   - timeBonusOf / eventTaskRates — per-variant event items/hour, shared
+ *     by bestTaskForEvent and estimateEventItems
+ *   - estimateEventItems(nowMs) — approximate event items per hour, per
+ *     day and until the item-drop phase ends, best variant per explorer
  *   - familyFromBias / pickAdventureSubtask / bestTaskForEvent /
  *     activeEventContext / forceTreasureOnEventsEnabled / userDefaultTask
  *   - pickTask — the explorer-routing entry point (precedence chain
@@ -345,45 +349,83 @@
         return best;
     }
 
-    // Best treasure-search variant for this explorer during a treasure-
-    // event-active context. Computes items/hour using the live host task
-    // durations + the explorer's skills + GetTimeBonus (general spec bonus).
-    // Returns null when host data isn't reachable or the event has no
-    // treasure value table.
-    function bestTaskForEvent(spec, eventCode) {
-        if (!spec || !eventCode) return null;
+    // Explorer speed bonus from the specialist description, in percent
+    // (100 = normal speed, 200/250/300 for faster explorer types, see the
+    // table in docs/traits/EXPLORER.md). Falls back to 100 when the host
+    // object or the value is missing so a rate is still computable.
+    function timeBonusOf(spec) {
+        try {
+            var desc = (spec && typeof spec.GetSpecialistDescription === 'function')
+                ? spec.GetSpecialistDescription() : null;
+            if (desc && typeof desc.GetTimeBonus === 'function') {
+                var b = desc.GetTimeBonus();
+                if (typeof b === 'number' && b > 0) return b;
+            }
+        } catch (e) { /* ignore */ }
+        return 100;
+    }
+
+    // Event items per hour for each treasure-search variant this explorer
+    // can run during `eventCode`. One entry per task that has a matching
+    // event treasure value: { enumVal, duration, timeBonus, hours, items,
+    // perHour }. `duration` is the skill-adjusted subtask duration in ms
+    // before the time bonus; `hours` divides by the percent time bonus
+    // (ms / (bonus / 100) / 3600000 = ms / bonus / 36000). Same arithmetic
+    // as autoTSO calculateDailyItems. bestTaskForEvent and the event-item
+    // estimate both read this list so the dispatch choice and the displayed
+    // estimate cannot diverge. Returns [] when host data isn't reachable or
+    // the event has no treasure value table.
+    function eventTaskRates(spec, eventCode) {
+        var out = [];
+        if (!spec || !eventCode) return out;
         var values = (S.core.events && S.core.events.treasureValues)
             ? S.core.events.treasureValues(eventCode) : [];
-        if (!values || !values.length) return null;
+        if (!values || !values.length) return out;
         var levelMult = (S.core.events && typeof S.core.events.levelMultiplier === 'function')
             ? S.core.events.levelMultiplier(eventCode) : 1;
 
         var tasks = treasureTaskTable();
-        if (!tasks.length) return null;
+        if (!tasks.length) return out;
 
         var skillList = allSpecSkills(spec);
-        var timeBonus = 1;
-        try {
-            var desc = (typeof spec.GetSpecialistDescription === 'function')
-                ? spec.GetSpecialistDescription() : null;
-            if (desc && typeof desc.GetTimeBonus === 'function') {
-                var b = desc.GetTimeBonus();
-                if (typeof b === 'number' && b > 0) timeBonus = b;
-            }
-        } catch (e) { /* ignore */ }
+        var timeBonus = timeBonusOf(spec);
 
-        var best = null;
-        var bestRate = -1;
         for (var i = 0; i < tasks.length && i < values.length; i++) {
             var t = tasks[i];
             var applied = applySkills(t, skillList);
-            var adjustedDuration = applied.duration / timeBonus;
-            if (adjustedDuration <= 0) continue;
+            var hours = applied.duration / timeBonus / 36000;
+            if (!(hours > 0)) continue;
             var items = values[i] * applied.lootMultiplier * levelMult;
-            var rate = items / adjustedDuration;
-            if (rate > bestRate) { bestRate = rate; best = t.enumVal; }
+            out.push({
+                enumVal:   t.enumVal,
+                duration:  applied.duration,
+                timeBonus: timeBonus,
+                hours:     hours,
+                items:     items,
+                perHour:   items / hours
+            });
+        }
+        return out;
+    }
+
+    // Index of the highest-perHour entry in an eventTaskRates list, or -1
+    // when empty. First maximum wins so ties keep the shorter variant.
+    function bestRateIndex(rates) {
+        var best = -1;
+        var bestRate = -1;
+        for (var i = 0; i < rates.length; i++) {
+            if (rates[i].perHour > bestRate) { bestRate = rates[i].perHour; best = i; }
         }
         return best;
+    }
+
+    // Best treasure-search variant for this explorer during a treasure-
+    // event-active context: the enumVal of the highest items/hour entry
+    // of eventTaskRates. Returns null when no rate is computable.
+    function bestTaskForEvent(spec, eventCode) {
+        var rates = eventTaskRates(spec, eventCode);
+        var idx = bestRateIndex(rates);
+        return idx === -1 ? null : rates[idx].enumVal;
     }
 
     // Build the "active treasure-event" context: { events: { code: true },
@@ -404,6 +446,85 @@
             }
         } catch (e) { /* swallow — context just stays empty */ }
         return ctx;
+    }
+
+    // Approximate event items the player's explorers bring in while the
+    // treasure event's item-drop phase (_Content) runs. Each explorer
+    // counts once, with its single best items/hour variant — summing every
+    // improving variant (as autoTSO's daily-items loop does) overstates the
+    // total. Loot-count adders are not modelled, so callers label the result
+    // as approximate. Returns null when no treasure event is live, else
+    // { code, name, resource, explorers, counted, perHour, perDay, endTime,
+    // hoursLeft, untilEnd }; hoursLeft / untilEnd are null when the event's
+    // stop date is unknown. nowMs defaults to the current epoch time.
+    function estimateEventItems(nowMs) {
+        var ctx = activeEventContext();
+        if (!ctx.anyTreasureEvent) return null;
+        var code = ctx.treasureEventCode;
+        var now = (typeof nowMs === 'number') ? nowMs : new Date().getTime();
+
+        var ev = null;
+        try {
+            var active = S.core.events.active();
+            for (var a = 0; a < active.length; a++) {
+                if (active[a] && active[a].code === code) { ev = active[a]; break; }
+            }
+        } catch (e) { /* ev stays null */ }
+        // The item-drop phase can end before the shop phase; prefer it.
+        var end = ev ? ((ev.endTimes && ev.endTimes.treasure) || ev.endTime) : null;
+        if (typeof end !== 'number') end = null;
+
+        var list = [];
+        try { list = S.core.specialists.explorers() || []; }
+        catch (e) { S.kernel.warn('specialists', 'estimateEventItems: listing explorers threw:', e); }
+
+        var counted = 0;
+        var perHour = 0;
+        var logged = false;
+        for (var i = 0; i < list.length; i++) {
+            var rates;
+            try { rates = eventTaskRates(list[i], code); }
+            catch (e) { rates = []; }
+            var idx = bestRateIndex(rates);
+            if (idx === -1) continue;
+            counted++;
+            perHour += rates[idx].perHour;
+            if (!logged) {
+                // Raw host values for a manual unit check (duration in ms,
+                // time bonus in percent).
+                S.kernel.debug('specialists', 'estimateEventItems: first explorer best task',
+                    rates[idx].enumVal, 'duration', rates[idx].duration,
+                    'timeBonus', rates[idx].timeBonus);
+                logged = true;
+            }
+        }
+
+        var hoursLeft = null;
+        var untilEnd = null;
+        if (end !== null) {
+            hoursLeft = Math.max(0, (end - now) / 3600000);
+            untilEnd = Math.floor(perHour * hoursLeft);
+        }
+
+        var resource = null;
+        try {
+            if (typeof S.core.events.eventResource === 'function') {
+                resource = S.core.events.eventResource(code);
+            }
+        } catch (e) { /* resource stays null */ }
+
+        return {
+            code:      code,
+            name:      (ev && ev.name) || code,
+            resource:  resource,
+            explorers: list.length,
+            counted:   counted,
+            perHour:   perHour,
+            perDay:    perHour * 24,
+            endTime:   end,
+            hoursLeft: hoursLeft,
+            untilEnd:  untilEnd
+        };
     }
 
     // Read the explorers.forceTreasureOnEvents setting. When
@@ -554,6 +675,8 @@
     S.core.specialists.biasFromTrait    = biasFromTrait;
     S.core.specialists.familyFromBias   = familyFromBias;
     S.core.specialists.bestTaskForEvent = bestTaskForEvent;
+    S.core.specialists.eventTaskRates   = eventTaskRates;
+    S.core.specialists.estimateEventItems = estimateEventItems;
     S.core.specialists.taskFamilyOf     = taskFamilyOf;
 
 }(Steward));

@@ -23,6 +23,18 @@
  *     }
  *   }
  *
+ * Menu spec (optional): a module can add a submenu to the native ~Steward~
+ * menu via a `menu` field. Items are always enabled (the menu is only
+ * rebuilt on init/toggle, so a live enabled flag would go stale); an item
+ * that depends on game state reports that itself when selected.
+ *
+ *   menu: {
+ *     title: 'Events',                       // submenu label
+ *     items: [ { label: 'Event calculator…', onSelect: function () {} } ]
+ *   }
+ *
+ * The `events` tab hosts read-only event tools.
+ *
  * The Status tab is reserved (rendered by the kernel's UI shell, not by a
  * module). Mail/Trades is deliberately omitted until that subsystem ships.
  */
@@ -34,11 +46,12 @@
         geologists:  true,
         quests:      true,
         buildings:   true,
+        events:      true,
         tools:       true,
         misc:        true
     };
 
-    var modules = [];                         // [{ id, priority, isReady, plan, boot, ui? }]
+    var modules = [];                         // [{ id, priority, isReady, plan, boot, ui?, menu? }]
     var byId = {};
 
     function isFunction(x) { return typeof x === 'function'; }
@@ -72,6 +85,31 @@
                 render:  sec.render
             }
         };
+    }
+
+    // Validate and normalise the optional menu spec. Invalid items are
+    // dropped; when none survive the whole menu is dropped. Either way the
+    // module still registers.
+    function validateMenu(moduleId, raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        if (!raw.title || !Array.isArray(raw.items)) {
+            S.kernel.warn('registry', moduleId, 'menu requires title and items array');
+            return null;
+        }
+        var items = [];
+        for (var i = 0; i < raw.items.length; i++) {
+            var it = raw.items[i];
+            if (!it || typeof it !== 'object' || !it.label || !isFunction(it.onSelect)) {
+                S.kernel.warn('registry', moduleId, 'menu item', i, 'requires label and onSelect');
+                continue;
+            }
+            items.push({ label: String(it.label), onSelect: it.onSelect });
+        }
+        if (!items.length) {
+            S.kernel.warn('registry', moduleId, 'menu has no valid items');
+            return null;
+        }
+        return { title: String(raw.title), items: items };
     }
 
     function register(spec) {
@@ -118,7 +156,8 @@
             plan:         spec.plan,
             boot:         isFunction(spec.boot) ? spec.boot : null,
             experimental: spec.experimental === true,
-            ui:           validateUi(spec.id, spec.ui)
+            ui:           validateUi(spec.id, spec.ui),
+            menu:         validateMenu(spec.id, spec.menu)
         };
         modules.push(entry);
         byId[spec.id] = entry;
@@ -158,12 +197,22 @@
         return out;
     }
 
+    // Modules that declare a native-menu submenu, in registration order.
+    function withMenu() {
+        var out = [];
+        for (var i = 0; i < modules.length; i++) {
+            if (modules[i].menu) out.push(modules[i]);
+        }
+        return out;
+    }
+
     S.kernel.register = register;
     S.kernel.registry = {
         list:    list,
         byTier:  byTier,
         byTab:   byTab,
         withUi:  withUi,
+        withMenu: withMenu,
         get:     get,
         count:   count,
         TABS:    TABS

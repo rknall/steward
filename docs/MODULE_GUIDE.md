@@ -109,6 +109,8 @@ That's a complete module. After `npm run build` it'll be bundled into `user_stew
 | `isReady`  | yes      | `(ctx)→bool` | Cheap. Errors are treated as `false`.                         |
 | `plan`     | yes      | `(ctx)→void` | Called when `isReady` returns true. Errors are swallowed and logged. |
 | `boot`     | no       | `()→void` | One-shot, called after registration completes.                   |
+| `ui`       | no       | object    | Dashboard section: `{ tab, section: { id, title, icon, render } }`. See [UI](#ui). |
+| `menu`     | no       | object    | Native `~Steward~` submenu: `{ title, items: [{ label, onSelect }] }`. See [UI](#ui). |
 
 See [`SCHEDULER.md`](SCHEDULER.md) for the contract details.
 
@@ -198,25 +200,44 @@ Use your module's `id` as the category. Don't log inside hot loops.
 
 ## UI
 
-If your module needs a settings panel, register one in `ui.js`:
+A module shows things in the native menu and the dashboard through two optional fields of its register spec.
+
+- `ui` adds a section to one dashboard tab. `tab` is one of `specialists`, `geologists`, `quests`, `buildings`, `events`, `tools` or `misc`. `section.id` is unique and also the settings buffer key. `render($body, h)` runs when the dashboard draws the tab; `h` is `S.kernel.ui.helpers` (`headerRow`, `gridRow`, `formRow`, `input`, `dropdown`, `toggle`, `button`, `settings`, `update`, ...).
+- `menu` adds a submenu to the native `~Steward~` menu. Use it for read-only tools, such as opening a tab or showing an alert.
 
 ```js
-// src/modules/collect/ui.js
-(function (S) {
-    S.modules.collect = S.modules.collect || {};
-    S.modules.collect.renderSettings = function (modal) {
-        var s = S.kernel.settings.read('collect');
-        modal.Body().append(/* html */);
-        // wire up createSwitch(...) and write back to settings on change
-    };
-    S.kernel.ui.menu.add({
-        label: 'Collect',
-        render: S.modules.collect.renderSettings
-    });
-})(Steward);
+// src/modules/eventcalc/module.js (trimmed)
+S.kernel.register({
+    id: 'eventcalc',
+    // priority, isReady, plan and boot as above
+    ui: {
+        tab: 'events',
+        section: {
+            id:    'eventcalc',
+            title: 'Event calculator',
+            icon:  '⚑',
+            render: function ($body, h) {
+                // ui.js loads after module.js, so look the renderer up at call time
+                return S.modules.eventcalc.renderSection($body, h);
+            }
+        }
+    },
+    menu: {
+        title: 'Events',
+        items: [
+            { label: 'Event calculator…', onSelect: function () {
+                S.kernel.ui.openDashboard('events');
+            } }
+        ]
+    }
+});
 ```
 
-The kernel renders the menu shell; modules supply per-entry render functions. UI primitives (`createModalWindow`, `createSwitch`, `createTableRow`) are host-provided — see [`TSO_API.md`](TSO_API.md).
+Menu items are always enabled. The native menu is rebuilt only on init and when a module is toggled, so an enabled flag would go stale. An item that depends on game state reports that itself when selected, as the event calculator's estimate alert does.
+
+Dashboard settings go through a buffer: `h.settings(id)` returns it, `h.update(id, patch)` merges changes into it, and the dashboard Save button writes them to the module's settings. Keep state that describes the current moment out of the buffer; a session-only value is cleared when the menu entry reopens the dashboard.
+
+UI primitives are host-provided; see [`TSO_API.md`](TSO_API.md).
 
 ## Error handling
 

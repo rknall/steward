@@ -3,9 +3,10 @@
  *
  * Two surfaces:
  *
- *   1. Native menu — minimal: master pause toggle + "Open Dashboard…"
- *      entry. Modules don't decorate it any more; the dashboard is the
- *      single configuration surface.
+ *   1. Native menu — pause toggle, status, "Open Dashboard…", module
+ *      submenus declared via the register spec's `menu` field (read-only
+ *      tools such as the event calculator), then quick toggles. The
+ *      dashboard remains the single configuration surface.
  *
  *   2. Dashboard modal — autoTSO-mirror layout:
  *        ┌──────────────────────────────────┐
@@ -21,7 +22,7 @@
  *        ├──────────────────────────────────┤
  *        │ Save                       Close │
  *        └──────────────────────────────────┘
- *      Tabs: Status | Specialists | Quests | Buildings | Tools | Misc
+ *      Tabs: Status | Specialists | Quests | Buildings | Events | Tools | Misc
  *      (Mail/Trades is intentionally deferred until those modules ship.)
  *
  * Settings buffer (explicit Save semantics):
@@ -64,6 +65,7 @@
         { id: 'geologists',  label: 'Geologists' },
         { id: 'quests',      label: 'Quests' },
         { id: 'buildings',   label: 'Collections & Buildings' },
+        { id: 'events',      label: 'Events' },
         { id: 'tools',       label: 'Tools' },
         { id: 'misc',        label: 'Misc' }
     ];
@@ -152,6 +154,8 @@
             catch (e) { /* ignore */ }
             sub.addItem(openItem);
 
+            appendModuleMenus(sub);
+
             // Per-module quick-toggles. Each enabled-aware module surfaces a
             // single entry showing its current state — clicking flips
             // settings.<id>.enabled and refreshes the menu. autoTSO has the
@@ -185,6 +189,45 @@
         } catch (e) {
             S.kernel.error('ui', 'appendModuleQuickToggles threw:', e);
         }
+    }
+
+    // One submenu per module that declares a `menu` in its register spec.
+    // Items stay enabled because the native menu is only rebuilt on
+    // init/toggle; the module reports "nothing to show" itself.
+    function appendModuleMenus(sub) {
+        try {
+            if (!S.kernel.registry || typeof S.kernel.registry.withMenu !== 'function') return;
+            var mods = S.kernel.registry.withMenu();
+            for (var i = 0; i < mods.length; i++) {
+                appendOneModuleMenu(sub, mods[i]);
+            }
+        } catch (e) {
+            S.kernel.error('ui', 'appendModuleMenus threw:', e);
+        }
+    }
+
+    function appendOneModuleMenu(sub, mod) {
+        var spec = mod.menu;
+        var entry = new air.NativeMenuItem(spec.title);
+        entry.name = 'StewardModuleMenu_' + mod.id;
+        var inner = new air.NativeMenu();
+        for (var i = 0; i < spec.items.length; i++) {
+            inner.addItem(makeModuleMenuItem(mod, spec.items[i]));
+        }
+        entry.submenu = inner;
+        sub.addItem(entry);
+    }
+
+    function makeModuleMenuItem(mod, spec) {
+        var item = new air.NativeMenuItem(spec.label);
+        item.enabled = true;
+        try {
+            item.addEventListener(air.Event.SELECT, function () {
+                try { spec.onSelect(); }
+                catch (e) { S.kernel.error('ui', mod.id, 'menu item threw:', e); }
+            });
+        } catch (e) { /* ignore */ }
+        return item;
     }
 
     function appendOneToggle(sub, mod) {

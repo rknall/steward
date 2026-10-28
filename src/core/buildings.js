@@ -244,6 +244,24 @@
         return out;
     }
 
+    // Seconds per produced unit, read from the economy definition rather than
+    // from a placed building, so it is available for any building type even when
+    // none is on the current island. Mirrors how autoTSO derives production time.
+    // Returns null when the host cannot answer, so callers can fall back safely.
+    function workTime(buildingName) {
+        try {
+            if (typeof game === 'undefined' || !game.def) return null;
+            var econ = game.def('ServerState::gEconomics');
+            if (!econ || typeof econ.GetResourcesCreationDefinitionForBuilding !== 'function') return null;
+            var def = econ.GetResourcesCreationDefinitionForBuilding(buildingName);
+            if (!def) return null;
+            var wt = def.workTime;
+            return (typeof wt === 'number' && wt > 0) ? wt : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     S.core.buildings = {
         // listing
         list:               list,
@@ -259,6 +277,7 @@
         grid:         grid,
         level:        level,
         playerId:     playerId,
+        workTime:     workTime,
 
         // state predicates
         isMine:       isMine,

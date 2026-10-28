@@ -42,6 +42,7 @@ function makeSpec(opts) {
     var name    = opts.name || 'Specialist';
     var task    = opts.task || null;
     var skills  = (opts.skills || []).map(makeSkill);
+    var timeBonus = opts.timeBonus;
 
     return {
         GetType:     function () { return typeId; },
@@ -62,11 +63,17 @@ function makeSpec(opts) {
         },
         getIconID:   function () { return opts.iconID || null; },
         GetSpecialistDescription: function () {
-            return {
+            var desc = {
                 getName_string:     function () { return name; },
                 getBaseType:        function () { return typeId; },
                 isTransportGeneral: function () { return false; }
             };
+            // Only expose the time bonus when the test sets one, so the
+            // missing-method path stays reachable.
+            if (typeof timeBonus === 'number') {
+                desc.GetTimeBonus = function () { return timeBonus; };
+            }
+            return desc;
         }
     };
 }

@@ -98,9 +98,9 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 |---|---|---|
 | Hard-coded treasure values for 6 events | mirrored in `core/events/data.js` | ✓ |
 | `getActiveEvent(type)` (substring match against host event names) | `core/events.active()` + `liveEventNames()` | ✓ |
-| `isEventWithDepos()` | not yet — Valentine/HW deposit info captured in data but no calculator | ~ |
-| `calculateDailyItems` (per-explorer skill-aware items/hour estimate) | `core/specialists.skills` exposes data, but the calculator UI / module is missing | ~ |
-| `calculateDeposits` (Valentine flowers / HW pumpkins for the rest of event) | data captured, no UI | ✗ |
+| `isEventWithDepos()` | `core/events/refill.js` `depositEvent()`: the live event whose `depositInfo` (in `core/events/data.js`) names workyard buildings | ✓ |
+| `calculateDailyItems` (per-explorer skill-aware items/hour estimate) | `core/specialists.estimateEventItems()`: best task per explorer, summed, shown in the Events tab. Loot-count traits are not modelled, as in autoTSO | ✓ |
+| `calculateDeposits` (Valentine flowers / HW pumpkins for the rest of event) | `core/events/refill.js` `rows()` / `compute()`: one row per placed field with its current deposit subtracted, shown in the Events tab by the `eventcalc` module | ✓ |
 
 ### aBuffs — Buffs System
 | autoTSO | Steward | Status |

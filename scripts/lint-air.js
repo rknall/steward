@@ -3,7 +3,9 @@
  * Steward lint wrapper.
  *
  * Runs ESLint with the AIR-compatible ruleset (defined in .eslintrc.json) over
- * src/. Exists so `npm run lint` and the husky pre-commit hook share a single
+ * src/. ESLint's JS entry is run through the current node binary, because on
+ * Windows node_modules/.bin/eslint is an sh shim that spawnSync cannot execute.
+ * Exists so `npm run lint` and the husky pre-commit hook share a single
  * code path, and so we can extend with extra checks later (e.g. bundle size,
  * dual-namespace collisions) without touching package.json.
  *
@@ -26,7 +28,7 @@ const args = process.argv.slice(2);
 const explicitTargets = args.filter(function (a) { return a !== '--fix'; });
 const fix = args.indexOf('--fix') !== -1;
 
-const eslintBin = path.join(REPO_ROOT, 'node_modules', '.bin', 'eslint');
+const eslintBin = path.join(REPO_ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js');
 if (!fs.existsSync(eslintBin)) {
     process.stderr.write('lint-air: eslint not installed. Run `npm install` first.\n');
     process.exit(1);
@@ -38,5 +40,9 @@ if (fix) eslintArgs.push('--fix');
 eslintArgs.push('--no-error-on-unmatched-pattern');
 Array.prototype.push.apply(eslintArgs, targets);
 
-const result = spawnSync(eslintBin, eslintArgs, { cwd: REPO_ROOT, stdio: 'inherit' });
+const result = spawnSync(process.execPath, [eslintBin].concat(eslintArgs), { cwd: REPO_ROOT, stdio: 'inherit' });
+if (result.error) {
+    process.stderr.write('lint-air: failed to run eslint: ' + result.error.message + '\n');
+    process.exit(1);
+}
 process.exit(result.status === null ? 1 : result.status);

@@ -60,9 +60,12 @@
         return null;
     }
 
-    // Return active events as { code, name, category, rawNames[], endTime }.
-    // Multiple raw events may collapse to one base code; their suffixes
-    // (_Content, _Shop, …) become category tags so callers can filter.
+    // Return active events as { code, name, category, rawNames[], endTime,
+    // endTimes }. Multiple raw events may collapse to one base code; their
+    // suffixes (_Content, _Shop, …) become category tags so callers can
+    // filter. endTimes holds the latest stop date per category
+    // ({ treasure, shop, other }) because the item-drop phase (_Content)
+    // ends before the shop phase (_Shop); endTime is the latest of all.
     function active() {
         var live = liveEventNames();
         if (!live.length) return [];
@@ -77,7 +80,8 @@
                     name:       (table()[code] && table()[code].name) || code,
                     rawNames:   [],
                     categories: {},
-                    endTime:    null
+                    endTime:    null,
+                    endTimes:   { treasure: null, shop: null, other: null }
                 };
             }
             byCode[code].rawNames.push(raw);
@@ -87,13 +91,16 @@
             // substring matches wrapper event names that persist into the
             // event's cooldown / shop-only phase, which made pickTask think
             // treasure was still dropping after items had stopped.
-            if (raw.indexOf('_Shop') !== -1)          byCode[code].categories.shop    = true;
-            else if (raw.indexOf('_Content') !== -1)  byCode[code].categories.treasure = true;
-            else                                       byCode[code].categories.other   = true;
-            // Track the latest end time across sub-events.
+            var catKey = raw.indexOf('_Shop') !== -1    ? 'shop'
+                       : raw.indexOf('_Content') !== -1 ? 'treasure'
+                       : 'other';
+            byCode[code].categories[catKey] = true;
+            // Track the latest end time across sub-events, overall and per category.
             var et = eventEndTime(raw);
-            if (et && (!byCode[code].endTime || et > byCode[code].endTime)) {
-                byCode[code].endTime = et;
+            if (typeof et === 'number' && et > 0) {
+                var cur = byCode[code];
+                if (!cur.endTime || et > cur.endTime) cur.endTime = et;
+                if (!cur.endTimes[catKey] || et > cur.endTimes[catKey]) cur.endTimes[catKey] = et;
             }
         }
         // Flatten categories object → list of strings, plus a flat

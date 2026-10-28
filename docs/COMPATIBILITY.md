@@ -107,6 +107,7 @@ Using any of the following will either parse-fail or throw at runtime, and in ma
 - `Object.assign` — unreliable; use explicit copies.
 - `Object.values`, `Object.entries` — not supported; iterate `Object.keys` and look up.
 - Computed property names `{ [key]: value }`.
+- ES3 reserved words (e.g. `typeof`, `default`, `delete`, `class`, `new`) as unquoted object keys or dot-properties — the whole file then fails to parse silently (the script never runs and no error is logged). Quote the key and use bracket access: `{ 'default': 1 }`, `x['default']`.
 
 ## Steward source patterns
 
@@ -155,6 +156,8 @@ Every Steward source file is a self-attaching IIFE on the global `Steward` names
 ```bash
 npm run lint     # AIR ruleset over src/
 ```
+
+`npm run lint` runs ESLint's JS entry through the current node, so it works on Windows. The ruleset also bans ES3 reserved words as unquoted keys and dot-properties (see "Other" under Not supported).
 
 The pre-commit hook runs the same lint over staged files. Push without lint passing and CI will fail before any artifact is produced.
 

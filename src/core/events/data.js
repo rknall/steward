@@ -29,11 +29,12 @@
     // - resource: the currency the event drops; used by UI to display gain.
     //   Anniversary has a level-dependent resource (Candles ≥54, CakeDough <54);
     //   resolved at query time, not stored here.
-    // - depositInfo: for events that surface as harvest deposits (Valentine
-    //   flower farms, HW pumpkin fields). Building name + harvest-time
-    //   constant — used to compute "deposits needed for the rest of the event"
-    //   (autoTSO/user_auto.js:4494-4522). Steward's calculator lands later;
-    //   we capture the data now so it's there.
+    // - depositInfo: workyard buildings whose deposit (named like the event
+    //   `resource`) the refill calculator reads per placed field
+    //   (autoTSO/user_auto.js:4494-4522 computes the same totals).
+    //   `fieldsPerType` = template rows per building when the real fields
+    //   cannot be read (default 1). Production time comes from the host
+    //   economy definition, not from data.
     S.core.events.data.events = {
         XMAS: {
             name:           'Christmas',
@@ -75,7 +76,7 @@
             resource:       'HalloweenResource',
             depositInfo: {
                 buildings: ['pumpkinfield_01', 'pumpkinfield_02', 'pumpkinfield_03'],
-                depositsPerRefill: 3
+                fieldsPerType: 3
             }
         }
     };
