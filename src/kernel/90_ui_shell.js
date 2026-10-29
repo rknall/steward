@@ -40,6 +40,7 @@
     var statusText = 'Steward online';
     var statusItem = null;
     var pauseItem = null;
+    var toggleItems = {};
     var initAttempts = 0;
     var initialized = false;
     var paused = false;
@@ -92,6 +93,14 @@
     }
 
     function pauseLabel() { return paused ? 'Steward: ✕ Paused' : 'Steward: ✓ Active'; }
+
+    // Quick-toggle label, or null when the module has no `enabled` flag (no
+    // toggle entry exists for it). Shared by the build and the in-place refresh.
+    function toggleLabel(mod) {
+        var s = S.kernel.settings.read(mod.id);
+        if (!s || typeof s.enabled === 'undefined') return null;
+        return (s.enabled ? '✓ ' : '✕ ') + mod.ui.section.title;
+    }
 
     function statusLabel() {
         var n = 0;
@@ -158,9 +167,10 @@
 
             // Per-module quick-toggles. Each enabled-aware module surfaces a
             // single entry showing its current state — clicking flips
-            // settings.<id>.enabled and refreshes the menu. autoTSO has the
+            // settings.<id>.enabled and updates the entry's label. autoTSO has the
             // equivalent under "Start/Stop X Auto".
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
+            toggleItems = {};
             appendModuleQuickToggles(sub);
 
             root.submenu = sub;
@@ -173,7 +183,24 @@
         }
     }
 
-    function refreshNativeMenu() { if (initialized) rebuildNativeMenu(); }
+    // Rebuilding the native menu leaks native menus in AIR, so after init
+    // only the labels of the existing items change. Also re-syncs labels after
+    // an `enabled` flip made outside the menu (dashboard Save, console write).
+    function refreshToggleLabels() {
+        if (!initialized) return;
+        try {
+            var mods = S.kernel.registry.withUi();
+            for (var i = 0; i < mods.length; i++) {
+                var item = toggleItems[mods[i].id];
+                if (!item) continue;
+                var label = toggleLabel(mods[i]);
+                if (label === null) continue;
+                try { item.label = label; } catch (e) { /* invalidated */ }
+            }
+        } catch (e) {
+            S.kernel.error('ui', 'refreshToggleLabels threw:', e);
+        }
+    }
 
     // Surface a quick-toggle for every dashboard-aware module that has an
     // `enabled` settings flag. Click the entry to flip it without opening
@@ -192,8 +219,8 @@
     }
 
     // One submenu per module that declares a `menu` in its register spec.
-    // Items stay enabled because the native menu is only rebuilt on
-    // init/toggle; the module reports "nothing to show" itself.
+    // Items stay enabled because the native menu is only built once, on
+    // init; the module reports "nothing to show" itself.
     function appendModuleMenus(sub) {
         try {
             if (!S.kernel.registry || typeof S.kernel.registry.withMenu !== 'function') return;
@@ -231,9 +258,8 @@
     }
 
     function appendOneToggle(sub, mod) {
-        var s = S.kernel.settings.read(mod.id);
-        if (!s || typeof s.enabled === 'undefined') return;
-        var label = (s.enabled ? '✓ ' : '✕ ') + mod.ui.section.title;
+        var label = toggleLabel(mod);
+        if (label === null) return;
         var item = new air.NativeMenuItem(label);
         item.name = 'StewardModuleToggle_' + mod.id;
         item.enabled = true;
@@ -242,6 +268,7 @@
                 toggleModuleEnabled(mod.id);
             });
         } catch (e) { /* ignore */ }
+        toggleItems[mod.id] = item;
         sub.addItem(item);
     }
 
@@ -256,7 +283,7 @@
             if (!s.enabled && S.kernel.queue && S.kernel.queue.cancelByModule) {
                 S.kernel.queue.cancelByModule(moduleId);
             }
-            refreshNativeMenu();
+            refreshToggleLabels();
         } catch (e) {
             S.kernel.error('ui', 'toggleModuleEnabled threw:', e);
         }
@@ -327,7 +354,7 @@
             if (pauseItem) {
                 try { pauseItem.label = pauseLabel(); } catch (e) { /* invalidated */ }
             }
-            refreshNativeMenu();
+            refreshToggleLabels();
         } catch (e) { /* ignore */ }
     }
 

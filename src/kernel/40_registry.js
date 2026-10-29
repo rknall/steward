@@ -24,8 +24,8 @@
  *   }
  *
  * Menu spec (optional): a module can add a submenu to the native ~Steward~
- * menu via a `menu` field. Items are always enabled (the menu is only
- * rebuilt on init/toggle, so a live enabled flag would go stale); an item
+ * menu via a `menu` field. Items are always enabled (the menu is built
+ * once, on init, so a live enabled flag would go stale); an item
  * that depends on game state reports that itself when selected.
  *
  *   menu: {

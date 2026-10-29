@@ -233,7 +233,7 @@ S.kernel.register({
 });
 ```
 
-Menu items are always enabled. The native menu is rebuilt only on init and when a module is toggled, so an enabled flag would go stale. An item that depends on game state reports that itself when selected, as the event calculator's estimate alert does.
+Menu items are always enabled. The native menu is built once, on init (later changes only update labels in place), so an enabled flag would go stale. An item that depends on game state reports that itself when selected, as the event calculator's estimate alert does.
 
 Dashboard settings go through a buffer: `h.settings(id)` returns it, `h.update(id, patch)` merges changes into it, and the dashboard Save button writes them to the module's settings. Keep state that describes the current moment out of the buffer; a session-only value is cleared when the menu entry reopens the dashboard.
 
