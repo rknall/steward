@@ -529,13 +529,26 @@
     var dropLoggedAt = null;
     var foundLoggedAt = null;
 
+    // true when spec's member name does not read as a function right now (or spec
+    // is missing, or reading the member throws). A live cSpecialist's members can
+    // read undefined on the JS side of the AIR bridge for a moment, also between a
+    // typeof guard and the call. A caller whose guarded call threw asks this to tell
+    // that passing fault (unknown, no warning) from a real throw inside the client.
+    function memberGone(spec, name) {
+        try {
+            return !spec || typeof spec[name] !== 'function';
+        } catch (e) {
+            return true;
+        }
+    }
+
     // Returns null when the entry is usable, else the name of the member that
     // failed ('uid' when the members exist but the key reads null or empty). A throw
     // counts as unusable.
     function unusableMember(spec) {
         try {
             for (var i = 0; i < REQUIRED_MEMBERS.length; i++) {
-                if (typeof spec[REQUIRED_MEMBERS[i]] !== 'function') return REQUIRED_MEMBERS[i];
+                if (memberGone(spec, REQUIRED_MEMBERS[i])) return REQUIRED_MEMBERS[i];
             }
             if (!uniqueIdKey(spec)) return 'uid';
         } catch (e) {
@@ -552,12 +565,15 @@
         for (var name in counts) {
             if (Object.prototype.hasOwnProperty.call(counts, name)) parts.push(name + ' x' + counts[name]);
         }
-        var rawType = '?';
-        var cls = '?';
-        try { rawType = String(sample.GetType()); } catch (e1) { /* keep ? */ }
-        try { cls = window.runtime.flash.utils.getQualifiedClassName(sample); } catch (e2) { /* keep ? */ }
-        S.kernel.log('specialists', 'dropped ' + n + ' of ' + total + '; missing ' + parts.join(', ') +
-            '; sample GetType ' + rawType + ' class ' + cls);
+        var line = 'dropped ' + n + ' of ' + total + '; missing ' + parts.join(', ');
+        if (sample) {
+            var rawType = '?';
+            var cls = '?';
+            try { rawType = String(sample.GetType()); } catch (e1) { /* keep ? */ }
+            try { cls = window.runtime.flash.utils.getQualifiedClassName(sample); } catch (e2) { /* keep ? */ }
+            line += '; sample GetType ' + rawType + ' class ' + cls;
+        }
+        S.kernel.log('specialists', line);
     }
 
     // Ghosts: the vector sometimes holds a real cSpecialist whose members read
@@ -967,6 +983,7 @@
     S.core.specialists.listComplete     = listComplete;
     S.core.specialists.dropped          = dropped;
     S.core.specialists.UNREADABLE       = UNREADABLE;
+    S.core.specialists.memberGone       = memberGone;
     S.core.specialists.LOOKUP_CLEAN_MISSES = LOOKUP_CLEAN_MISSES;
     S.core.specialists.lookup           = lookup;
     S.core.specialists.refind           = refind;

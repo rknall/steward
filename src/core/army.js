@@ -208,12 +208,14 @@
     // A general's squads as a map, or null when they cannot be read (no
     // specialist, no getter, or a throw). Verification needs the difference
     // between "empty" ({}) and "unreadable" (null); generalArmy flattens it.
+    // A member that vanishes between the check and the call is the passing
+    // bridge fault and reads as unreadable without a warning.
     function readGeneralArmy(spec) {
         if (!spec) return null;
         try {
             if (typeof spec.GetArmy === 'function') return squads(spec.GetArmy());
         } catch (e) {
-            S.kernel.warn('army', 'generalArmy() threw:', e);
+            if (!S.core.specialists.memberGone(spec, 'GetArmy')) S.kernel.warn('army', 'generalArmy() threw:', e);
         }
         return null;
     }
@@ -301,11 +303,13 @@
         return readFighters().list;
     }
 
+    // The garrison grid, or null when unreadable; a member that vanishes
+    // between the check and the call is the passing bridge fault, no warning.
     function garrisonGrid(spec) {
         try {
             if (spec && typeof spec.GetGarrisonGridIdx === 'function') return spec.GetGarrisonGridIdx();
         } catch (e) {
-            S.kernel.warn('army', 'garrisonGrid() threw:', e);
+            if (!S.core.specialists.memberGone(spec, 'GetGarrisonGridIdx')) S.kernel.warn('army', 'garrisonGrid() threw:', e);
         }
         return null;
     }
@@ -314,7 +318,7 @@
         try {
             if (spec && typeof spec.isTravellingAway === 'function') return !!spec.isTravellingAway();
         } catch (e) {
-            S.kernel.warn('army', 'isTravelling() threw:', e);
+            if (!S.core.specialists.memberGone(spec, 'isTravellingAway')) S.kernel.warn('army', 'isTravelling() threw:', e);
         }
         return false;
     }
@@ -604,12 +608,15 @@
         }
     }
 
+    // Whether the general has a garrison, or null when that cannot be read,
+    // so a passing bridge fault never reads as "no garrison".
     function hasGarrison(spec) {
+        if (S.core.specialists.memberGone(spec, 'GetGarrison')) return null;
         try {
-            return typeof spec.GetGarrison === 'function' && !!spec.GetGarrison();
+            return !!spec.GetGarrison();
         } catch (e) {
-            S.kernel.warn('army', 'GetGarrison() threw:', e);
-            return false;
+            if (!S.core.specialists.memberGone(spec, 'GetGarrison')) S.kernel.warn('army', 'GetGarrison() threw:', e);
+            return null;
         }
     }
 
@@ -646,14 +653,18 @@
                 var why = ownReason(spec);
                 if (why) return why;
                 if (S.core.specialists.status(spec) !== S.SpecialistStatus.Idle) return 'not idle';
-                if (!hasGarrison(spec)) return 'no garrison';
+                var garrison = hasGarrison(spec);
+                if (garrison === null) return S.core.specialists.UNREADABLE;
+                if (!garrison) return 'no garrison';
                 if (isTravelling(spec)) return 'travelling';
                 var cls = classOf(want);
                 if (cls === S.TroopClass.Mixed || cls === S.TroopClass.Unknown) return 'troop class ' + cls;
                 var cap = S.core.specialists.troopCapacity(spec);
                 if (cap > 0 && total(want) > cap) return 'over capacity (' + total(want) + ' > ' + cap + ')';
                 var have = readGeneralArmy(spec);
-                if (have === null) return 'army unreadable';
+                // An unreadable army is the same passing fault as an unreadable
+                // specialist, so the run retries instead of pausing.
+                if (have === null) return S.core.specialists.UNREADABLE;
                 var draw = RAISE_REUSES_OWN_TROOPS ? minus(want, have) : want;
                 if (!isEmpty(minus(draw, freeArmy()))) return 'free pool does not cover the raise';
                 found = spec;

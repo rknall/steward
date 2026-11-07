@@ -158,6 +158,8 @@ zone.mStreetDataMap.getDeposits_vectorByType('IronOre');
 // still working, and nothing ties these episodes to a list read. Treat a missing
 // member as unknown, not absent. The episodes recurred about every 120 s in the
 // logs; the cause (host garbage collection) is not established.
+// A member can read as a function and then as undefined on the next read, so a
+// typeof guard does not make the call safe; it can still throw "is not a function".
 ```
 
 ### Building accessors

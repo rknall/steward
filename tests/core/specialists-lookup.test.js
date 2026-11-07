@@ -437,3 +437,41 @@ t.test('fighterList: a ghost entry makes the read incomplete', function () {
     t.assert.strictEqual(r.complete, false);
     t.assert.strictEqual(r.list.length, 1);
 });
+
+// ---- memberGone and the all-empty drop line ---------------------------------
+
+t.test('memberGone: true for a missing spec, a missing, non-function or throwing member; false for a function', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var gone = H.Steward.core.specialists.memberGone;
+    var s = spec('k1');
+    s.notAFunction = 5;
+    Object.defineProperty(s, 'thrower', { get: function () { throw new Error('boom'); } });
+    t.assert.strictEqual(gone(null, 'GetType'), true);
+    t.assert.strictEqual(gone(undefined, 'GetType'), true);
+    t.assert.strictEqual(gone(s, 'absent'), true);
+    t.assert.strictEqual(gone(s, 'notAFunction'), true);
+    t.assert.strictEqual(gone(s, 'thrower'), true);
+    t.assert.strictEqual(gone(s, 'GetType'), false);
+});
+
+t.test('131 slots with 126 empty log one drop line without a sample tail and refind reports unreadable', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var c = H.Steward.core.specialists;
+    var list = [];
+    var i;
+    for (i = 0; i < 5; i++) list.push(spec('k' + i));
+    for (i = 0; i < 126; i++) list.push(null);
+    var z = zoneOf(list);
+    t.assert.strictEqual(c.all({ zone: z }).length, 5);
+    var lines = dropLines(H);
+    t.assert.strictEqual(lines.length, 1);
+    t.assert.ok(/^dropped 126 of 131; missing empty x126$/.test(String(lines[0].args[0])), String(lines[0].args[0]));
+    var r = c.refind('absent', { zone: z });
+    t.assert.strictEqual(r.spec, null);
+    t.assert.strictEqual(r.reason, c.UNREADABLE);
+    r = c.refind('k3', { zone: z });
+    t.assert.strictEqual(r.spec, list[3]);
+    t.assert.strictEqual(r.reason, null);
+    c.all({ zone: z });
+    t.assert.strictEqual(dropLines(H).length, 1);
+});

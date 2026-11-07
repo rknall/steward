@@ -100,6 +100,36 @@ function ghost(spec) {
     };
 }
 
+// Models the bridge member that passes a typeof guard and then reads undefined
+// at the call: spec[name] becomes an accessor that returns the saved function on
+// its first n reads and undefined after that (n = 0 means undefined on every
+// read). A setter replaces the saved function. reads() reports how many times
+// the member was read; restore() removes the accessor and puts the function back
+// as a plain property. Works on members installed as own data properties, such
+// as those of the army and general stubs.
+function flipAfter(spec, name, n) {
+    var saved = spec[name];
+    var count = 0;
+    Object.defineProperty(spec, name, {
+        configurable: true,
+        enumerable:   true,
+        get: function () {
+            count++;
+            return count <= n ? saved : undefined;
+        },
+        set: function (v) {
+            saved = v;
+        }
+    });
+    return {
+        reads: function () { return count; },
+        restore: function () {
+            delete spec[name];
+            spec[name] = saved;
+        }
+    };
+}
+
 function geologist(opts) {
     opts = opts || {};
     opts.type = TYPE.GEOLOGIST;
@@ -128,6 +158,7 @@ module.exports = {
     explorer:  explorer,
     spec:      makeSpec,
     ghost:     ghost,
+    flipAfter: flipAfter,
     skill:     makeSkill,
     task:      task
 };

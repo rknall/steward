@@ -215,11 +215,15 @@
         return typeof g === 'number' && g === grid;
     }
 
+    // null = unreadable: a HasUnits member that vanishes on the AIR bridge
+    // (before or after the typeof check) must not read as "no units", and only
+    // a throw while the member is still there is worth a warning.
     function hasUnits(spec) {
-        try { return typeof spec.HasUnits === 'function' && spec.HasUnits() === true; }
+        if (S.core.specialists.memberGone(spec, 'HasUnits')) return null;
+        try { return spec.HasUnits() === true; }
         catch (e) {
-            S.kernel.warn(CATEGORY, 'HasUnits threw:', e);
-            return false;
+            if (!S.core.specialists.memberGone(spec, 'HasUnits')) S.kernel.warn(CATEGORY, 'HasUnits threw:', e);
+            return null;
         }
     }
 
@@ -293,8 +297,14 @@
                 found = null;
                 var r = ready(key);
                 if (!r.spec) return r.reason;
-                if (!hasUnits(r.spec)) return 'no units';
-                if (typeof fromGrid === 'number' && !onGrid(r.spec, fromGrid)) return 'not on line grid ' + fromGrid;
+                // An unreadable member is the passing bridge fault, so the
+                // caller retries instead of acting on a wrong reason.
+                var units = hasUnits(r.spec);
+                if (units === null) return S.core.specialists.UNREADABLE;
+                if (!units) return 'no units';
+                var at = S.core.army.garrisonGrid(r.spec);
+                if (at === null) return S.core.specialists.UNREADABLE;
+                if (typeof fromGrid === 'number' && at !== fromGrid) return 'not on line grid ' + fromGrid;
                 if (typeof target !== 'number' || !(target > 0)) return 'bad target ' + target;
                 S.core.buildings.invalidate();
                 var b = S.core.buildings.byGrid(target);
@@ -347,6 +357,7 @@
                 var r = ready(key);
                 if (!r.spec) return r.reason;
                 var g = S.core.army.garrisonGrid(r.spec);
+                if (g === null) return S.core.specialists.UNREADABLE;
                 if (typeof g !== 'number' || !(g > 0)) return 'not on the map';
                 found = r.spec;
                 return null;

@@ -664,3 +664,49 @@ t.test('a refused precheck clears what an earlier precheck found', function () {
     assert.strictEqual(def.send(), false);
     assert.strictEqual(s.sent.actions.length, 0);
 });
+
+// ---- bridge flip: a member that reads as a function, then as undefined -----------
+
+// Code-bug warnings only: the action runner also logs every refusal as a warning.
+function warnsSince(s, from) {
+    return s.H.logs().slice(from).filter(function (l) { return l.level === 'warn' && /threw/.test(JSON.stringify(l)); });
+}
+
+t.test('star refuses unreadable, not not on the map, when GetGarrisonGridIdx vanishes', function () {
+    var g = AC.general({ uid: 'g1', grid: 5, army: { Rifle: 5 } });
+    var s = setup({ generals: [g] });
+    specStubs.flipAfter(g, 'GetGarrisonGridIdx', 1);
+    var before = s.H.logs().length;
+    var r = run(s, s.orders.star('g1'));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(r.sends, 0);
+    assert.strictEqual(warnsSince(s, before).length, 0);
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('attack refuses unreadable, not no units, when HasUnits vanishes', function () {
+    var g = AC.general({ uid: 'g1', grid: 5, army: { Rifle: 10 } });
+    var s = setup({ generals: [g], buildings: { 300: camp(300) } });
+    specStubs.flipAfter(g, 'HasUnits', 1);
+    var before = s.H.logs().length;
+    var r = run(s, s.orders.attack('g1', 300, 5));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(r.sends, 0);
+    assert.strictEqual(warnsSince(s, before).length, 0);
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('attack refuses unreadable, not not on line grid, when GetGarrisonGridIdx vanishes', function () {
+    var g = AC.general({ uid: 'g1', grid: 5, army: { Rifle: 10 } });
+    var s = setup({ generals: [g], buildings: { 300: camp(300) } });
+    specStubs.flipAfter(g, 'GetGarrisonGridIdx', 1);
+    var before = s.H.logs().length;
+    var r = run(s, s.orders.attack('g1', 300, 5));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(r.sends, 0);
+    assert.strictEqual(warnsSince(s, before).length, 0);
+    assert.strictEqual(s.sent.actions.length, 0);
+});

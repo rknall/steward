@@ -950,3 +950,88 @@ t.test('raise and unload send without a found general: false, nothing sent, one 
     });
     assert.strictEqual(warns.length, 2);
 });
+
+// ---- bridge flip: a member that reads as a function, then as undefined -----------
+
+// Code-bug warnings only: the action runner also logs every refusal as a warning.
+function threwOf(s, from) {
+    return warnsOf(s, from).filter(function (l) { return /threw/.test(JSON.stringify(l)); });
+}
+
+t.test('readGeneralArmy is null with no warning when GetArmy vanishes before the call', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 5 } });
+    var s = setup({ fighters: [g] });
+    var flip = specStubs.flipAfter(g, 'GetArmy', 1);
+    var before = s.H.logs().length;
+    assert.strictEqual(s.army.readGeneralArmy(g), null);
+    assert.strictEqual(threwOf(s, before).length, 0);
+    assert.ok(flip.reads() >= 2);
+    flip.restore();
+
+    var g2 = AC.general({ uid: 'g1', army: { Rifle: 5 } });
+    var s2 = setup({ free: { Rifle: 1 }, fighters: [g2] });
+    specStubs.flipAfter(g2, 'GetArmy', 1);
+    var before2 = s2.H.logs().length;
+    assert.strictEqual(s2.army.inventory().byKey.g1.armyOk, false);
+    assert.strictEqual(threwOf(s2, before2).length, 0);
+});
+
+t.test('garrisonGrid is null with no warning when GetGarrisonGridIdx vanishes before the call', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 5 } });
+    var s = setup({ fighters: [g] });
+    specStubs.flipAfter(g, 'GetGarrisonGridIdx', 1);
+    var before = s.H.logs().length;
+    assert.strictEqual(s.army.garrisonGrid(g), null);
+    assert.strictEqual(threwOf(s, before).length, 0);
+});
+
+t.test('isTravelling is false with no warning when isTravellingAway vanishes before the call', function () {
+    var g = AC.general({ uid: 'g1', travelling: true, army: { Rifle: 5 } });
+    var s = setup({ fighters: [g] });
+    specStubs.flipAfter(g, 'isTravellingAway', 1);
+    var before = s.H.logs().length;
+    assert.strictEqual(s.army.isTravelling(g), false);
+    assert.strictEqual(threwOf(s, before).length, 0);
+});
+
+t.test('a real throw in GetArmy still warns', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 5 }, throwOn: 'GetArmy' });
+    var s = setup({ fighters: [g] });
+    var before = s.H.logs().length;
+    assert.strictEqual(s.army.readGeneralArmy(g), null);
+    var warns = threwOf(s, before).filter(function (l) { return /generalArmy\(\) threw/.test(JSON.stringify(l)); });
+    assert.strictEqual(warns.length, 1);
+});
+
+t.test('raise refuses unreadable, not no garrison, when GetGarrison vanishes', function () {
+    var cases = {
+        flip: function (g) { specStubs.flipAfter(g, 'GetGarrison', 1); },
+        ghost: function (g) { delete g.GetGarrison; },
+        throws: function (g) { g.state.throwOn = 'GetGarrison'; }
+    };
+    Object.keys(cases).forEach(function (name) {
+        var g = AC.general({ uid: 'g1', army: { Rifle: 5 } });
+        var s = actionSetup({ free: { Rifle: 10 }, generals: [g] });
+        cases[name](g);
+        var before = s.H.logs().length;
+        var r = runDef(s, s.army.raise('g1', { Rifle: 8 }));
+        assert.strictEqual(r.status, s.S.ActionResult.Refused, name);
+        assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE, name);
+        assert.strictEqual(r.sends, 0, name);
+        assert.strictEqual(s.sent.messages.length, 0, name);
+        assert.strictEqual(threwOf(s, before).length, name === 'throws' ? 1 : 0, name);
+    });
+});
+
+t.test('raise refuses unreadable, not army unreadable, when GetArmy vanishes in the precheck', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 5 } });
+    var s = actionSetup({ free: { Rifle: 10 }, generals: [g] });
+    specStubs.flipAfter(g, 'GetArmy', 0);
+    var before = s.H.logs().length;
+    var r = runDef(s, s.army.raise('g1', { Rifle: 8 }));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(threwOf(s, before).length, 0);
+    assert.strictEqual(r.sends, 0);
+    assert.strictEqual(s.sent.messages.length, 0);
+});
