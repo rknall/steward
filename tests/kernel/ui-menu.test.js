@@ -595,6 +595,184 @@ t.test('enabled function on a submenu item refreshes on the tick', function () {
     t.assert.strictEqual(s.counts.enabledWrites, 1);
 });
 
+// A module with nested submenus: the bar menu holds a display line and one
+// submenu with a function label, a function-label display child and a static
+// action child; the ~Steward~ submenu holds one submenu with a function-label
+// child. Every bar function records the pass it received.
+function setupDelta() {
+    var H = harness.boot({ sections: ['kernel'] });
+    var M = installMenuStubs(H);
+    var d = { top: 'top', group: 'group', child: 'child', modChild: 'mod',
+              itemsCalls: 0, selected: 0, topPasses: [], groupPasses: [], childPasses: [] };
+    H.Steward.kernel.register({
+        id:       'delta',
+        priority: 'PriorityNormal',
+        isReady:  function () { return true; },
+        plan:     function () {},
+        menu: {
+            title: 'Delta',
+            items: [{
+                label: 'Nested',
+                items: [{ label: function () { return d.modChild; }, enabled: false }]
+            }]
+        },
+        barMenu: {
+            title: '~Delta~',
+            items: function () {
+                d.itemsCalls++;
+                return [
+                    { label: function (pass) { d.topPasses.push(pass); return d.top; }, enabled: false },
+                    {
+                        label: function (pass) { d.groupPasses.push(pass); return d.group; },
+                        items: [
+                            { label: function (pass) { d.childPasses.push(pass); return d.child; },
+                              enabled: false },
+                            { label: 'Static', onSelect: function () { d.selected++; } }
+                        ]
+                    }
+                ];
+            }
+        }
+    });
+    H.settings.write('delta', { enabled: true });
+    H.Steward.kernel.ui.init();
+    return { H: H, counts: M.counts, rootMenu: M.rootMenu, d: d };
+}
+
+function deltaBar(rootMenu) { return rootMenu.getItemByName('StewardBarMenu_delta'); }
+
+function deltaModuleInner(rootMenu) {
+    var root = rootMenu.getItemByName('StewardRoot');
+    return root.submenu.getItemByName('StewardModuleMenu_delta').submenu;
+}
+
+t.test('a submenu item gets a built inner menu', function () {
+    var s = setupDelta();
+    t.assert.strictEqual(s.d.itemsCalls, 1);
+    var inner = deltaBar(s.rootMenu).submenu;
+    t.assert.strictEqual(inner.items.length, 2);
+    t.assert.strictEqual(inner.items[0].label, 'top');
+    var entry = inner.items[1];
+    t.assert.strictEqual(entry.label, 'group');
+    t.assert.strictEqual(entry.enabled, true);
+    t.assert.strictEqual(entry.onSelect, null);
+    t.assert.ok(entry.submenu instanceof s.H.ctx.air.NativeMenu);
+    t.assert.strictEqual(entry.submenu.items.length, 2);
+    t.assert.strictEqual(entry.submenu.items[0].label, 'child');
+    t.assert.strictEqual(entry.submenu.items[0].enabled, false);
+    t.assert.strictEqual(entry.submenu.items[1].label, 'Static');
+    t.assert.strictEqual(entry.submenu.items[1].enabled, true);
+    entry.submenu.items[1].onSelect();
+    t.assert.strictEqual(s.d.selected, 1);
+    var mod = deltaModuleInner(s.rootMenu);
+    t.assert.strictEqual(mod.items.length, 1);
+    t.assert.strictEqual(mod.items[0].label, 'Nested');
+    t.assert.strictEqual(mod.items[0].enabled, true);
+    t.assert.strictEqual(mod.items[0].submenu.items[0].label, 'mod');
+    t.assert.strictEqual(mod.items[0].submenu.items[0].enabled, false);
+    // A rebuild constructs the top and the nested menu and their four items.
+    var before = snapshot(s.counts);
+    t.assert.strictEqual(s.H.Steward.kernel.ui.refreshBarMenu('delta'), true);
+    t.assert.strictEqual(s.counts.menus, before.menus + 2);
+    t.assert.strictEqual(s.counts.items, before.items + 4);
+    t.assert.strictEqual(s.d.itemsCalls, 2);
+});
+
+t.test('opening the bar writes only a changed nested label', function () {
+    var s = setupDelta();
+    settleBar(s);
+    var inner = deltaBar(s.rootMenu).submenu;
+    var child = inner.items[1].submenu.items[0];
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 0);
+    s.d.child = 'changed';
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    t.assert.strictEqual(s.counts.enabledWrites, 0);
+    t.assert.strictEqual(inner.items[1].submenu.items[0], child);
+    t.assert.strictEqual(child.label, 'changed');
+    inner.fire('displaying');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+});
+
+t.test('a changed submenu entry label is written on open', function () {
+    var s = setupDelta();
+    settleBar(s);
+    var inner = deltaBar(s.rootMenu).submenu;
+    var entry = inner.items[1];
+    var sub = entry.submenu;
+    s.d.group = 'group 2';
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    t.assert.strictEqual(inner.items[1], entry);
+    t.assert.strictEqual(entry.label, 'group 2');
+    t.assert.strictEqual(entry.submenu, sub);
+});
+
+t.test('status refresh writes no nested bar label', function () {
+    var s = setupDelta();
+    settleBar(s);
+    s.d.group = 'g2';
+    s.d.child = 'c2';
+    for (var i = 0; i < 5; i++) s.H.Steward.kernel.ui.status.refresh();
+    t.assert.strictEqual(s.counts.labelWrites, 0);
+    var entry = deltaBar(s.rootMenu).submenu.items[1];
+    t.assert.strictEqual(entry.label, 'group');
+    t.assert.strictEqual(entry.submenu.items[0].label, 'child');
+});
+
+t.test('a nested module menu label refreshes on the tick', function () {
+    var s = setupDelta();
+    settleBar(s);
+    var item = deltaModuleInner(s.rootMenu).items[0].submenu.items[0];
+    s.d.modChild = 'mod 2';
+    s.H.Steward.kernel.ui.status.refresh();
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    t.assert.strictEqual(item.label, 'mod 2');
+    s.H.Steward.kernel.ui.status.refresh();
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+});
+
+t.test('nested and top labels share one pass', function () {
+    var s = setupDelta();
+    t.assert.strictEqual(s.d.topPasses[0], s.d.groupPasses[0]);
+    t.assert.strictEqual(s.d.topPasses[0], s.d.childPasses[0]);
+    var inner = deltaBar(s.rootMenu).submenu;
+    s.d.topPasses.length = 0;
+    s.d.groupPasses.length = 0;
+    s.d.childPasses.length = 0;
+    inner.fire('preparing');
+    inner.fire('displaying');
+    t.assert.strictEqual(s.d.childPasses.length, 2);
+    t.assert.strictEqual(s.d.topPasses[0], s.d.groupPasses[0]);
+    t.assert.strictEqual(s.d.topPasses[0], s.d.childPasses[0]);
+    t.assert.strictEqual(s.d.topPasses[1], s.d.childPasses[1]);
+    t.assert.notStrictEqual(s.d.childPasses[0], s.d.childPasses[1]);
+});
+
+t.test('refreshBarMenu reseeds nested slots', function () {
+    var s = setupDelta();
+    settleBar(s);
+    var inner = deltaBar(s.rootMenu).submenu;
+    // Leave 'two' in the cache of the nested slot, then rebuild with 'one'.
+    s.d.child = 'two';
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    s.d.child = 'one';
+    s.H.Steward.kernel.ui.refreshBarMenu('delta');
+    inner = deltaBar(s.rootMenu).submenu;
+    var child = inner.items[1].submenu.items[0];
+    t.assert.strictEqual(child.label, 'one');
+    s.counts.labelWrites = 0;
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 0);
+    // A stale 'two' left in the cache would suppress this write.
+    s.d.child = 'two';
+    inner.fire('preparing');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    t.assert.strictEqual(child.label, 'two');
+});
+
 // A module whose bar entry follows a `visible` function. state.visible is what
 // the function answers at build; state.boom makes it throw.
 function setupVis(opts) {

@@ -171,6 +171,96 @@ t.test('menuItems drops an item without label', function () {
     t.assert.strictEqual(out[0].label, 'Ok');
 });
 
+function warnCount(H, re) {
+    return H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'registry' && re.test(l.args.join(' '));
+    }).length;
+}
+
+t.test('menuItems keeps a submenu with normalised children', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var fn = function () {};
+    var lf = function () { return 'dyn'; };
+    var out = H.Steward.kernel.registry.menuItems('m', [
+        { label: 'Static', items: [
+            { label: 'Act', onSelect: fn },
+            { separator: true },
+            { label: 'Info', enabled: false }
+        ] },
+        { label: lf, items: [ { label: 'One', onSelect: fn } ] }
+    ]);
+    t.assert.strictEqual(out.length, 2);
+    t.assert.strictEqual(out[0].label, 'Static');
+    t.assert.strictEqual(out[0].onSelect, null);
+    t.assert.strictEqual(out[0].enabled, true);
+    t.assert.strictEqual(out[0].items.length, 3);
+    t.assert.strictEqual(out[0].items[0].label, 'Act');
+    t.assert.strictEqual(out[0].items[0].onSelect, fn);
+    t.assert.strictEqual(out[0].items[1].separator, true);
+    t.assert.strictEqual(out[0].items[2].label, 'Info');
+    t.assert.strictEqual(out[0].items[2].enabled, false);
+    t.assert.strictEqual(out[1].label, lf);
+    t.assert.strictEqual(out[1].onSelect, null);
+    t.assert.strictEqual(out[1].enabled, true);
+    t.assert.strictEqual(out[1].items.length, 1);
+});
+
+t.test('menuItems drops an invalid child inside a submenu', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var out = H.Steward.kernel.registry.menuItems('m', [
+        { label: 'Before', onSelect: function () {} },
+        { label: 'Group', items: [
+            { label: 'Broken' },
+            { label: 'Fine', onSelect: function () {} }
+        ] },
+        { label: 'After', onSelect: function () {} }
+    ]);
+    t.assert.strictEqual(out.length, 3);
+    t.assert.strictEqual(out[1].items.length, 1);
+    t.assert.strictEqual(out[1].items[0].label, 'Fine');
+    t.assert.strictEqual(out[0].label, 'Before');
+    t.assert.strictEqual(out[2].label, 'After');
+});
+
+t.test('menuItems drops an empty submenu with a warning', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var out = H.Steward.kernel.registry.menuItems('m', [
+        { label: 'Empty', items: [] },
+        { label: 'AllBad', items: [ { label: 'Broken' } ] },
+        { label: 'Ok', onSelect: function () {} }
+    ]);
+    t.assert.strictEqual(out.length, 1);
+    t.assert.strictEqual(out[0].label, 'Ok');
+    t.assert.strictEqual(warnCount(H, /submenu has no valid items/), 2);
+});
+
+t.test('menuItems drops a submenu with onSelect with a warning', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var out = H.Steward.kernel.registry.menuItems('m', [
+        { label: 'Group', onSelect: function () {}, items: [ { label: 'A', onSelect: function () {} } ] },
+        { label: 'Ok', onSelect: function () {} }
+    ]);
+    t.assert.strictEqual(out.length, 1);
+    t.assert.strictEqual(out[0].label, 'Ok');
+    t.assert.strictEqual(warnCount(H, /submenu must not have onSelect/), 1);
+});
+
+t.test('a static menu with a submenu item registers', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var fn = function () {};
+    H.Steward.kernel.register(menuSpec('m', [
+        { label: 'Group', items: [ { label: 'Open', onSelect: fn } ] }
+    ]));
+    var list = H.Steward.kernel.registry.withMenu();
+    t.assert.strictEqual(list.length, 1);
+    var items = list[0].menu.items;
+    t.assert.strictEqual(items.length, 1);
+    t.assert.strictEqual(items[0].label, 'Group');
+    t.assert.strictEqual(items[0].onSelect, null);
+    t.assert.strictEqual(items[0].items.length, 1);
+    t.assert.strictEqual(items[0].items[0].onSelect, fn);
+});
+
 function barSpec(id, items) {
     var s = validSpec(id);
     s.barMenu = { title: '~Run~', items: items };

@@ -1,10 +1,11 @@
 /*
  * The ~Adventures~ bar menu of the adventures module.
  *
- * A read-only view of the run plus the run controls: the run title, one
- * status line, the four commands enabled by what applies now, and the stage
- * rows grouped as the steps table in state.js folds them. The marks are
- * written here and nowhere else.
+ * A read-only view of the run plus the run controls. The top level is fixed
+ * whatever the wave count: the run title, one status line, the four commands
+ * enabled by what applies now, and one submenu per stage group as the steps
+ * table in state.js folds them. The stage rows live in their group's submenu,
+ * which keeps the menu short. The marks are written here and nowhere else.
  *
  * The entry stays built and joins or leaves the bar: it is in the bar only
  * while the run is Running or Paused. Moving it creates no native object, so
@@ -244,6 +245,41 @@
         };
     }
 
+    // What a group shows as one glyph, from its row marks alone: the current
+    // row's, else todo while anything is left, else done, else every row is not
+    // used.
+    function groupMark(groupRows) {
+        var todo = false;
+        var done = false;
+        for (var i = 0; i < groupRows.length; i++) {
+            var mark = groupRows[i].mark;
+            if (isCurrent(mark)) return mark;
+            if (mark === 'todo') todo = true;
+            else if (mark === 'done') done = true;
+        }
+        if (todo) return 'todo';
+        return done ? 'done' : 'skip';
+    }
+
+    function groupText(group) {
+        return MARK[groupMark(group.rows)] + '  ' + group.label;
+    }
+
+    // A submenu entry holding the rows of group g. Built per index like
+    // rowItem; the entry's label is the group head, so the group names stay in
+    // the steps table.
+    function groupItem(g, count) {
+        var children = [];
+        for (var n = 0; n < count; n++) children.push(rowItem(g, n));
+        return {
+            label: function (pass) {
+                var group = view(pass).groups[g];
+                return group ? groupText(group) : '';
+            },
+            items: children
+        };
+    }
+
     function signature() {
         var r = st().run();
         return r ? 'waves:' + r.paths.length : IDLE;
@@ -262,10 +298,8 @@
         for (var c = 0; c < commands.length; c++) list.push(control(commands[c]));
 
         var groups = rows();
-        for (var g = 0; g < groups.length; g++) {
-            list.push({ separator: true }, { label: groups[g].label, enabled: false });
-            for (var n = 0; n < groups[g].rows.length; n++) list.push(rowItem(g, n));
-        }
+        if (groups.length) list.push({ separator: true });
+        for (var g = 0; g < groups.length; g++) list.push(groupItem(g, groups[g].rows.length));
         return list;
     }
 

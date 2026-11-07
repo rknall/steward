@@ -40,6 +40,11 @@
  *   { label: 'Do it', onSelect: fn }         // action
  *   { label: 'Do it', onSelect: fn, enabled: fn }  // action, live enabled
  *   { label: 'Info', enabled: false }        // display-only line, no onSelect
+ *   { label: 'Group', items: [ ...item shapes... ] }  // submenu
+ *
+ * A submenu's children are normalised by the same rules and may nest again.
+ * It has no `onSelect`, is always enabled (an entry must be enabled to open)
+ * and is dropped when no child is valid.
  *
  * `enabled` may be a function `enabled(pass)` beside `onSelect`; only a
  * result of true enables the item. It is re-evaluated with the labels and
@@ -143,6 +148,31 @@
                 continue;
             }
             var hasLabel = isFunction(it.label) || (typeof it.label === 'string' && it.label !== '');
+            if (Array.isArray(it.items)) {
+                // Submenu. Checked before the flat rules: it has no onSelect
+                // by design, and AIR does not fire SELECT reliably on an item
+                // that opens a submenu, so one that carries it is refused.
+                if (!hasLabel) {
+                    S.kernel.warn('registry', moduleId, 'menu item', i, 'requires label');
+                    continue;
+                }
+                if (it.onSelect !== undefined && it.onSelect !== null) {
+                    S.kernel.warn('registry', moduleId, 'menu item', i, 'submenu must not have onSelect');
+                    continue;
+                }
+                var children = normalizeMenuItems(moduleId, it.items);
+                if (!children.length) {
+                    S.kernel.warn('registry', moduleId, 'menu item', i, 'submenu has no valid items');
+                    continue;
+                }
+                items.push({
+                    label:    isFunction(it.label) ? it.label : String(it.label),
+                    items:    children,
+                    onSelect: null,
+                    enabled:  true
+                });
+                continue;
+            }
             if (!hasLabel) {
                 S.kernel.warn('registry', moduleId, 'menu item', i, 'requires label');
                 continue;

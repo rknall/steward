@@ -14,6 +14,8 @@
  *      after ~Steward~, built the same way but refreshed when it opens
  *      instead of on the status tick. An entry may stay out of the bar
  *      (its `visible` function) and be moved in and out with showBarMenu.
+ *      Module and bar menu items may nest one submenu level deeper; a
+ *      nested submenu is built once with its parent and refreshed with it.
  *
  *   2. Dashboard modal — autoTSO-mirror layout:
  *        ┌──────────────────────────────────┐
@@ -504,21 +506,14 @@
         for (var n = 0; n < stale.length; n++) delete cache[stale[n]];
     }
 
-    // Builds an inner NativeMenu from `menu`. `key` names its slots (the ':'
-    // after it keeps a module's submenu and bar menu slots disjoint) and
-    // `store` receives its records. Its slots are dropped from both caches
-    // first and then seeded with the constructor values, so the new items are
-    // not rewritten on the next refresh and no stale value from the previous
-    // items suppresses a needed write.
-    function buildModuleInner(mod, menu, key, store) {
-        var prefix = 'mod:' + key + ':';
-        dropSlots(lastLabels, prefix);
-        dropSlots(lastEnabled, prefix);
-
-        var records = [];
-        var pass = {};
-        var items = moduleMenuItems(mod, menu);
-        var inner = new air.NativeMenu();
+    // Adds the normalised `items` to `inner`, naming each slot `prefix + k`.
+    // A submenu item gets its own NativeMenu filled the same way under the
+    // slot prefix `prefix + k + '.'`, so its slots stay unique and fall under
+    // the menu prefix that a rebuild drops. Records of every level go to the
+    // one `records` list and share the one `pass`, so the refresh that covers
+    // the top menu covers the nested items too and no nested menu needs its
+    // own open listener.
+    function fillInner(mod, items, prefix, inner, records, pass) {
         for (var k = 0; k < items.length; k++) {
             var spec = items[k];
             if (spec.separator) {
@@ -527,9 +522,26 @@
             }
             var isFn = typeof spec.label === 'function';
             var text = isFn ? labelText(mod, spec.label, pass) : spec.label;
+            var item;
+            if (Array.isArray(spec.items)) {
+                // An entry must be enabled to open, and AIR does not fire
+                // SELECT reliably on an item with a submenu, so it gets
+                // neither an enabled function nor a select listener.
+                item = new air.NativeMenuItem(text);
+                item.enabled = true;
+                var sub = new air.NativeMenu();
+                fillInner(mod, spec.items, prefix + k + '.', sub, records, pass);
+                item.submenu = sub;
+                if (isFn) {
+                    lastLabels[prefix + k] = text;
+                    records.push({ slot: prefix + k, item: item, fn: spec.label, enabledFn: null });
+                }
+                inner.addItem(item);
+                continue;
+            }
             var liveOn = typeof spec.enabled === 'function';
             var on = liveOn ? enabledValue(mod, spec.enabled, pass) : spec.enabled !== false;
-            var item = new air.NativeMenuItem(text);
+            item = new air.NativeMenuItem(text);
             item.enabled = on;
             if (spec.onSelect) addModuleSelect(mod, item, spec.onSelect);
             if (isFn) lastLabels[prefix + k] = text;
@@ -544,6 +556,23 @@
             }
             inner.addItem(item);
         }
+    }
+
+    // Builds an inner NativeMenu from `menu`. `key` names its slots (the ':'
+    // after it keeps a module's submenu and bar menu slots disjoint) and
+    // `store` receives its records. Its slots, nested ones included, are
+    // dropped from both caches first and then seeded with the constructor
+    // values, so the new items are not rewritten on the next refresh and no
+    // stale value from the previous items suppresses a needed write.
+    function buildModuleInner(mod, menu, key, store) {
+        var prefix = 'mod:' + key + ':';
+        dropSlots(lastLabels, prefix);
+        dropSlots(lastEnabled, prefix);
+
+        var records = [];
+        var items = moduleMenuItems(mod, menu);
+        var inner = new air.NativeMenu();
+        fillInner(mod, items, prefix, inner, records, {});
         store[mod.id] = records;
         return inner;
     }

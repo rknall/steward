@@ -96,6 +96,25 @@ function labels(w) {
     return w.rm.items().map(function (it) { return labelOf(it, pass); });
 }
 
+// Every label depth first with one pass: an entry's label, then its children's.
+function allLabels(w) {
+    var pass = {};
+    var out = [];
+    function walk(list) {
+        list.forEach(function (it) {
+            out.push(labelOf(it, pass));
+            if (Array.isArray(it.items)) walk(it.items);
+        });
+    }
+    walk(w.rm.items());
+    return out;
+}
+
+// The top-level items that are submenu entries.
+function groupItems(w) {
+    return w.rm.items().filter(function (it) { return Array.isArray(it.items); });
+}
+
 function itemByLabel(w, label) {
     var items = w.rm.items();
     for (var i = 0; i < items.length; i++) if (!items[i].separator && items[i].label === label) return items[i];
@@ -172,7 +191,7 @@ t.test('marks: wave 3 Attack with 2 of 4 sent', function () {
     assert.strictEqual(row(w, 'Wave 4').mark, 'todo');
     assert.strictEqual(row(w, 'Horseshoe').mark, 'done');
     assert.strictEqual(row(w, 'Place carriers').mark, 'todo');
-    var text = labels(w).filter(function (l) { return l.indexOf(w.rm.MARK.now) === 0; })[0];
+    var text = allLabels(w).filter(function (l) { return l.indexOf(w.rm.MARK.now + '  Wave 3') === 0; })[0];
     assert.strictEqual(text, w.rm.MARK.now + '  Wave 3  w3.txt   Attack 2/4');
 });
 
@@ -182,7 +201,7 @@ t.test('marks: paused at wave 2 Supply', function () {
     assert.strictEqual(row(w, 'Wave 2').mark, 'paused');
     assert.strictEqual(row(w, 'Wave 2').detail, 'Supply');
     assert.strictEqual(row(w, 'Wave 3').mark, 'todo');
-    var text = labels(w).filter(function (l) { return /Wave 2/.test(l); })[0];
+    var text = allLabels(w).filter(function (l) { return /^\S+  Wave 2/.test(l); })[0];
     assert.strictEqual(text.indexOf(w.rm.MARK.paused + '  Wave 2'), 0, text);
 });
 
@@ -251,7 +270,7 @@ t.test('horseshoe None and retrain off show not used', function () {
         assert.strictEqual(row(w, label).mark, 'skip', label);
         assert.strictEqual(row(w, label).detail, 'not used', label);
     });
-    var text = labels(w).filter(function (l) { return /Horseshoe/.test(l); })[0];
+    var text = allLabels(w).filter(function (l) { return /^\S+  Horseshoe/.test(l); })[0];
     assert.strictEqual(text, w.rm.MARK.skip + '  Horseshoe   not used');
     assert.notStrictEqual(row(w, 'Send generals').mark, 'skip');
     var on = setup({ run: { retrain: true } });
@@ -278,7 +297,7 @@ t.test('rows read no file', function () {
     var load = w.S.core.battles.load;
     w.S.core.battles.load = function () { reads++; return load.apply(this, arguments); };
     w.rm.rows();
-    labels(w);
+    allLabels(w);
     enabledFlags(w);
     assert.strictEqual(reads, 0);
     assert.ok(Object.keys(w.fs.disk).length > 0);
@@ -467,17 +486,80 @@ t.test('idle items are title and controls only', function () {
     assert.strictEqual(w.rm.signature(), 'idle');
 });
 
-t.test('row count follows the wave count', function () {
+t.test('the top level is fixed whatever the wave count', function () {
     var two = setup({ waves: 2 });
     var four = setup({ waves: 4 });
     assert.strictEqual(two.rm.signature(), 'waves:2');
     assert.strictEqual(four.rm.signature(), 'waves:4');
-    assert.strictEqual(four.rm.items().length - two.rm.items().length, 2);
-    // Title, status line, a separator and the controls come first; then each
-    // group adds a separator and a head, and each row an item.
-    var expected = 7;
-    four.rm.rows().forEach(function (g) { expected += 2 + g.rows.length; });
-    assert.strictEqual(four.rm.items().length, expected);
+    [two, four].forEach(function (w) {
+        var items = w.rm.items();
+        var groups = w.rm.rows();
+        assert.strictEqual(items.length, 13);
+        assert.strictEqual(items[7].separator, true);
+        assert.strictEqual(groups.length, 5);
+        for (var g = 0; g < groups.length; g++) {
+            assert.ok(Array.isArray(items[8 + g].items), 'entry ' + g);
+            assert.ok(items[8 + g].label({}).indexOf(groups[g].label) > 0, 'entry text ' + g);
+        }
+        assert.strictEqual(groupItems(w).length, groups.length);
+    });
+});
+
+t.test('the Waves submenu has one row per wave', function () {
+    function wavesGroup(w) {
+        var groups = w.rm.rows();
+        for (var g = 0; g < groups.length; g++) {
+            if (groups[g].rows.some(function (r) { return /^Wave \d+$/.test(r.label); })) return groupItems(w)[g];
+        }
+        throw new Error('no waves group');
+    }
+    var two = wavesGroup(setup({ waves: 2 }));
+    var four = wavesGroup(setup({ waves: 4 }));
+    assert.strictEqual(four.items.length - two.items.length, 2);
+});
+
+t.test('every row is in its group submenu in order', function () {
+    var w = setup({ waves: 3, waveIndex: 1, step: 'wave Attack' });
+    var groups = w.rm.rows();
+    var entries = groupItems(w);
+    var pass = {};
+    assert.strictEqual(entries.length, groups.length);
+    entries.forEach(function (entry, g) {
+        assert.strictEqual(entry.onSelect, undefined, 'entry ' + g);
+        assert.strictEqual(entry.items.length, groups[g].rows.length, groups[g].label);
+        entry.items.forEach(function (child, n) {
+            var row = groups[g].rows[n];
+            assert.ok(labelOf(child, pass).indexOf(w.rm.MARK[row.mark] + '  ' + row.label) === 0, row.label);
+            assert.strictEqual(child.enabled, false, row.label);
+            assert.strictEqual(child.onSelect, undefined, row.label);
+        });
+    });
+});
+
+t.test('group marks follow the rows', function () {
+    function entryTexts(w) {
+        var pass = {};
+        return groupItems(w).map(function (it) { return labelOf(it, pass); });
+    }
+    function expected(w, marks) {
+        var M = w.rm.MARK;
+        return w.rm.rows().map(function (g, i) { return M[marks[i]] + '  ' + g.label; });
+    }
+    var w = setup({ waves: 4, waveIndex: 2, step: 'wave Attack' });
+    var at = w.rm.rows().map(function (g) {
+        return g.rows.some(function (r) { return /^Wave \d+$/.test(r.label); });
+    }).indexOf(true);
+    var marks = w.rm.rows().map(function (g, i) { return i < at ? 'done' : (i === at ? 'now' : 'todo'); });
+    assert.deepStrictEqual(entryTexts(w), expected(w, marks));
+
+    w = setup({ waves: 3, waveIndex: 1, step: 'wave Supply', paused: true });
+    marks = w.rm.rows().map(function (g, i) { return i < at ? 'done' : (i === at ? 'paused' : 'todo'); });
+    assert.deepStrictEqual(entryTexts(w), expected(w, marks));
+
+    w = setup({ step: 'Next', run: { retrain: false } });
+    w.st.done();
+    marks = w.rm.rows().map(function () { return 'done'; });
+    assert.deepStrictEqual(entryTexts(w), expected(w, marks));
 });
 
 t.test('sync does not rebuild across a series, rebuilds on start and only hides on stop', function () {
@@ -523,7 +605,7 @@ t.test('no label throws with the core buffs throwing', function () {
     var w = setup({ waves: 2, waveIndex: 1, step: 'wave Attack' });
     w.S.core.buffs.speedBuffs = function () { throw new Error('game not loaded'); };
     var list;
-    assert.doesNotThrow(function () { list = labels(w); });
+    assert.doesNotThrow(function () { list = allLabels(w); });
     assert.ok(list.length > 6);
     assert.doesNotThrow(function () { enabledFlags(w); });
     assert.strictEqual(row(w, 'Horseshoe').detail, '');
