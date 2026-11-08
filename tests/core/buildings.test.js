@@ -44,6 +44,70 @@ t.test('byName falls back to snapshot when host API absent', function () {
     t.assert.strictEqual(found.length, 1);
 });
 
+// The host name index can omit a whole type or return only part of it while
+// GetBuildings_vector holds every building; byName must return the union.
+function gridsOf(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) out.push(list[i].GetGrid());
+    return out.sort(function (a, b) { return a - b; });
+}
+
+t.test('byName adds buildings the name index omits for a whole type', function () {
+    var H = harness.boot();
+    var z = H.zone.zone();
+    for (var g = 1; g <= 3; g++) z.building(H.zone.building({ name: 'FieldC', grid: g }));
+    H.installZone(z);
+    z.zone.mStreetDataMap.getBuildingsByName_vector = function () { return []; };
+
+    var found = H.Steward.core.buildings.byName('FieldC');
+    t.assert.strictEqual(found.length, 3);
+    t.assert.deepEqual(gridsOf(found), [1, 2, 3]);
+});
+
+t.test('byName fills a short name-index result without duplicates', function () {
+    var H = harness.boot();
+    var z = H.zone.zone();
+    var placed = [];
+    for (var g = 4; g <= 6; g++) {
+        var b = H.zone.building({ name: 'FieldB', grid: g });
+        placed.push(b);
+        z.building(b);
+    }
+    H.installZone(z);
+    z.zone.mStreetDataMap.getBuildingsByName_vector = function () { return [placed[1]]; };
+
+    var found = H.Steward.core.buildings.byName('FieldB');
+    t.assert.strictEqual(found.length, 3);
+    t.assert.deepEqual(gridsOf(found), [4, 5, 6]);
+    var count = 0;
+    for (var i = 0; i < found.length; i++) if (found[i] === placed[1]) count++;
+    t.assert.strictEqual(count, 1);
+});
+
+t.test('byName counts a building present in both sources once', function () {
+    var H = harness.boot();
+    var z = H.zone.zone();
+    z.building(H.zone.building({ name: 'IronMine', grid: 10 }));
+    z.building(H.zone.building({ name: 'IronMine', grid: 11 }));
+    H.installZone(z);
+
+    t.assert.strictEqual(H.Steward.core.buildings.byName('IronMine').length, 2);
+});
+
+t.test('byName reads the building list fresh, not a stale snapshot', function () {
+    var H = harness.boot();
+    var z = H.zone.zone();
+    z.building(H.zone.building({ name: 'FieldA', grid: 1 }));
+    H.installZone(z);
+    H.Steward.core.buildings.list();   // primes the cached snapshot with one field
+
+    z.building(H.zone.building({ name: 'FieldA', grid: 2 }));
+    z.building(H.zone.building({ name: 'FieldA', grid: 3 }));
+    z.zone.mStreetDataMap.getBuildingsByName_vector = function () { return []; };
+
+    t.assert.strictEqual(H.Steward.core.buildings.byName('FieldA').length, 3);
+});
+
 // Production buff reads. The host clock is a mutable value so a test can move
 // time without rebooting.
 function bootClock(startAt) {

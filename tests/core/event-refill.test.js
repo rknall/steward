@@ -125,8 +125,8 @@ t.test('compute does not mutate its input rows', function () {
     t.assert.strictEqual(res.rows[0].deposit, 'x');
 });
 
-t.test('home zone with 9 fields and 9 deposits gives 9 game rows', function () {
-    var H = bootRefill();
+// Nine placed fields (three per type) with one readable deposit each.
+function nineFields(H) {
     var grids = { pumpkinfield_01: [30, 10, 20], pumpkinfield_02: [60, 40, 50], pumpkinfield_03: [90, 70, 80] };
     var z = H.zone.zone();
     var deps = [];
@@ -142,8 +142,10 @@ t.test('home zone with 9 fields and 9 deposits gives 9 game rows', function () {
         }
     }
     z.deposits('HalloweenResource', deps);
-    H.installZone(z);
+    return { z: z, expected: expected };
+}
 
+function assertNineGameRows(H, expected) {
     var res = H.Steward.core.events.refill.rows('HW');
     t.assert.strictEqual(res.source, 'game');
     t.assert.strictEqual(res.rows.length, 9);
@@ -153,12 +155,38 @@ t.test('home zone with 9 fields and 9 deposits gives 9 game rows', function () {
     t.assert.strictEqual(res.rows[2].grid, 30);
     t.assert.strictEqual(res.rows[3].building, 'pumpkinfield_02');
     t.assert.strictEqual(res.rows[8].grid, 90);
+    var seen = {};
     for (var r = 0; r < res.rows.length; r++) {
         t.assert.strictEqual(res.rows[r].source, 'game');
         t.assert.strictEqual(res.rows[r].deposit, expected[res.rows[r].grid]);
         t.assert.strictEqual(res.rows[r].key, 'g' + res.rows[r].grid);
         t.assert.strictEqual(res.rows[r].workTime, WORK_TIME[res.rows[r].building]);
+        t.assert.strictEqual(seen[res.rows[r].key], undefined);
+        seen[res.rows[r].key] = true;
     }
+}
+
+t.test('home zone with 9 fields and 9 deposits gives 9 game rows', function () {
+    var H = bootRefill();
+    var f = nineFields(H);
+    H.installZone(f.z);
+    assertNineGameRows(H, f.expected);
+});
+
+t.test('home zone gives 9 game rows when the name index omits field types', function () {
+    var H = bootRefill();
+    var f = nineFields(H);
+    H.installZone(f.z);
+
+    var map = f.z.zone.mStreetDataMap;
+    var original = map.getBuildingsByName_vector;
+    map.getBuildingsByName_vector = function (name) {
+        if (name === 'pumpkinfield_03') return [];
+        var all = original.apply(map, arguments);
+        if (name === 'pumpkinfield_02') return all && all.length ? [all[0]] : all;
+        return all;
+    };
+    assertNineGameRows(H, f.expected);
 });
 
 t.test('fields without readable deposits become manual rows with deposit 0', function () {

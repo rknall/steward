@@ -12,6 +12,7 @@
 (function (S) {
 
     var snapshot = null;     // cached array per tick
+    var lastGapLog = {};     // last logged name-index gap per building name
 
     function currentZone(zoneOverride) {
         if (zoneOverride) return zoneOverride;
@@ -165,26 +166,64 @@
 
     function byName(targetName, opts) {
         opts = opts || {};
-        // Fast path: ask the host's named lookup. Mirrors byGrid's fast
-        // path. Some building categories (e.g. masons) appear in the
-        // host's getBuildingsByName_vector but not in GetBuildings_vector,
-        // so the snapshot fallback would miss them.
+        // Fast path: ask the host's named lookup, then merge in the building
+        // list. Neither source is complete: the name index can omit a whole
+        // type that GetBuildings_vector holds, and the building list omits
+        // masons that the name index holds. The result is the union, deduped
+        // by grid. The list is read fresh from the same zone because the
+        // cached snapshot may predate the buildings or belong to another zone.
         if (!opts.zone) {
-            try {
-                var z = S.core.zone.current();
-                if (z && z.mStreetDataMap &&
-                    typeof z.mStreetDataMap.getBuildingsByName_vector === 'function') {
+            var z = null;
+            try { z = S.core.zone.current(); } catch (e0) { z = null; }
+            if (z && z.mStreetDataMap &&
+                typeof z.mStreetDataMap.getBuildingsByName_vector === 'function') {
+                var hits = [];
+                try {
                     var v = z.mStreetDataMap.getBuildingsByName_vector(targetName);
                     if (v) {
-                        var hits = [];
                         var len = (typeof v.length === 'number') ? v.length : 0;
                         for (var i = 0; i < len; i++) {
                             if (v[i]) hits.push(v[i]);
                         }
-                        return hits;
                     }
+                } catch (e) { hits = []; }
+
+                var seen = {};
+                for (var h = 0; h < hits.length; h++) {
+                    var hg = grid(hits[h]);
+                    if (hg !== null) seen[hg] = true;
                 }
-            } catch (e) { /* fall through to snapshot */ }
+                var all = readAllFromZone(z);
+                var extras = 0;
+                for (var k = 0; k < all.length; k++) {
+                    var b = all[k];
+                    if (name(b) !== targetName) continue;
+                    var bg = grid(b);
+                    if (bg !== null) {
+                        if (Object.prototype.hasOwnProperty.call(seen, bg)) continue;
+                        seen[bg] = true;
+                    } else if (hits.indexOf(b) !== -1) {
+                        continue;
+                    }
+                    hits.push(b);
+                    extras++;
+                }
+                // Log a gap only when it changes so a render loop stays quiet.
+                try {
+                    if (extras > 0) {
+                        var sig = (hits.length - extras) + '/' + extras;
+                        if (lastGapLog[targetName] !== sig) {
+                            lastGapLog[targetName] = sig;
+                            S.kernel.debug('buildings', 'byName ' + targetName +
+                                ': name index returned ' + (hits.length - extras) +
+                                ', building list added ' + extras);
+                        }
+                    } else {
+                        delete lastGapLog[targetName];
+                    }
+                } catch (e2) { /* logging never breaks the read */ }
+                return hits;
+            }
         }
         var src = ensureSnapshot(opts.zone);
         var out = [];
