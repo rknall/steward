@@ -17,37 +17,34 @@
  *      Module and bar menu items may nest one submenu level deeper; a
  *      nested submenu is built once with its parent and refreshed with it.
  *
- *   2. Dashboard modal — autoTSO-mirror layout:
- *        ┌──────────────────────────────────┐
- *        │ Title bar                        │
- *        ├──────────────────────────────────┤
- *        │ [tab] [tab] [tab] [tab] [tab]    │
- *        ├──────────────────────────────────┤
- *        │ ╔══ section band ═══════════╗    │
- *        │ │  rows… (label | control)  │    │
- *        │ ╚═══════════════════════════╝    │
- *        │ ╔══ section band ═══════════╗    │
- *        │ ╚═══════════════════════════╝    │
- *        ├──────────────────────────────────┤
- *        │ Save                       Close │
- *        └──────────────────────────────────┘
- *      Tabs: Status | Explorers | Geologists | Quests | Collections & Buildings | Events
- *      (Mail/Trades is intentionally deferred until those modules ship.)
+ *   2. Dashboard modal ("Steward") — a header with the running state and a
+ *      one-line summary, a tab bar (Overview, then one tab per registry tab
+ *      that has modules) and one panel. The Overview shows the automation
+ *      switch and one tile per module; a module tab shows each module as a
+ *      settings column beside its main column, stacked in a short window.
+ *      The view lives in 92_ui_dashboard.js.
  *
- *   3. Settings modal — same frame with no tab bar: the kernel Logging and
- *      Scheduler sections, then the `misc` module sections. It shares the
- *      dashboard's settings buffer and footer.
+ *   3. Settings modal ("Steward settings") — a side nav with one group at a
+ *      time: General (logging, scheduler, about), then the `misc` modules.
+ *      The view lives in 93_ui_settings.js.
  *
- *   Module dialogs share the dashboard stylesheet through ensureStyle(id),
- *   which scopes the same rules to each modal id; the scope list is kept on
- *   the <style> element so it survives a script reload.
+ *   This file owns what both screens share: the open sequence, the settings
+ *   buffer and its change count, the footer (Save, a change note, Close)
+ *   and S.kernel.ui.screen, the read surface the views use. A view is an
+ *   object in S.kernel.ui.views with render() and optional chrome() and
+ *   idleNote(); it is looked up when a screen opens, so this file never
+ *   needs the later ones at load time. The stylesheet comes from
+ *   89_ui_style.js through S.kernel.ui.ensureStyle.
  *
  * Settings buffer (explicit Save semantics):
- *   - Either modal (dashboard or Settings) opens → one buffer, snapshotting
- *     each module's settings on first use.
+ *   - Opening either screen starts one empty buffer; each namespace is a
+ *     deep copy of its stored value on first use, next to a second copy
+ *     that holds the original.
  *   - Modules render via helpers.settings(id) which proxies the buffer.
- *   - Save → flushes dirty modules and applies the logger and scheduler
- *     settings through lifecycle.applySettings. Close → discards.
+ *   - The change count compares the buffer with the original leaf by leaf,
+ *     so a value set back counts as no change.
+ *   - Save → writes the namespaces with changes and applies them through
+ *     lifecycle.applySettings. Close → discards.
  */
 
 (function (S) {
@@ -92,31 +89,27 @@
     var barContainer = null;   // where the entries live, for showBarMenu
     var barShown = {};         // id -> whether the entry is in the bar now
 
-    var dashboard = {
+    // The one open screen. `buffer` holds the edited copies per namespace,
+    // `original` what they started from (plus the shown values a view
+    // declared through baseline). `saveBtn` and `$note` are the footer
+    // elements, kept so the chrome can be updated without rebuilding them.
+    var active = {
         modal:     null,
-        modalId:   'StewardDashboard',
-        activeTab: null,
+        view:      null,
+        viewState: {},
+        winH:      null,
         buffer:    {},
-        dirty:     {},
+        original:  {},
         editing:   false,
-        saveBtn:   null
+        saveBtn:   null,
+        $note:     null
     };
 
-    // The tab order shown in the bar. Status is built-in; every other id is
-    // in the registry's TABS (see 40_registry.js). `misc` is the exception
-    // that has no tab here: it renders on the Settings screen. Mail/Trades
-    // is omitted (deferred to a later phase).
-    // Internal `id` strings stay stable so module ui specs (and the registry's
-    // TABS set) don't have to track renames. Only the user-visible `label`
-    // changes here.
-    var TAB_ORDER = [
-        { id: 'status',      label: 'Status' },
-        { id: 'specialists', label: 'Explorers' },
-        { id: 'geologists',  label: 'Geologists' },
-        { id: 'quests',      label: 'Quests' },
-        { id: 'buildings',   label: 'Collections & Buildings' },
-        { id: 'events',      label: 'Events' }
-    ];
+    // Per id a function that answers whether a window outside the screens
+    // (such as the template editor) holds unsaved edits.
+    var editGuards = {};
+
+    var DASHBOARD_MODAL_ID = S.kernel.ui.DASHBOARD_MODAL_ID;
 
     // A second id, not the dashboard's: the host's create() is a no-op for a
     // live id and removes a closed modal asynchronously, so one id reused
@@ -165,9 +158,8 @@
     // Quick-toggle label, or null when the module has no `enabled` flag (no
     // toggle entry exists for it). Shared by the build and the in-place refresh.
     function toggleLabel(mod) {
-        var s = S.kernel.settings.read(mod.id);
-        if (!s || typeof s.enabled === 'undefined') return null;
-        return (s.enabled ? '✓ ' : '✕ ') + mod.ui.section.title;
+        if (!hasEnabledFlag(mod.id)) return null;
+        return (isModuleEnabled(mod.id) ? '✓ ' : '✕ ') + mod.ui.section.title;
     }
 
     function statusLabel() {
@@ -741,6 +733,13 @@
         return !!(s && s.enabled);
     }
 
+    // Whether the stored settings carry an `enabled` key: only such a module
+    // gets a quick toggle, an enabled switch and an on/off state.
+    function hasEnabledFlag(moduleId) {
+        var s = S.kernel.settings.read(moduleId);
+        return !!s && typeof s.enabled !== 'undefined';
+    }
+
     // Surface a transient message to the user via the host's alert system.
     // Best-effort — silently no-ops if the host isn't ready (e.g., very
     // early boot).
@@ -753,660 +752,370 @@
     }
 
     // -----------------------------------------------------------------
-    // Dashboard modal — autoTSO-mirror layout
+    // Settings buffer and change counting
     // -----------------------------------------------------------------
 
-    // Stylesheet rules without a scope prefix: scopeCss() prefixes every
-    // selector with each modal id that shares the look (the dashboard and
-    // module dialogs), so the rules exist once. The host's bootstrap.min.css
-    // forces .modal-body { height:60% } and a parchment background image;
-    // both need overriding with !important.
-    var STYLE_ID = 'steward-dashboard-style';
-    var STYLE_RULES = [
-        // ---- modal frame ----
-        // The host paints the wood chrome on .modal-header / .modal-body /
-        // .modal-footer (window_top.png + window_middle.png + window_bottom.png).
-        // We DON'T override those — autoTSO uses exactly the same chrome
-        // and looks great. We only override layout (padding, height) and
-        // our colour palette.
-        '.modal-dialog{width:1000px;max-width:96%;}',
-        '.modal-content{color:#e8e1cf;}',
-
-        // ---- title bar (keep wood background) ----
-        '.modal-header{padding:14px 22px 12px !important;' +
-            'border-bottom:1px solid rgba(0,0,0,.3);}',
-        // Pure white + a soft dark text-shadow so the title pops off the
-        // wood regardless of how the host renders window_top.png.
-        '.modal-header .modal-title,' +
-            '.modal-header h4{color:#fff;font-size:20px;' +
-            'font-weight:600;letter-spacing:.3px;margin:0;' +
-            'text-shadow:0 1px 2px rgba(0,0,0,.6);}',
-        '.modal-header .close{color:#f8f1d9;opacity:.85;' +
-            'text-shadow:none;font-size:24px;line-height:1;}',
-        '.modal-header .close:hover{color:#fff;opacity:1;}',
-
-        // ---- body (keep wood background, override host .modal-body { height:60%; padding:15px }) ----
-        '.modal-body{padding:0 !important;height:auto !important;' +
-            'overflow:visible;color:#e8e1cf;}',
-
-        // ---- tab bar ----
-        '.steward-tabs{display:block;padding:12px 20px 0;' +
-            'border-bottom:1px solid rgba(0,0,0,.3);}',
-        '.steward-tabs:after{content:"";display:block;clear:both;height:0;}',
-        '.steward-tab{float:left;padding:9px 22px;color:#5dade2;' +
-            'text-decoration:none;font-size:15px;font-weight:500;cursor:pointer;' +
-            'border-radius:6px 6px 0 0;margin-right:4px;}',
-        '.steward-tab:hover{background:rgba(93,173,226,.12);' +
-            'color:#5dade2;text-decoration:none;}',
-        '.steward-tab.active{background:#3d8fc6;color:#fff;}',
-        '.steward-tab.active:hover{background:#3d8fc6;color:#fff;}',
-
-        // ---- panel (per-tab content) ----
-        '.steward-panel{padding:16px 22px 20px;height:480px;' +
-            'overflow-y:auto;}',
-
-        // ---- section header / form rows ----
-        // Sections render as a flat sequence of BS3 rows on the panel.
-        // The header row uses cells with the host's `tblHeader` class
-        // (parchment + black text + 23px height — defined in
-        // bootstrap.min.css). Form rows are plain BS3 .row with col-*
-        // cells from gridRow().
-        //
-        // tblHeader rounded corners are applied to the first / last cell
-        // of each header (matches utils.createTableRow output).
-        '.steward-row{margin:0;padding:6px 0;font-size:13px;' +
-            'color:#e8e1cf;border-bottom:1px solid rgba(0,0,0,.15);}',
-        '.steward-row:last-child{border-bottom:none;}',
-        '.steward-row-disabled{background:rgba(120,40,30,.25);}',
-        '.steward-row-ctl{text-align:right;}',
-        '.steward-row-help{color:#a09a85;font-size:11px;' +
-            'margin-left:8px;}',
-        '.steward-row-hint{color:#b8b0a3;font-size:12px;' +
-            'padding-left:18px;}',
-
-        '.tblHeader{padding-top:3px !important;' +
-            'padding-bottom:3px !important;line-height:23px;' +
-            'font-weight:600;}',
-        '.steward-tbl-first{border-radius:10px 0 0 10px;}',
-        '.steward-tbl-last{border-radius:0 10px 10px 0;}',
-        '.steward-section-title{font-size:14px;color:#000;}',
-        '.steward-section-icon{display:inline-block;' +
-            'margin-right:4px;}',
-        '.steward-section-action{color:#2c5fb5;' +
-            'text-decoration:none;font-size:13px;font-weight:500;' +
-            'float:right;line-height:23px;}',
-        '.steward-section-action:hover{text-decoration:underline;' +
-            'color:#2c5fb5;}',
-
-        // Pad the row that follows a tblHeader so the table doesn't feel
-        // crammed against the band.
-        '.row.steward-row{padding-left:14px;padding-right:14px;}',
-
-        // Idle/busy variants of a per-explorer row — different accent
-        // colour without changing the underlying row layout.
-        '.row.steward-row-idle{color:#cfe6ce;}',
-        '.row.steward-row-busy{color:#d8c89c;}',
-
-        // ---- input / dropdown ----
-        '.steward-input,' +
-            '.steward-dropdown{background:linear-gradient(180deg,#f5e8c8 0%,#e0c898 100%);' +
-            'color:#2a2418;border:1px solid #5a4a30;border-radius:3px;' +
-            'padding:5px 10px;font-size:13px;font-family:inherit;' +
-            'box-shadow:0 1px 0 rgba(255,255,255,.3) inset;line-height:normal;}',
-        '.steward-dropdown{padding-right:24px;cursor:pointer;}',
-
-        // ---- button ----
-        '.steward-btn{background:linear-gradient(180deg,#f5e8c8 0%,#e0c898 100%);' +
-            'color:#2a2418;border:1px solid #5a4a30;padding:6px 22px;' +
-            'border-radius:4px;font-size:13px;font-weight:500;font-family:inherit;' +
-            'cursor:pointer;line-height:normal;' +
-            'box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 1px 2px rgba(0,0,0,.3);}',
-        '.steward-btn:hover{background:linear-gradient(180deg,#faedd2,#e8d2a8);}',
-        '.steward-btn-sm{padding:3px 12px;font-size:12px;}',
-
-        // ---- decorative bits ----
-        '.steward-help-i{display:inline-block;width:18px;height:18px;' +
-            'border-radius:50%;background:#5dade2;color:#fff;font-style:italic;' +
-            'font-size:11px;font-weight:600;line-height:18px;text-align:center;' +
-            'margin-left:6px;cursor:help;vertical-align:middle;}',
-        '.steward-new-badge{display:inline-block;' +
-            'background:linear-gradient(180deg,#e34a3c,#b8362a);color:#fff;' +
-            'font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;' +
-            'letter-spacing:.5px;border:1px solid #5a1a14;margin-left:6px;' +
-            'vertical-align:middle;}',
-        'code{background:rgba(255,255,255,.06);color:#d8d0bd;' +
-            'padding:1px 5px;border-radius:2px;font-size:11px;}',
-        'strong{color:#f5e9c4;}',
-
-        // ---- footer (keep wood background) ----
-        '.modal-footer{padding:12px 22px !important;' +
-            'border-top:1px solid rgba(0,0,0,.4);text-align:left;margin:0;}',
-        '.modal-footer:after{content:"";display:block;clear:both;height:0;}',
-        '.modal-footer .steward-btn{margin:0;}',
-        '.modal-footer .steward-btn-save{float:left;}',
-        '.modal-footer .steward-btn-close{float:right;}',
-        '.modal-footer .steward-btn[disabled]{opacity:.5;cursor:default;}',
-
-        // ---- shared classes for module dialogs ----
-        // Sortable lists (jQuery UI) and status colours used by dialogs that
-        // borrow this stylesheet through ensureStyle().
-        '.steward-list{list-style:none;margin:0;padding:0;}',
-        '.steward-list li{padding:5px 8px;margin:2px 0;background:rgba(0,0,0,.18);' +
-            'border-radius:4px;cursor:move;}',
-        '.steward-list .ui-sortable-placeholder{visibility:visible !important;' +
-            'background:rgba(93,173,226,.2);}',
-        '.steward-bad{color:#f3a299;}',
-        '.steward-warn{color:#f0c47c;}',
-        '.steward-ok{color:#9fd8a8;}',
-        '.steward-muted{color:#a09a85;}'
-    ];
-
-    // Prefix every selector of every rule with '#<id> ' for each id. Only
-    // the selector part (before the first '{') is split on ',', so commas
-    // inside a body such as linear-gradient(...) stay intact.
-    function scopeCss(rules, ids) {
-        var out = [];
-        for (var r = 0; r < rules.length; r++) {
-            var rule = rules[r];
-            var brace = rule.indexOf('{');
-            if (brace < 0) continue;
-            var sels = rule.substring(0, brace).split(',');
-            var scoped = [];
-            for (var i = 0; i < ids.length; i++) {
-                for (var j = 0; j < sels.length; j++) {
-                    var sel = sels[j].replace(/^\s+|\s+$/g, '');
-                    if (sel) scoped.push('#' + ids[i] + ' ' + sel);
-                }
-            }
-            out.push(scoped.join(',') + rule.substring(brace));
-        }
-        return out.join('');
+    function isPlainObject(v) {
+        return v !== null && typeof v === 'object' &&
+               Object.prototype.toString.call(v) === '[object Object]';
     }
 
-    // Scope list for the shared stylesheet: the dashboard first, then the
-    // ids already recorded in `attr` (comma-separated) in order, then
-    // modalId when new. Empties and duplicates are dropped.
-    function mergeScopes(attr, modalId) {
-        var list = [dashboard.modalId];
-        var parts = attr ? String(attr).split(',') : [];
-        parts.push(modalId || '');
+    // Settings are JSON in storage, so a JSON round trip is a full copy.
+    function deepCopy(v) {
+        if (v === null || typeof v !== 'object') return v;
+        return JSON.parse(JSON.stringify(v));
+    }
+
+    function hasOwn(o, k) {
+        return Object.prototype.hasOwnProperty.call(o, k);
+    }
+
+    function bufferedSettings(ns) {
+        if (!hasOwn(active.buffer, ns)) {
+            var stored = S.kernel.settings.read(ns);
+            var snap = isPlainObject(stored) ? deepCopy(stored) : {};
+            active.buffer[ns] = snap;
+            active.original[ns] = deepCopy(snap);
+        }
+        return active.buffer[ns];
+    }
+
+    // Adds to `target` every path of `shown` it lacks; existing values are
+    // never overwritten.
+    function fillMissing(target, shown) {
+        for (var k in shown) {
+            if (!hasOwn(shown, k)) continue;
+            if (!hasOwn(target, k)) {
+                target[k] = deepCopy(shown[k]);
+            } else if (isPlainObject(target[k]) && isPlainObject(shown[k])) {
+                fillMissing(target[k], shown[k]);
+            }
+        }
+    }
+
+    // Records the values a view shows for paths the stored value lacks
+    // (defaults merged in by a module, the logger's effective config), so an
+    // edit back to the shown value counts as no change. The buffer itself is
+    // not touched: Save still writes only what was edited.
+    function baseline(ns, shown) {
+        bufferedSettings(ns);
+        if (isPlainObject(shown)) fillMissing(active.original[ns], shown);
+    }
+
+    function leafDiffers(b, o) {
+        if (b === o) return false;
+        if ((b !== null && typeof b === 'object') || (o !== null && typeof o === 'object')) {
+            try { return JSON.stringify(b) !== JSON.stringify(o); } catch (e) { return true; }
+        }
+        return true;
+    }
+
+    // Leaves of `buf` that differ from the same path in `orig`. Only the
+    // buffer's leaves are walked: a path never edited is never a change.
+    function countDiff(buf, orig) {
+        var n = 0;
+        for (var k in buf) {
+            if (!hasOwn(buf, k)) continue;
+            var o = (isPlainObject(orig) && hasOwn(orig, k)) ? orig[k] : undefined;
+            if (isPlainObject(buf[k])) n += countDiff(buf[k], isPlainObject(o) ? o : {});
+            else if (leafDiffers(buf[k], o)) n++;
+        }
+        return n;
+    }
+
+    // The name a namespace has on screen: the kernel ones are fixed, a
+    // module uses its section heading.
+    function nsName(ns) {
+        if (ns === 'logger') return 'Logging';
+        if (ns === 'scheduler') return 'Scheduler';
+        var mod = null;
+        try { mod = S.kernel.registry.get(ns); } catch (e) { mod = null; }
+        if (mod && mod.ui && mod.ui.section) {
+            return mod.ui.section.heading || mod.ui.section.title || ns;
+        }
+        return ns;
+    }
+
+    function changes() {
+        var out = { count: 0, names: [], byNs: {} };
+        for (var ns in active.buffer) {
+            if (!hasOwn(active.buffer, ns)) continue;
+            var n = countDiff(active.buffer[ns], active.original[ns]);
+            if (n > 0) {
+                out.byNs[ns] = n;
+                out.count += n;
+                out.names.push(nsName(ns));
+            }
+        }
+        return out;
+    }
+
+    function walkPath(root, parts) {
+        var v = root;
         for (var i = 0; i < parts.length; i++) {
-            var id = parts[i].replace(/^\s+|\s+$/g, '');
-            if (id && list.indexOf(id) < 0) list.push(id);
+            if (!isPlainObject(v) || !hasOwn(v, parts[i])) return undefined;
+            v = v[parts[i]];
         }
-        return list;
+        return v;
     }
 
-    // Make the shared stylesheet cover modalId. The scope list lives on the
-    // <style> element (data-scopes), not in this closure: after a script
-    // reload the new bundle starts with fresh closures while the old element
-    // and any open dialog stay in the page, so a closure list would drop a
-    // dialog's scope. The element is looked up by id on every call and only
-    // rewritten when its scope list changes.
-    function ensureStyle(modalId) {
-        var el = document.getElementById(STYLE_ID);
-        var current = el ? el.getAttribute('data-scopes') : '';
-        var key = mergeScopes(current, modalId).join(',');
-        if (el && current === key) return;
-        var css = scopeCss(STYLE_RULES, key.split(','));
-        if (!el) {
-            var $style = $('<style>', { type: 'text/css', id: STYLE_ID });
-            el = $style[0];
-            if (el.styleSheet) el.styleSheet.cssText = css;
-            else               el.appendChild(document.createTextNode(css));
-            $('head').append($style);
-        } else if (el.styleSheet) {
-            el.styleSheet.cssText = css;
-        } else {
-            while (el.firstChild) el.removeChild(el.firstChild);
-            el.appendChild(document.createTextNode(css));
-        }
-        el.setAttribute('data-scopes', key);
-    }
-
-    // The one open sequence: the refusal and the buffer reset live here so a
-    // second screen cannot drift from the first.
-    function openScreen(modalId, title, label, activeTab, render) {
-        if (typeof Modal === 'undefined') {
-            S.kernel.error('ui', 'host Modal class unavailable — cannot open ' + label.toLowerCase());
-            return;
-        }
-        if (hasOpenEdits()) { notify('Save or close the open window first'); return; }
-        ensureStyle(modalId);
-        dashboard.buffer = {};
-        dashboard.dirty = {};
-        dashboard.editing = false;
-        dashboard.activeTab = activeTab;
-        try {
-            dashboard.modal = new Modal(modalId, title, true);
-            dashboard.modal.create();
-            render();
-            dashboard.modal.show();
-        } catch (e) {
-            S.kernel.error('ui', 'open' + label + ' threw:', e);
-        }
-    }
-
-    function openDashboard(initialTabId) {
-        openScreen(dashboard.modalId, 'Steward — Auto Settings', 'Dashboard',
-            initialTabId || 'specialists', renderDashboard);
-    }
-
-    function openSettings() {
-        openScreen(SETTINGS_MODAL_ID, 'Steward — Settings', 'Settings', null, renderSettings);
-    }
-
-    function closeDashboard(commit) {
-        if (commit && hasDirty()) {
-            flushBuffers();
-            notify('Configuration saved');
-        }
-        dashboard.buffer = {};
-        dashboard.dirty = {};
-        dashboard.editing = false;
-        if (dashboard.modal) {
-            try { dashboard.modal.hide(); } catch (e) { /* ignore */ }
-        }
-    }
-
-    function renderDashboard() {
-        if (!dashboard.modal) return;
-        var $body = dashboard.modal.Body();
-        if (!$body || !$body.length) return;
-        $body.empty();
-
-        // Tab bar.
-        var $tabs = $('<div>', { 'class': 'steward-tabs' });
-        for (var i = 0; i < TAB_ORDER.length; i++) {
-            (function (tab) {
-                var $a = $('<a>', {
-                    'href':       '#',
-                    'class':      'steward-tab' + (tab.id === dashboard.activeTab ? ' active' : ''),
-                    'data-tab':   tab.id
-                }).text(tab.label);
-                $a.on('click', function (e) {
-                    e.preventDefault();
-                    activateTab(tab.id);
-                });
-                $tabs.append($a);
-            }(TAB_ORDER[i]));
-        }
-        $body.append($tabs);
-
-        // Panel container.
-        $body.append($('<div>', { 'class': 'steward-panel', 'id': 'steward-panel' }));
-
-        renderFooter();
-        activateTab(dashboard.activeTab);
-    }
-
-    function activateTab(tabId) {
-        var $body = dashboard.modal.Body();
-        $('.steward-tab', $body).removeClass('active');
-        $('.steward-tab[data-tab="' + tabId + '"]', $body).addClass('active');
-        dashboard.activeTab = tabId;
-
-        var $panel = $('#steward-panel', $body);
-        $panel.empty();
-        // BS3 .row carries negative side margins; wrap in container-fluid
-        // so the rows align with the panel edges instead of overflowing.
-        var $container = $('<div>', { 'class': 'container-fluid' });
-        $panel.append($container);
-
-        if (tabId === 'status') {
-            renderStatusTab($container);
-        } else {
-            renderModuleTab($container, tabId);
-        }
-    }
-
-    function renderModuleTab($panel, tabId) {
-        var h = S.kernel.ui.helpers;
-        var mods = S.kernel.registry.byTab(tabId);
-        if (!mods.length) {
-            $panel.append(h.headerRow('No modules in this tab yet.'));
-            return;
-        }
-        for (var i = 0; i < mods.length; i++) {
-            renderSection($panel, mods[i]);
-        }
-    }
-
-    // The shell builds the section's header row from the ui spec, then hands
-    // the panel + helpers to the module so it can append its data rows.
-    // Modules append directly to $panel — same flat sequence-of-rows layout
-    // autoTSO uses (createTableRow per row, header rows interleaved).
-    function renderSection($panel, mod) {
-        var sec = mod.ui.section;
-        var h = S.kernel.ui.helpers;
-
-        $panel.append(h.headerRow(sec.title, {
-            icon:   sec.icon,
-            action: sec.action || null
-        }));
-
-        try {
-            sec.render($panel, h);
-        } catch (e) {
-            S.kernel.error('ui', 'render threw for', mod.id, ':', e);
-            $panel.append(h.formRow('Render failed — see log.', ''));
-        }
-
-        $panel.append(sectionSpacer());
-    }
-
-    // Visual separator between sections — empty row.
-    function sectionSpacer() {
-        return $('<div>', { 'class': 'steward-section-spacer' }).css({ height: '10px' });
-    }
-
-    // Render one event in the Status tab's "Active events" section.
-    // Surfaces:
-    //   - the event display name (Easter, XMAS, …)
-    //   - phase: "Treasure phase" (green) when items are dropping,
-    //            "Event Cooldown" (amber) when only the shop variant is
-    //            live, otherwise the raw category list
-    //   - the resource currency + the player's current count
-    function renderEventRow(ev, h) {
-        var $lbl = $('<span>');
-        $lbl.append($('<strong>').text(ev.name));
-        $lbl.append(document.createTextNode(' — '));
-
-        var inTreasure = !!(ev.categories && ev.categories.treasure);
-        var inCooldown = !!(ev.categories && ev.categories.shop && !inTreasure);
-        var $phase;
-        if (inTreasure) {
-            $phase = $('<span>').css({ color: '#6cba5d', fontWeight: '600' })
-                .text('Treasure phase');
-        } else if (inCooldown) {
-            $phase = $('<span>').css({ color: '#e8a64a', fontWeight: '600' })
-                .text('Cooldown Phase');
-        } else {
-            $phase = $('<span>').text((ev.categoryList || []).join(', ') || 'live');
-        }
-        $lbl.append($phase);
-
-        var $rhs = $('<span>');
-        var resource = null;
-        try {
-            if (S.core.events.eventResource) {
-                resource = S.core.events.eventResource(ev.code) || null;
-            }
-        } catch (e) { /* ignore */ }
-        if (resource) {
-            $rhs.append($('<code>').text(resource));
-            var amount = null;
-            try {
-                if (S.core.events.eventResourceAmount) {
-                    amount = S.core.events.eventResourceAmount(ev.code);
-                }
-            } catch (e) { /* ignore */ }
-            if (typeof amount === 'number') {
-                $rhs.append(document.createTextNode(' · '));
-                $rhs.append($('<strong>').text(String(amount)));
-                $rhs.append(document.createTextNode(' held'));
-            }
-        }
-        return h.formRow($lbl, $rhs);
-    }
-
-    // -----------------------------------------------------------------
-    // Status tab — built into the shell, not a module.
-    // -----------------------------------------------------------------
-
-    function renderStatusTab($panel) {
-        var h = S.kernel.ui.helpers;
-
-        // ---- Section: Steward Status ----
-        $panel.append(h.headerRow('Steward Status', { icon: '★' }));
-
-        $panel.append(h.formRow('Master pause', h.toggle({
-            checked:  paused,
-            onChange: function (next) { setPaused(next); }
-        })));
-
-        var withUi = S.kernel.registry.withUi();
-        var enabledNames = [];
-        for (var i = 0; i < withUi.length; i++) {
-            if (isModuleEnabled(withUi[i].id)) enabledNames.push(withUi[i].ui.section.title);
-        }
-        var $modText = $('<span>');
-        $modText.append($('<strong>').text(enabledNames.length));
-        $modText.append(document.createTextNode(' of ' + withUi.length + ' enabled'));
-        if (enabledNames.length) {
-            $modText.append(document.createTextNode(' · ' + enabledNames.join(', ')));
-        }
-        $panel.append(h.formRow('Modules running', $modText));
-
-        $panel.append(h.formRow('Queue depth', String(S.kernel.queue.depth())));
-        var ver = S.kernel.VERSION;
-        var verLabel = (typeof ver === 'string' && /^\d/.test(ver)) ? 'v' + ver : 'dev';
-        $panel.append(h.formRow('Build', $('<code>').text(verLabel)));
-
-        $panel.append($('<div>').css({ height: '10px' }));
-
-        // ---- Section: Active events ----
-        try {
-            if (S.core.events && S.core.events.active) {
-                var ev = S.core.events.active();
-                $panel.append(h.headerRow('Active events', { icon: '⚑' }));
-                if (ev.length === 0) {
-                    $panel.append(h.formRow(
-                        $('<em>').css({ color: '#a09a85' }).text('No events live.'),
-                        ''));
-                } else {
-                    for (var k = 0; k < ev.length; k++) {
-                        $panel.append(renderEventRow(ev[k], h));
-                    }
-                }
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    // -----------------------------------------------------------------
-    // Settings screen — built into the shell like the Status tab. Rows
-    // write through h.update, so Save and Close work as on the dashboard.
-    // -----------------------------------------------------------------
-
-    // The number typed, or null for blank, non-numeric or negative input.
-    function parseNumber(text) {
-        var t = String(text).replace(/^\s+|\s+$/g, '');
-        if (t === '') return null;
-        var n = Number(t);
-        return (isFinite(n) && n >= 0) ? n : null;
-    }
-
-    // Each returns the stored unit, or null when the input is rejected.
-    var settingsParse = {
-        sizeKB: function (text) {
-            var n = parseNumber(text);
-            return n === null ? null : Math.round(n * 1024);
-        },
-        keep: function (text) {
-            var n = parseNumber(text);
-            return n === null ? null : Math.floor(n);
-        },
-        tickMs: function (text) {
-            var n = parseNumber(text);
-            if (n === null) return null;
-            return Math.max(S.kernel.TIMEOUTS.TICK_INTERVAL_MIN_MS, Math.round(n * 1000));
-        }
-    };
-
-    function showMB(kb) { return Math.round(kb / 1024 * 100) / 100; }
-    function showCount(n) { return n; }
-    function showSeconds(ms) { return ms / 1000; }
-
-    // Text input bound to a number. A rejected entry reverts and a clamped
-    // one shows the clamped value. h.input enables Save while typing, and the
-    // blur change event from the Save click still runs before the flush.
-    function numberInput(ns, key, value, parse, show) {
-        var h = S.kernel.ui.helpers;
-        var current = value;
-        var $i = h.input({ value: show(value), width: '70px', onChange: function (text) {
-            var next = parse(text);
-            if (next !== null) {
-                current = next;
-                var patch = {};
-                patch[key] = next;
-                h.update(ns, patch);
-            }
-            $i.val(show(current));
-        } });
-        return $i;
-    }
-
-    function loggerToggle(key, checked) {
-        var h = S.kernel.ui.helpers;
-        return h.toggle({
-            checked:  checked,
-            onChange: function (next) {
-                var patch = {};
-                patch[key] = next;
-                h.update('logger', patch);
-            }
-        });
-    }
-
-    function renderLoggingSection($panel) {
-        var h = S.kernel.ui.helpers;
-        var cfg = S.kernel.log.effective();
-
-        $panel.append(h.headerRow('Logging', { icon: '✎' }));
-        $panel.append(h.formRow('Debug lines', loggerToggle('debugEnabled', cfg.debugEnabled)));
-        $panel.append(h.formRow('Write to file', loggerToggle('fileEnabled', cfg.fileEnabled)));
-        $panel.append(h.formRow('Rotate at size (MB)',
-            numberInput('logger', 'maxFileSizeKB', cfg.maxFileSizeKB, settingsParse.sizeKB, showMB),
-            '0 = off'));
-        $panel.append(h.formRow('Rotate daily', loggerToggle('rotateDaily', cfg.rotateDaily)));
-        $panel.append(h.formRow('Old files to keep',
-            numberInput('logger', 'keepRotated', cfg.keepRotated, settingsParse.keep, showCount),
-            '0 = none'));
-        $panel.append(sectionSpacer());
-    }
-
-    function renderSchedulerSection($panel) {
-        var h = S.kernel.ui.helpers;
-
-        $panel.append(h.headerRow('Scheduler', { icon: '⏱' }));
-        // `tickInterval` in ms is the key scheduler.configure reads.
-        $panel.append(h.formRow('Tick interval (seconds)',
-            numberInput('scheduler', 'tickInterval', S.kernel.scheduler.state.tickIntervalMs,
-                settingsParse.tickMs, showSeconds),
-            'minimum ' + showSeconds(S.kernel.TIMEOUTS.TICK_INTERVAL_MIN_MS)));
-        $panel.append(sectionSpacer());
-    }
-
-    function renderSettings() {
-        if (!dashboard.modal) return;
-        var $body = dashboard.modal.Body();
-        if (!$body || !$body.length) return;
-        $body.empty();
-
-        var h = S.kernel.ui.helpers;
-        var $panel = $('<div>', { 'class': 'steward-panel' });
-        // Same wrapper as activateTab: BS3 .row needs container-fluid.
-        var $container = $('<div>', { 'class': 'container-fluid' });
-        $panel.append($container);
-        $body.append($panel);
-
-        $container.append(h.indentRow('Logging and scheduler changes apply on Save. ' +
-            'Diagnostics buttons run at once.'));
-        renderLoggingSection($container);
-        renderSchedulerSection($container);
-        renderModuleTab($container, 'misc');
-
-        renderFooter();
-    }
-
-    // -----------------------------------------------------------------
-    // Footer
-    // -----------------------------------------------------------------
-
-    function renderFooter() {
-        var $footer = dashboard.modal.Footer ? dashboard.modal.Footer() : null;
-        if (!$footer || !$footer.length) return;
-        $footer.empty();
-        dashboard.saveBtn = $('<button>', {
-            'type':  'button',
-            'class': 'steward-btn steward-btn-save',
-            'text':  'Save'
-        });
-        var $closeBtn = $('<button>', {
-            'type':  'button',
-            'class': 'steward-btn steward-btn-close',
-            'text':  'Close'
-        });
-        dashboard.saveBtn.on('click', function () { closeDashboard(true); });
-        $closeBtn.on('click', function () { closeDashboard(false); });
-        $footer.append(dashboard.saveBtn).append($closeBtn);
-        updateFooterButtons();
+    // Whether the buffered value at a dotted path differs from the original.
+    function isChanged(ns, path) {
+        if (!hasOwn(active.buffer, ns)) return false;
+        var parts = String(path).split('.');
+        var b = walkPath(active.buffer[ns], parts);
+        if (typeof b === 'undefined') return false;
+        var o = walkPath(active.original[ns], parts);
+        if (isPlainObject(b)) return countDiff(b, isPlainObject(o) ? o : {}) > 0;
+        return leafDiffers(b, o);
     }
 
     function hasDirty() {
-        for (var k in dashboard.dirty) {
-            if (dashboard.dirty[k]) return true;
-        }
-        return false;
-    }
-
-    // The native menu stays clickable behind a modal, and opening a screen
-    // drops the buffer. Visibility matters because the header X and a zone
-    // load skip closeDashboard and leave a stale dirty flag behind.
-    function hasOpenEdits() {
-        return hasDirty() && dashboard.modal && dashboard.modal.Body().is(':visible');
+        return changes().count > 0;
     }
 
     // Typing alone enables Save: a bound input commits on blur, and a disabled
     // button would swallow the very click whose blur commits the value.
     function canSave() {
-        return hasDirty() || dashboard.editing === true;
+        return hasDirty() || active.editing === true;
     }
 
-    function updateFooterButtons() {
-        if (!dashboard.saveBtn) return;
-        dashboard.saveBtn.prop('disabled', !canSave());
+    function markDirty() {
+        refreshChrome();
+    }
+
+    // An input is being typed into but has not committed yet; the flag only
+    // enables Save so the committing click reaches it, it never counts as a
+    // change.
+    function markEditing() {
+        active.editing = true;
+        refreshChrome();
+    }
+
+    function resetBuffer() {
+        active.buffer = {};
+        active.original = {};
+        active.editing = false;
     }
 
     function flushBuffers() {
-        for (var moduleId in dashboard.buffer) {
-            if (!dashboard.dirty[moduleId]) continue;
+        var byNs = changes().byNs;
+        for (var ns in active.buffer) {
+            if (!hasOwn(active.buffer, ns) || !(byNs[ns] > 0)) continue;
             try {
-                S.kernel.settings.write(moduleId, dashboard.buffer[moduleId]);
-                S.kernel.log('ui', 'saved settings for', moduleId);
-                var apply = S.kernel.lifecycle.applySettings[moduleId];
+                S.kernel.settings.write(ns, active.buffer[ns]);
+                S.kernel.log('ui', 'saved settings for', ns);
+                var apply = S.kernel.lifecycle.applySettings[ns];
                 if (typeof apply === 'function') apply();
             } catch (e) {
-                S.kernel.error('ui', 'failed to save', moduleId, ':', e);
+                S.kernel.error('ui', 'failed to save', ns, ':', e);
             }
         }
     }
 
     // -----------------------------------------------------------------
-    // Settings buffer
+    // Edit guards
     // -----------------------------------------------------------------
 
-    function bufferedSettings(moduleId) {
-        if (!dashboard.buffer[moduleId]) {
-            var stored = S.kernel.settings.read(moduleId) || {};
-            var snap = {};
-            for (var k in stored) snap[k] = stored[k];
-            dashboard.buffer[moduleId] = snap;
+    // A second call with the same id replaces the guard; a non-function
+    // removes it.
+    function addEditGuard(id, fn) {
+        if (typeof fn === 'function') editGuards[id] = fn;
+        else delete editGuards[id];
+    }
+
+    // The native menu stays clickable behind a modal, and opening a screen
+    // drops the buffer. Visibility matters because the header X and a zone
+    // load skip closeDashboard and leave stale changes behind. A guard that
+    // throws counts as no edits, so a broken window never locks the screens.
+    function hasOpenEdits() {
+        if (hasDirty() && active.modal) {
+            try {
+                if (active.modal.Body().is(':visible')) return true;
+            } catch (e) { /* no body: not open */ }
         }
-        return dashboard.buffer[moduleId];
+        for (var id in editGuards) {
+            if (!hasOwn(editGuards, id)) continue;
+            try {
+                if (editGuards[id]()) return true;
+            } catch (e) {
+                S.kernel.error('ui', 'edit guard threw for', id, ':', e);
+            }
+        }
+        return false;
     }
 
-    function markDirty(moduleId) {
-        dashboard.dirty[moduleId] = true;
-        updateFooterButtons();
+    // -----------------------------------------------------------------
+    // Screen lifecycle
+    // -----------------------------------------------------------------
+
+    // The window height read once per open. The test rig and an early boot
+    // may have no window or a $ without height(); any failure means unknown,
+    // which is treated as a full-size window.
+    function measureWindowHeight() {
+        try {
+            if (typeof window === 'undefined' || typeof $ !== 'function') return null;
+            var $w = $(window);
+            if (!$w || typeof $w.height !== 'function') return null;
+            var n = $w.height();
+            return (typeof n === 'number' && isFinite(n) && n > 0) ? n : null;
+        } catch (e) {
+            return null;
+        }
     }
 
-    // An input is being typed into but has not committed yet; the flag only
-    // enables Save so the committing click reaches it, it never marks dirty.
-    function markEditing() {
-        dashboard.editing = true;
-        updateFooterButtons();
+    function compact() {
+        var layout = S.kernel.ui.layout;
+        if (typeof active.winH !== 'number' || !layout) return false;
+        return typeof layout.compactMaxHeight === 'number' && active.winH <= layout.compactMaxHeight;
     }
+
+    // Panel height for a short window, or null when the stylesheet's height
+    // applies. `kind` is 'dashboard' or 'settings'.
+    function panelHeight(kind) {
+        if (!compact()) return null;
+        var layout = S.kernel.ui.layout;
+        var chrome = layout.chrome ? layout.chrome[kind] : undefined;
+        if (typeof chrome !== 'number') return null;
+        return Math.max(layout.minPanel, active.winH - chrome);
+    }
+
+    // The one open sequence: the refusal and the buffer reset live here so a
+    // second screen cannot drift from the first.
+    function openScreen(modalId, title, label, viewName, viewState) {
+        if (typeof Modal === 'undefined') {
+            S.kernel.error('ui', 'host Modal class unavailable — cannot open ' + label.toLowerCase());
+            return;
+        }
+        if (hasOpenEdits()) { notify('Save or close the open window first'); return; }
+        if (typeof S.kernel.ui.ensureStyle === 'function') S.kernel.ui.ensureStyle(modalId);
+        resetBuffer();
+        active.saveBtn = null;
+        active.$note = null;
+        active.viewState = viewState || {};
+        active.winH = measureWindowHeight();
+        active.view = (S.kernel.ui.views && S.kernel.ui.views[viewName]) || null;
+        if (!active.view || typeof active.view.render !== 'function') {
+            active.view = null;
+            S.kernel.error('ui', 'no ' + viewName + ' view — cannot open ' + label.toLowerCase());
+            return;
+        }
+        try {
+            active.modal = new Modal(modalId, title, true);
+            active.modal.create();
+            active.view.render();
+            renderFooter();
+            active.modal.show();
+        } catch (e) {
+            S.kernel.error('ui', 'open' + label + ' threw:', e);
+        }
+    }
+
+    // The view picks its own default tab or group for a null one.
+    function openDashboard(tab) {
+        openScreen(DASHBOARD_MODAL_ID, 'Steward', 'Dashboard', 'dashboard', { tab: tab || null });
+    }
+
+    function openSettings(group) {
+        openScreen(SETTINGS_MODAL_ID, 'Steward settings', 'Settings', 'settings', { group: group || null });
+    }
+
+    function closeDashboard(commit) {
+        if (hasDirty()) {
+            if (commit) {
+                flushBuffers();
+                notify('Configuration saved');
+            } else {
+                notify('Changes discarded');
+            }
+        }
+        resetBuffer();
+        active.saveBtn = null;
+        active.$note = null;
+        if (active.modal) {
+            try { active.modal.hide(); } catch (e) { /* ignore */ }
+        }
+        active.modal = null;
+    }
+
+    // -----------------------------------------------------------------
+    // Footer and chrome
+    // -----------------------------------------------------------------
+
+    // Built once per open. A Save click first blurs an input whose change
+    // event commits and refreshes the chrome; a footer rebuilt at that moment
+    // would swallow the click, so later updates only change the elements.
+    function renderFooter() {
+        var $footer = active.modal.Footer ? active.modal.Footer() : null;
+        if (!$footer || !$footer.length) return;
+        var h = S.kernel.ui.helpers;
+        $footer.empty();
+        active.saveBtn = h.button('Save', { onClick: function () { closeDashboard(true); } });
+        active.$note = $('<span>');
+        var $closeBtn = h.button('Close', { onClick: function () { closeDashboard(false); } });
+        $closeBtn.addClass('steward-foot-right');
+        $footer.append(active.saveBtn).append(active.$note).append($closeBtn);
+        updateFooter();
+    }
+
+    function idleNote() {
+        var view = active.view;
+        if (view && typeof view.idleNote === 'function') {
+            var text = null;
+            try { text = view.idleNote(); } catch (e) {
+                S.kernel.error('ui', 'idleNote threw:', e);
+            }
+            if (typeof text === 'string') return text;
+        }
+        return 'No changes. Settings apply when you press Save.';
+    }
+
+    function updateFooter() {
+        if (!active.saveBtn || !active.$note) return;
+        var c = changes();
+        active.saveBtn.prop('disabled', !(c.count > 0 || active.editing === true));
+        if (c.count > 0) {
+            active.saveBtn.addClass('steward-primary');
+            active.$note.removeClass('steward-foot-note').addClass('steward-foot-dirty')
+                .text(c.count + ' unsaved change' + (c.count === 1 ? '' : 's') + ' · ' + c.names.join(', '));
+        } else {
+            active.saveBtn.removeClass('steward-primary');
+            active.$note.removeClass('steward-foot-dirty').addClass('steward-foot-note')
+                .text(idleNote());
+        }
+    }
+
+    function refreshChrome() {
+        updateFooter();
+        var view = active.view;
+        if (active.modal && view && typeof view.chrome === 'function') {
+            try { view.chrome(); } catch (e) {
+                S.kernel.error('ui', 'chrome threw:', e);
+            }
+        }
+    }
+
+    function buildLabel() {
+        var ver = S.kernel.VERSION;
+        return (typeof ver === 'string' && /^\d/.test(ver)) ? 'v' + ver : 'dev';
+    }
+
+    // What the views read; everything else on the screen goes through the
+    // helpers.
+    var screenApi = {
+        modal:           function () { return active.modal; },
+        state:           function () { return active.viewState; },
+        refreshChrome:   refreshChrome,
+        changes:         changes,
+        isChanged:       isChanged,
+        baseline:        baseline,
+        nsName:          nsName,
+        compact:         compact,
+        panelHeight:     panelHeight,
+        isModuleEnabled: isModuleEnabled,
+        hasEnabledFlag:  hasEnabledFlag,
+        buildLabel:      buildLabel
+    };
 
     // -----------------------------------------------------------------
     // Public API
@@ -1436,12 +1145,9 @@
     S.kernel.ui.markDirty        = markDirty;
     S.kernel.ui.markEditing      = markEditing;
     S.kernel.ui.canSave          = canSave;
-    S.kernel.ui.settingsParse    = settingsParse;
-    S.kernel.ui.TAB_ORDER        = TAB_ORDER;
-
-    S.kernel.ui.ensureStyle      = ensureStyle;
-    S.kernel.ui.scopeCss         = scopeCss;
-    S.kernel.ui.mergeScopes      = mergeScopes;
+    S.kernel.ui.hasOpenEdits     = hasOpenEdits;
+    S.kernel.ui.addEditGuard     = addEditGuard;
+    S.kernel.ui.screen           = screenApi;
 
     var statusUpdater = setInterval(refreshStatus, S.kernel.TIMEOUTS.STATUS_UPDATE_MS);
 

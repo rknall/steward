@@ -1,10 +1,10 @@
 /*
  * Dashboard surface for the collect module.
  *
- * Renders inside the Buildings tab as a "Collect Pickups" section. The
- * section's action link is a one-shot "Discover collectibles" probe that
- * walks the current zone and logs every candidate plus how it matched
- * against the user's patterns — useful for tuning the pattern list.
+ * Renders on the Buildings tab: a settings column and a card listing what
+ * sits on the zone. The Discover button is a one-shot probe that walks the
+ * current zone and logs every candidate plus how it matched against the
+ * user's patterns, useful for tuning the pattern list.
  */
 
 (function (S) {
@@ -69,75 +69,87 @@
         }
     }
 
-    // Section.summary — shown on the Status tab.
-    function summary() {
-        var s = readSettings();
-        if (!s.enabled) return 'disabled';
-        var n = (s.namePatterns || []).length;
-        return n + ' pattern' + (n === 1 ? '' : 's') +
-            (s.adventureZones === true ? ', adventures' : '');
-    }
-
-    // Section.render — appends rows to the panel. Settings are buffered so
-    // the user can Save / Close. Pattern config (settings.namePatterns) is
-    // intentionally not user-facing here — it's an advanced knob editable in
-    // settings.json. The dashboard surfaces what matters at a glance: the
-    // master toggle and the collectibles currently sitting on the zone.
-    function renderSection($panel, h) {
+    // Compact strip text. Reads the buffer so an unsaved toggle shows at once.
+    function summary(h) {
         var s = h.settings('collect');
-
-        $panel.append(h.formRow('Run on Startup', h.toggle({
-            checked:  !!s.enabled,
-            onChange: function (next) { h.update('collect', { enabled: next }); }
-        })));
-
-        $panel.append(h.formRow('Pick up on adventures', h.toggle({
-            checked:  s.adventureZones === true,
-            onChange: function (next) { h.update('collect', { adventureZones: next }); }
-        })));
-
-        appendCollectiblesList($panel, h);
+        return s.adventureZones === true ? 'also on adventures' : 'home island only';
     }
 
-    function appendCollectiblesList($panel, h) {
-        if (!S.core.buildings || !S.core.buildings.collectiblesByName) return;
+    // Settings column. The baseline is the merged settings the card shows, so
+    // a key the stored object lacks does not count as a change.
+    function renderSide($side, h) {
+        h.baseline('collect', readSettings());
 
-        // Force a fresh snapshot so the list reflects what's actually on the
-        // ground at the moment the dashboard is opened. invalidate() is a
-        // no-op when the cache is already empty.
-        try { S.core.buildings.invalidate(); }
-        catch (e) { /* ignore */ }
+        var $card = h.card({ icon: '★', title: 'Collect pickups', meta: 'settings' });
+        $card.append(h.field('Collect on the home island', 'Module on or off', h.toggle({
+            ns: 'collect', path: 'enabled', label: 'Collect on the home island'
+        })));
+        $card.append(h.field('Also on adventure maps',
+            'Clicks quest objects and collectibles while a run is on the map',
+            h.toggle({ ns: 'collect', path: 'adventureZones', label: 'Also on adventure maps' })));
+        $side.append($card);
+    }
 
-        var groups;
-        try { groups = S.core.buildings.collectiblesByName(); }
-        catch (e) { groups = []; }
+    // Collectibles currently on the zone; a failing host read counts as none.
+    function collectibleGroups(fresh) {
+        if (!S.core.buildings || !S.core.buildings.collectiblesByName) return [];
+        try {
+            // A fresh snapshot so the list reflects what is on the ground now.
+            if (fresh) S.core.buildings.invalidate();
+            return S.core.buildings.collectiblesByName();
+        } catch (e) {
+            return [];
+        }
+    }
 
-        // Sub-header.
-        $panel.append(h.gridRow(
-            [[8, 'Collectibles on zone'], [4, groups.length + ' types']],
-            { headerCells: true }
-        ));
+    function typesText(n) {
+        return n + ' collectible type' + (n === 1 ? '' : 's');
+    }
 
+    // Main column: what sits on the zone, plus the one-shot log probe.
+    function render($main, h) {
+        var groups = collectibleGroups(true);
+
+        var $card = h.card({ icon: '★', title: 'On this zone', meta: typesText(groups.length) });
         if (!groups.length) {
-            $panel.append(h.formRow(
-                $('<em>').css({ color: '#a09a85' }).text('Nothing collectible on this zone right now.'),
-                ''
-            ));
-            return;
+            $card.append(h.empty('Nothing to collect here right now.',
+                'New pickups show up here as soon as the zone has some.'));
+        } else {
+            var rows = [];
+            for (var i = 0; i < groups.length; i++) {
+                rows.push([groups[i].name, groups[i].count + ' on zone']);
+            }
+            $card.append(h.table({
+                cols: [{ label: 'Collectible', width: '70%' }, { label: 'On zone', width: '30%' }],
+                rows: rows
+            }));
         }
 
-        for (var i = 0; i < groups.length; i++) {
-            var g = groups[i];
-            $panel.append(h.gridRow([
-                [8, g.name],
-                [4, g.count + ' on zone']
-            ]));
-        }
+        $card.append(h.field('List the collectibles on this zone',
+            'Writes each one and the patterns it matches to the log. Runs at once, no Save needed.',
+            $('<span>').append(h.now()).append(h.button('Discover', { size: 'sm', onClick: discover })),
+            { wide: true }));
+        $main.append($card);
+    }
+
+    function tiles(h) {
+        var s = h.settings('collect');
+        var n = collectibleGroups(false).length;
+        return [{
+            title: 'Collect pickups',
+            icon: '★',
+            lines: [
+                n === 0 ? 'Nothing collectible on this zone' : typesText(n) + ' on this zone',
+                s.adventureZones === true ? 'Also picks up on adventures' : 'Home island only'
+            ]
+        }];
     }
 
     S.modules.collect.readSettings  = readSettings;
     S.modules.collect.discover      = discover;
-    S.modules.collect.renderSection = renderSection;
+    S.modules.collect.side          = renderSide;
+    S.modules.collect.render        = render;
     S.modules.collect.summary       = summary;
+    S.modules.collect.tiles         = tiles;
 
 }(Steward));

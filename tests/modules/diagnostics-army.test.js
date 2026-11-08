@@ -368,3 +368,81 @@ t.test('dumpBuildings survives a throwing building', function () {
     t.assert.strictEqual(matching(out, /logging 2 records|buildings: 2 written/).length, 1);
     t.assert.strictEqual(s.H.queued().length, 0);
 });
+
+// ---- sampler countdown and plan ------------------------------------------------
+
+t.test('samplerLeftMs is null while idle and counts down one step per tick', function () {
+    var s = setup();
+    var from = s.timers.list.length;
+    var plan = s.army.samplerPlan();
+    t.assert.strictEqual(s.army.samplerLeftMs(), null);
+    s.army.toggleSampler();
+    t.assert.strictEqual(s.army.samplerLeftMs(), plan.totalMs);
+    fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(s.army.samplerLeftMs(), plan.totalMs - plan.everyMs);
+    fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(s.army.samplerLeftMs(), plan.totalMs - 2 * plan.everyMs);
+    s.army.toggleSampler();
+    t.assert.strictEqual(s.army.samplerLeftMs(), null);
+});
+
+t.test('onSamplerTick is called after every sample, including the last', function () {
+    var s = setup();
+    var from = s.timers.list.length;
+    var ticks = 0;
+    s.H.Steward.modules.diagnostics.onSamplerTick = function () { ticks++; };
+    s.army.toggleSampler();
+    fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(ticks, 1);
+    fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(ticks, 2);
+    while (s.army.samplerRunning()) fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(ticks, s.army.samplerPlan().count);
+});
+
+t.test('a throwing onSamplerTick hook does not stop the sampler', function () {
+    var s = setup();
+    var from = s.timers.list.length;
+    s.H.Steward.modules.diagnostics.onSamplerTick = function () { throw new Error('boom'); };
+    s.army.toggleSampler();
+    fire(pending(s.timers, from)[0]);
+    t.assert.strictEqual(s.army.samplerRunning(), true);
+    t.assert.strictEqual(pending(s.timers, from).length, 1);
+});
+
+t.test('samplerPlan totalMs is everyMs times count', function () {
+    var plan = setup().army.samplerPlan();
+    t.assert.strictEqual(plan.totalMs, plan.everyMs * plan.count);
+    t.assert.strictEqual(plan.everyMs, SAMPLE_MS);
+});
+
+// The tool row labelled "Sample generals".
+function sampleRow($, d, H) {
+    var $main = $('<div>');
+    d.renderSection($main, H.Steward.kernel.ui.helpers);
+    var $found = null;
+    $main.find('.steward-tool').each(function () {
+        var $r = $(this);
+        if ($r.text().indexOf('Sample generals') > -1) $found = $r;
+    });
+    return $found;
+}
+
+t.test('the Sample generals help is built from the plan, not retyped', function () {
+    var s = setup();
+    var $ = require('../stubs/jq').install(s.H);
+    var $row = sampleRow($, s.H.Steward.modules.diagnostics, s.H);
+    t.assert.ok($row, 'sampler row rendered');
+    var plan = s.army.samplerPlan();
+    t.assert.strictEqual($row.find('small').text(),
+        'every ' + (plan.everyMs / 1000) + ' s for ' + (plan.totalMs / 60000) + ' min');
+});
+
+t.test('the sampler button label follows the countdown', function () {
+    var s = setup();
+    var $ = require('../stubs/jq').install(s.H);
+    var $btn = sampleRow($, s.H.Steward.modules.diagnostics, s.H).find('button');
+    t.assert.strictEqual($btn.text(), 'Start');
+    $btn.trigger('click');
+    t.assert.strictEqual($btn.text(), 'Stop (3:00 left)');
+});

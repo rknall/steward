@@ -180,26 +180,80 @@ function make(opts) {
     };
 }
 
-// Host Modal and document stand-ins. Body() has no length, so the render
-// functions return early; its visibility is the test's switch. The style
-// element already lists both scopes, so ensureStyle returns at once.
+// The one document fake. jq.install and installModal both go through this,
+// so whichever runs second adds to the first one's document and neither
+// replaces H.ctx.document. `head` is a plain appendChild holder until the
+// jq fake upgrades it to an element; `_byId` answers getElementById first
+// and the jq fake's tree search (`_search`, set by jq.install) second.
+function ensureDocument(H) {
+    var existing = H.ctx.document;
+    if (existing && existing._stewardFake) return existing;
+    var doc = {
+        _stewardFake: true,
+        _byId: {},
+        _search: null,
+        head: {
+            children: [],
+            appendChild: function (c) { this.children.push(c); return c; }
+        },
+        createTextNode: function (data) {
+            return { nodeType: 3, data: String(data), parent: null, children: [] };
+        },
+        getElementById: function (id) {
+            if (Object.prototype.hasOwnProperty.call(doc._byId, id)) return doc._byId[id];
+            return doc._search ? doc._search(id) : null;
+        }
+    };
+    H.ctx.document = doc;
+    return doc;
+}
+
+function jqInstalled(H) {
+    return !!(H.ctx.$ && H.ctx.$._jqFake);
+}
+
+// Host Modal and document stand-ins. Without the jq fake, Body() has no
+// length, so the render functions return early; its visibility is the
+// test's switch (`rig.visible`) either way. With the jq fake, Body() and
+// Footer() are real elements, one pair per modal, and `rig.made[i].modal`
+// is the instance. The style element already lists the dashboard, settings
+// and adventures scopes and the
+// current rule checksum, so ensureStyle returns at once.
 function installModal(H) {
     var rig = { made: [], visible: false };
     function Modal(id, title, closable) {
-        rig.made.push({ id: id, title: title, closable: closable });
+        this._rig = { id: id, title: title, closable: closable, modal: this };
+        rig.made.push(this._rig);
     }
     Modal.prototype.create = noop;
     Modal.prototype.show = noop;
     Modal.prototype.hide = noop;
     Modal.prototype.Body = function () {
+        if (jqInstalled(H)) {
+            if (!this._body) {
+                this._body = H.ctx.$('<div>');
+                this._body[0].visible = function () { return rig.visible; };
+            }
+            return this._body;
+        }
         return { length: 0, is: function () { return rig.visible; } };
     };
-    Modal.prototype.Footer = function () { return { length: 0 }; };
-    H.ctx.Modal = Modal;
-    H.ctx.document = {
-        getElementById: function () {
-            return { getAttribute: function () { return 'StewardDashboard,StewardSettings'; } };
+    Modal.prototype.Footer = function () {
+        if (jqInstalled(H)) {
+            if (!this._footer) this._footer = H.ctx.$('<div>');
+            return this._footer;
         }
+        return { length: 0 };
+    };
+    H.ctx.Modal = Modal;
+    var doc = ensureDocument(H);
+    doc._byId['steward-dashboard-style'] = {
+        getAttribute: function (name) {
+            if (name === 'data-scopes') return 'StewardDashboard,StewardSettings,StewardAdventures';
+            if (name === 'data-rules') return H.ctx.Steward.kernel.ui.styleChecksum;
+            return null;
+        },
+        setAttribute: noop
     };
     return rig;
 }
@@ -208,5 +262,6 @@ module.exports = {
     make:               make,
     makeSettingsHost:   makeSettingsHost,
     makeGame:           makeGame,
-    installModal:       installModal
+    installModal:       installModal,
+    ensureDocument:     ensureDocument
 };

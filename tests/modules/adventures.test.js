@@ -135,8 +135,96 @@ t.test('save writes <id>.json with version 1, no id, ordered waves and no .tmp',
 t.test('save of a record without an id appends -2 when the id is taken', function () {
     var s = setup();
     assert.strictEqual(s.tpl.save(record({}), 1000).id, 't1000');
-    assert.strictEqual(s.tpl.save(record({}), 1000).id, 't1000-2');
+    assert.strictEqual(s.tpl.save(record({ label: 'Black Knights 2' }), 1000).id, 't1000-2');
     assert.ok(s.fs.disk[DIR + '/t1000-2.json']);
+});
+
+// ---- label uniqueness -----------------------------------------------------------
+
+t.test('labelTaken ignores case and outer spaces, the record itself and broken entries', function () {
+    var s = setup();
+    var recs = [
+        { id: 'a', label: 'Black Knights' },
+        { id: 'b', label: 'Other' },
+        { id: 'c', error: 'unreadable', label: 'Ghost' }
+    ];
+    assert.strictEqual(s.tpl.labelTaken('  black KNIGHTS ', undefined, recs), true);
+    assert.strictEqual(s.tpl.labelTaken('Black Knights', 'a', recs), false);
+    assert.strictEqual(s.tpl.labelTaken('Black Knights', 'b', recs), true);
+    assert.strictEqual(s.tpl.labelTaken('Ghost', undefined, recs), false);
+    assert.strictEqual(s.tpl.labelTaken('Fresh', undefined, recs), false);
+    assert.strictEqual(s.tpl.labelTaken('   ', undefined, recs), false);
+    assert.strictEqual(s.tpl.labelTaken('x', undefined, null), false);
+});
+
+t.test('save refuses a label another template uses and writes nothing', function () {
+    var s = setup();
+    s.tpl.save(record({}), 1000);
+    var r = s.tpl.save(record({ label: ' black knights' }), 2000);
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.problems[0].field, 'label');
+    assert.deepStrictEqual(Object.keys(s.fs.disk).filter(function (k) {
+        return k.indexOf(DIR) === 0;
+    }), [DIR + '/t1000.json']);
+});
+
+t.test('save accepts the record own label again', function () {
+    var s = setup();
+    var id = s.tpl.save(record({}), 1000).id;
+    var rec = s.tpl.get(id);
+    assert.strictEqual(s.tpl.save(rec, 2000).ok, true);
+});
+
+t.test('templates that already share a label still load and list', function () {
+    var s = setup();
+    s.fs.disk[DIR + '/one.json'] = JSON.stringify({ version: 1, label: 'Same', adventure: 'BlackKnights',
+        loadout: 'l.json', waves: ['w.json'] });
+    s.fs.disk[DIR + '/two.json'] = JSON.stringify({ version: 1, label: 'Same', adventure: 'BlackKnights',
+        loadout: 'l.json', waves: ['w.json'] });
+    var labels = s.tpl.list().map(function (r) { return r.label; });
+    assert.deepStrictEqual(plain(labels), ['Same', 'Same']);
+});
+
+// ---- overview tile ---------------------------------------------------------------
+
+function tileWith(s, current) {
+    s.S.modules.adventures.state.current = function () { return current; };
+    return s.S.modules.adventures.tiles(s.S.kernel.ui.helpers);
+}
+
+t.test('tile lines for no run, a running run and a paused run', function () {
+    var s = setup();
+    var RS = s.S.RunStatus;
+    var none = tileWith(s, { run: null, request: null });
+    assert.strictEqual(none.length, 1);
+    assert.strictEqual(none[0].title, 'Adventures');
+    assert.strictEqual(none[0].lines[0], 'No run active');
+    assert.strictEqual(none[0].lines[1], '0 run templates · progress in the ~Adventures~ menu');
+    assert.strictEqual(none[0].badge.text, 'Idle');
+
+    var running = tileWith(s, { run: { status: RS.Running }, request: null });
+    assert.strictEqual(running[0].lines[0], 'A run is active');
+    assert.strictEqual(running[0].badge.text, 'Running');
+
+    var paused = tileWith(s, { run: { status: RS.Paused }, request: null });
+    assert.strictEqual(paused[0].lines[0], 'A run is paused');
+    assert.strictEqual(paused[0].badge.text, 'Paused');
+
+    var asked = tileWith(s, { run: null, request: {} });
+    assert.strictEqual(asked[0].lines[0], 'A run is requested');
+    assert.strictEqual(asked[0].badge.text, 'Idle');
+});
+
+t.test('tile counts template files in the singular and plural', function () {
+    var s = setup();
+    s.tpl.save(record({}), 1000);
+    s.S.modules.adventures.state.current = function () { return { run: null, request: null }; };
+    var h = s.S.kernel.ui.helpers;
+    assert.strictEqual(s.S.modules.adventures.tiles(h)[0].lines[1],
+        '1 run template · progress in the ~Adventures~ menu');
+    s.tpl.save(record({ label: 'Second' }), 2000);
+    assert.strictEqual(s.S.modules.adventures.tiles(h)[0].lines[1],
+        '2 run templates · progress in the ~Adventures~ menu');
 });
 
 t.test('re-saving with fewer waves leaves the shorter list in the file', function () {

@@ -372,7 +372,7 @@
         });
     }
 
-    // Exposed for ui.js (set in Task 5).
+    // Exposed for ui.js.
     S.modules.mining.readSettings = readSettings;
 
     S.kernel.register({
@@ -382,19 +382,22 @@
         isReady:  isReady,
         plan:     plan,
         ui: {
-            tab: 'geologists',
+            tab: 'mining',
             section: {
                 id:    'mining',
                 title: 'Mining',
-                render: function ($body, h) {
-                    if (S.modules.mining.renderSection) {
-                        return S.modules.mining.renderSection($body, h);
-                    }
+                icon:  '⚒',
+                side: function ($side, h) {
+                    if (S.modules.mining.side) return S.modules.mining.side($side, h);
                 },
-                summary: function () {
-                    return S.modules.mining.summary
-                        ? S.modules.mining.summary()
-                        : '';
+                render: function ($main, h) {
+                    if (S.modules.mining.render) return S.modules.mining.render($main, h);
+                },
+                summary: function (h) {
+                    return S.modules.mining.summary ? S.modules.mining.summary(h) : '';
+                },
+                tiles: function (h) {
+                    return S.modules.mining.tiles ? S.modules.mining.tiles(h) : [];
                 }
             }
         }

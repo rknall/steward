@@ -109,18 +109,85 @@ t.test('ui.tab misc is accepted', function () {
     t.assert.strictEqual(H.Steward.kernel.registry.byTab('misc').length, 1);
 });
 
-t.test('ui.tab tools is rejected with a warning and the module still registers', function () {
-    var H = harness.boot({ sections: ['kernel'] });
-    var s = validSpec('old');
-    s.ui = { tab: 'tools', section: { id: 'old', title: 'Old', render: function () {} } };
-    t.assert.strictEqual(H.Steward.kernel.register(s), true);
-    t.assert.strictEqual(H.Steward.kernel.registry.get('old').ui, null);
-    t.assert.strictEqual(H.Steward.kernel.registry.byTab('tools').length, 0);
-    var warned = H.logs().filter(function (l) {
+function uiSpec(id, tab, section) {
+    var s = validSpec(id);
+    var sec = { id: id, title: 'T', render: function () {} };
+    for (var k in (section || {})) sec[k] = section[k];
+    s.ui = { tab: tab, section: sec };
+    return s;
+}
+
+function notKnownTabWarnings(H) {
+    return H.logs().filter(function (l) {
         return l.level === 'warn' && l.category === 'registry' &&
                /not a known tab/.test(l.args.join(' '));
     });
-    t.assert.strictEqual(warned.length, 1);
+}
+
+['tools', 'quests', 'overview'].forEach(function (tab) {
+    t.test('ui.tab ' + tab + ' is rejected with a warning and the module still registers', function () {
+        var H = harness.boot({ sections: ['kernel'] });
+        t.assert.strictEqual(H.Steward.kernel.register(uiSpec('old', tab)), true);
+        t.assert.strictEqual(H.Steward.kernel.registry.get('old').ui, null);
+        t.assert.strictEqual(H.Steward.kernel.registry.byTab(tab).length, 0);
+        t.assert.strictEqual(notKnownTabWarnings(H).length, 1);
+    });
+});
+
+t.test('ui.tab mining is accepted', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.register(uiSpec('mn', 'mining')), true);
+    t.assert.ok(H.Steward.kernel.registry.get('mn').ui);
+    t.assert.strictEqual(H.Steward.kernel.registry.byTab('mining').length, 1);
+    t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
+});
+
+t.test('ui section defaults: heading, icon, runsNow, wide, no side or tiles', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(uiSpec('d', 'misc'));
+    var sec = H.Steward.kernel.registry.get('d').ui.section;
+    t.assert.strictEqual(sec.heading, 'T');
+    t.assert.strictEqual(sec.icon, '');
+    t.assert.strictEqual(sec.runsNow, false);
+    t.assert.strictEqual(sec.wide, false);
+    t.assert.strictEqual(sec.side, null);
+    t.assert.strictEqual(sec.tiles, null);
+    t.assert.strictEqual(sec.summary, null);
+});
+
+t.test('ui section keeps heading, runsNow, wide and function side or tiles', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var side = function () {};
+    var tiles = function () {};
+    H.Steward.kernel.register(uiSpec('k', 'misc', {
+        heading: 'Heading', runsNow: true, wide: true, side: side, tiles: tiles
+    }));
+    var sec = H.Steward.kernel.registry.get('k').ui.section;
+    t.assert.strictEqual(sec.heading, 'Heading');
+    t.assert.strictEqual(sec.runsNow, true);
+    t.assert.strictEqual(sec.wide, true);
+    t.assert.strictEqual(sec.side, side);
+    t.assert.strictEqual(sec.tiles, tiles);
+});
+
+t.test('a non-function side or tiles is dropped and only === true sets the flags', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(uiSpec('n', 'misc', {
+        side: 'x', tiles: {}, runsNow: 'yes', wide: 1
+    }));
+    var sec = H.Steward.kernel.registry.get('n').ui.section;
+    t.assert.strictEqual(sec.side, null);
+    t.assert.strictEqual(sec.tiles, null);
+    t.assert.strictEqual(sec.runsNow, false);
+    t.assert.strictEqual(sec.wide, false);
+});
+
+t.test('a section action is not carried over', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(uiSpec('a', 'misc', { action: function () {} }));
+    var sec = H.Steward.kernel.registry.get('a').ui.section;
+    t.assert.strictEqual(sec.action, undefined);
+    t.assert.ok(!Object.prototype.hasOwnProperty.call(sec, 'action'));
 });
 
 t.test('diagnostics registers on misc and nothing registers on tools', function () {

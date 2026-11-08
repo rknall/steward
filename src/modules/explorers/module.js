@@ -211,24 +211,27 @@
                 id:    'explorers',
                 title: 'Explorers',
                 icon:  '⌖',
-                render: function ($body, h) {
-                    if (S.modules.explorers.renderSection) {
-                        return S.modules.explorers.renderSection($body, h);
+                side: function ($side, h) {
+                    if (S.modules.explorers.side) {
+                        return S.modules.explorers.side($side, h);
                     }
                 },
-                summary: function () {
+                render: function ($main, h) {
+                    if (S.modules.explorers.render) {
+                        return S.modules.explorers.render($main, h);
+                    }
+                },
+                summary: function (h) {
                     return S.modules.explorers.summary
-                        ? S.modules.explorers.summary()
+                        ? S.modules.explorers.summary(h)
                         : '';
                 },
-                action: {
-                    label:   'Show overrides + state',
-                    onClick: function () {
-                        if (S.modules.explorers.showOverrides) {
-                            S.modules.explorers.showOverrides();
-                        }
-                    }
+                tiles: function (h) {
+                    return S.modules.explorers.tiles
+                        ? S.modules.explorers.tiles(h)
+                        : [];
                 }
+
             }
         }
     });

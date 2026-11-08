@@ -1,16 +1,17 @@
 /*
  * Dashboard surface for the mining module.
  *
- * Renders inside the Geologists tab as a "Mining" section beside the
- * existing Geologists section. Master toggle + per-deposit table over
- * all 9 deposit types (canonical S.core.deposits.types() order).
+ * Owns the Mining tab: `side` is the settings column (module switch, delay,
+ * pause threshold, build queue and licence counts) and `render` is the
+ * per-deposit table over all deposit types in S.core.deposits.types()
+ * order. Stone/Marble/Granite have no mine, so they are listed apart as
+ * not managed; their Active count reads the mason building instead.
  *
- * Stone/Marble/Granite show '—' in the action columns since they have
- * no mine; their Active count reads the mason building instead.
- *
- * Per-deposit writes go through updateDeposit, which preserves every
- * schema field (build, upgrade, targetLevel, pause, buff, refill) so
- * later phase landings don't have to migrate user settings.
+ * Every shown value is the stored setting overlaid with the dashboard
+ * buffer, so a re-render keeps a pending edit visible. Per-deposit writes
+ * go through updateDeposit, which preserves every schema field (build,
+ * upgrade, targetLevel, pause, buff, refill) so later phase landings don't
+ * have to migrate user settings.
  */
 
 (function (S) {
@@ -31,6 +32,32 @@
         for (key in storedDeps)  depMerged[key] = storedDeps[key];
         merged.deposits = depMerged;
         return merged;
+    }
+
+    // What the screen shows: the stored settings with the unsaved buffer
+    // laid over them, deposit by deposit so a partly edited row keeps the
+    // fields the buffer lacks.
+    function shownSettings(h) {
+        var base = readSettings();
+        var buf = h.settings('mining') || {};
+        var out = {};
+        var key;
+        for (key in base) out[key] = base[key];
+        for (key in buf)  out[key] = buf[key];
+        var deps = {};
+        var baseDeps = base.deposits || {};
+        var bufDeps = buf.deposits || {};
+        var name, f;
+        for (name in baseDeps) deps[name] = baseDeps[name];
+        for (name in bufDeps) {
+            var row = {};
+            var under = baseDeps[name] || {};
+            for (f in under) row[f] = under[f];
+            for (f in bufDeps[name]) row[f] = bufDeps[name][f];
+            deps[name] = row;
+        }
+        out.deposits = deps;
+        return out;
     }
 
     function activeCount(info) {
@@ -61,11 +88,69 @@
         };
     }
 
-    function summary() {
-        var s = readSettings();
-        if (!s.enabled) return 'disabled';
+    function depositTypes() {
+        var d = S.core.deposits;
+        if (!d || !d.types) return [];
+        return d.types() || [];
+    }
+
+    // The game's name for a deposit; the key itself when the locale lacks it.
+    function depositLabel(name) {
+        var text = null;
+        try { text = S.core.locale.res(name); }
+        catch (e) { text = null; }
+        return text ? String(text) : String(name);
+    }
+
+    function pausedCount(s) {
+        var types = depositTypes();
+        var n = 0;
+        for (var i = 0; i < types.length; i++) {
+            var cfg = (s.deposits || {})[types[i].name];
+            if (types[i].mineName && cfg && cfg.pause === true) n++;
+        }
+        return n;
+    }
+
+    function minesActive() {
+        var types = depositTypes();
+        var n = 0;
+        for (var i = 0; i < types.length; i++) {
+            if (types[i].mineName) n += activeCount(types[i]);
+        }
+        return n;
+    }
+
+    function thresholdOf(s) {
+        return typeof s.pauseThreshold === 'number' ? s.pauseThreshold
+            : S.modules.mining.defaultSettings.pauseThreshold;
+    }
+
+    function delayOf(s) {
+        return typeof s.actionDelay === 'number' ? s.actionDelay
+            : S.modules.mining.defaultSettings.actionDelay;
+    }
+
+    function summary(h) {
+        var s = shownSettings(h);
         var counts = readQueueCounts();
-        return counts.slotsUsed + '/' + counts.slotsTotal + ' build slots';
+        return delayOf(s) + ' ms · pause below ' + thresholdOf(s) +
+               ' · queue ' + counts.slotsUsed + '/' + counts.slotsTotal;
+    }
+
+    function tiles(h) {
+        var s = shownSettings(h);
+        var counts = readQueueCounts();
+        var paused = pausedCount(s);
+        return [{
+            title: 'Mining',
+            icon:  '⚒',
+            lines: [
+                'Build queue ' + counts.slotsUsed + ' of ' + counts.slotsTotal +
+                    ' · licences ' + counts.licUsed + ' of ' + counts.licMax,
+                minesActive() + ' mines active, ' + (paused === 0 ? 'none' : paused) + ' paused'
+            ]
+        }];
     }
 
     function updateDeposit(h, depositName, partial) {
@@ -90,121 +175,127 @@
         h.update('mining', { deposits: deposits });
     }
 
-    function renderSection($panel, h) {
-        var s = h.settings('mining');
-
-        $panel.append(h.formRow('Run on Startup', h.toggle({
-            checked:  !!s.enabled,
-            onChange: function (next) {
-                h.update('mining', { enabled: next });
-            }
-        })));
-
-        $panel.append(h.formRow('Action delay', h.input({
-            type:     'number',
-            value:    s.actionDelay || 1500,
-            width:    '90px',
-            onChange: function (val) {
-                var n = parseInt(val, 10);
-                if (!isNaN(n) && n >= 0) {
-                    h.update('mining', { actionDelay: n });
-                }
-            }
-        }), 'ms — pause between sends'));
-
-        $panel.append(h.formRow('Pause threshold', h.input({
-            type:     'number',
-            value:    typeof s.pauseThreshold === 'number' ? s.pauseThreshold : 50,
-            width:    '90px',
-            onChange: function (val) {
-                var n = parseInt(val, 10);
-                if (!isNaN(n) && n >= 0) {
-                    h.update('mining', { pauseThreshold: n });
-                }
-            }
-        }), 'auto-pause when deposit remaining drops below this'));
-
-        appendDepositTable($panel, h, s);
-        appendStatusFooter($panel, h);
+    // Any whole level from 1 up. The game decides the top level: tryUpgrade
+    // asks IsUpgradeAllowed before it queues an upgrade, so a target above a
+    // mine's real maximum just stops there.
+    function parseLevel(text) {
+        var n = S.kernel.ui.settingsParse.whole(text);
+        return (n === null || n < 1) ? null : n;
     }
 
-    function appendDepositTable($panel, h, s) {
-        var d = S.core.deposits;
-        if (!d || !d.types) return;
-        var types = d.types();
-        var depCfg = (s && s.deposits) || {};
+    function side($side, h) {
+        h.baseline('mining', readSettings());
+        var s = shownSettings(h);
 
-        $panel.append(h.gridRow(
-            [[3, 'Deposit'], [2, 'Build Mine'], [2, 'Upgrade Mine'],
-             [2, 'Target Lvl'], [2, 'Pause'], [1, 'Active']],
-            { headerCells: true }
-        ));
+        var $card = h.card({ icon: '⚒', title: 'Mining' });
+        $card.append(h.field('Build and upgrade mines', 'Module on or off',
+            h.toggle({
+                ns: 'mining', path: 'enabled', checked: !!s.enabled,
+                label: 'Build and upgrade mines'
+            })));
+        $card.append(h.field('Delay between actions', null,
+            h.number({
+                ns: 'mining', path: 'actionDelay', value: delayOf(s),
+                unit: 'ms', label: 'Delay between actions'
+            })));
+        $card.append(h.field('Pause threshold',
+            'Pause a mine when its deposit has less than this left',
+            h.number({
+                ns: 'mining', path: 'pauseThreshold', value: thresholdOf(s),
+                unit: 'units', label: 'Pause threshold'
+            })));
+        $side.append($card);
+
+        var counts = readQueueCounts();
+        var $stats = $('<div>', { 'class': 'steward-card' });
+        $stats.append(h.stats([
+            { k: 'Build queue', v: counts.slotsUsed, small: 'of ' + counts.slotsTotal + ' slots' },
+            { k: 'Licences',    v: counts.licUsed,   small: 'of ' + counts.licMax }
+        ]));
+        $side.append($stats);
+    }
+
+    function render($main, h) {
+        h.baseline('mining', readSettings());
+        var s = shownSettings(h);
+        var types = depositTypes();
+        var depCfg = s.deposits || {};
+
+        var mineRows = [];
+        var otherRows = [];
+        var active = 0;
 
         for (var i = 0; i < types.length; i++) {
             var info = types[i];
-            var cfg = depCfg[info.name] || {};
-            var active = activeCount(info);
-
-            (function (depositName, currentCfg, activeNum, mineable) {
-                var $buildCell, $upgradeCell, $targetCell, $pauseCell;
-                if (mineable) {
-                    $buildCell = h.toggle({
-                        checked:  !!currentCfg.build,
-                        onChange: function (next) {
-                            updateDeposit(h, depositName, { build: next });
-                        }
-                    });
-                    $upgradeCell = h.toggle({
-                        checked:  !!currentCfg.upgrade,
-                        onChange: function (next) {
-                            updateDeposit(h, depositName, { upgrade: next });
-                        }
-                    });
-                    $targetCell = h.input({
-                        type:     'number',
-                        value:    typeof currentCfg.targetLevel === 'number' ? currentCfg.targetLevel : 3,
-                        width:    '60px',
-                        // TSO mines cap at level 5; reject out-of-range input rather than persist garbage.
-                        onChange: function (val) {
-                            var n = parseInt(val, 10);
-                            if (!isNaN(n) && n >= 1 && n <= 5) {
-                                updateDeposit(h, depositName, { targetLevel: n });
-                            }
-                        }
-                    });
-                    $pauseCell = h.toggle({
-                        checked:  !!currentCfg.pause,
-                        onChange: function (next) {
-                            updateDeposit(h, depositName, { pause: next });
-                        }
-                    });
-                } else {
-                    $buildCell   = '—';
-                    $upgradeCell = '—';
-                    $targetCell  = '—';
-                    $pauseCell   = '—';
-                }
-                $panel.append(h.gridRow(
-                    [[3, depositName],
-                     [2, $buildCell],
-                     [2, $upgradeCell],
-                     [2, $targetCell],
-                     [2, $pauseCell],
-                     [1, String(activeNum)]]
-                ));
-            })(info.name, cfg, active, !!info.mineName);
+            var count = activeCount(info);
+            var label = { text: depositLabel(info.name), title: info.name };
+            if (!info.mineName) {
+                otherRows.push([label, { text: 'no mine settings', cls: 'steward-muted' }, count]);
+                continue;
+            }
+            active += count;
+            mineRows.push(mineRow(h, info, label, depCfg[info.name] || {}, count));
         }
+
+        var paused = pausedCount(s);
+        var meta = active + ' mines active · ' + (paused === 0 ? 'none' : paused) + ' paused';
+        var $card = h.card({ title: 'Mines per deposit', meta: meta });
+        $card.append(h.table({
+            fill: true,
+            cols: [
+                { label: 'Deposit',      width: '25%' },
+                { label: 'Build',        width: '14%', cls: 'steward-c' },
+                { label: 'Upgrade',      width: '14%', cls: 'steward-c' },
+                { label: 'Up to level',  width: '17%', cls: 'steward-c' },
+                { label: 'Pause',        width: '15%', cls: 'steward-c' },
+                { label: 'Active',       width: '15%', cls: 'steward-num' }
+            ],
+            rows: mineRows,
+            emptyText: 'No deposit types known yet.'
+        }));
+        if (otherRows.length) {
+            $card.append(h.subHead('NOT MANAGED BY STEWARD'));
+            $card.append(h.table({
+                cols: [
+                    { label: 'Deposit', width: '25%' },
+                    { label: 'Mine',    width: '60%' },
+                    { label: 'Active',  width: '15%', cls: 'steward-num' }
+                ],
+                rows: otherRows
+            }));
+        }
+        $main.append($card);
     }
 
-    function appendStatusFooter($panel, h) {
-        var counts = readQueueCounts();
-        var line = 'Build queue: ' + counts.slotsUsed + '/' + counts.slotsTotal +
-                   ' slots used  ·  Licenses: ' + counts.licUsed + '/' + counts.licMax;
-        $panel.append(h.formRow('Status', line));
+    // One row of the mine table. Every control writes through updateDeposit
+    // so a stored deposit keeps all of its fields.
+    function mineRow(h, info, label, cfg, count) {
+        var name = info.name;
+        var path = 'deposits.' + name + '.';
+        function flag(field) {
+            return h.toggle({
+                ns: 'mining', path: path + field, checked: !!cfg[field],
+                label: field + ' ' + name,
+                write: function (next) {
+                    var partial = {};
+                    partial[field] = next;
+                    updateDeposit(h, name, partial);
+                }
+            });
+        }
+        var level = h.number({
+            ns: 'mining', path: path + 'targetLevel',
+            value: typeof cfg.targetLevel === 'number' ? cfg.targetLevel : 3,
+            parse: parseLevel, width: '50px', label: 'Up to level ' + name,
+            write: function (next) { updateDeposit(h, name, { targetLevel: next }); }
+        });
+        return [label, flag('build'), flag('upgrade'), level, flag('pause'), count];
     }
 
     S.modules.mining.readSettings  = readSettings;
-    S.modules.mining.renderSection = renderSection;
+    S.modules.mining.side          = side;
+    S.modules.mining.render        = render;
     S.modules.mining.summary       = summary;
+    S.modules.mining.tiles         = tiles;
 
 }(Steward));

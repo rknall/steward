@@ -287,3 +287,56 @@ t.test('boot does not overwrite a stored adventureZones false', function () {
     w.mod.boot();
     t.assert.strictEqual(w.H.settings.read('collect').adventureZones, false);
 });
+
+// ---- dashboard surface ----------------------------------------------------------
+
+var jq = require('../stubs/jq');
+
+function uiRig(groups) {
+    var H = harness.boot();
+    var $ = jq.install(H);
+    H.Steward.core.buildings.collectiblesByName = function () { return groups; };
+    H.Steward.core.buildings.invalidate = function () {};
+    return { H: H, $: $, h: H.Steward.kernel.ui.helpers, mod: H.Steward.modules.collect };
+}
+
+t.test('the section keeps "Collect Pickups" as the quick-toggle title and a sentence-case heading', function () {
+    var section = harness.boot().module('collect').ui.section;
+    t.assert.strictEqual(section.title, 'Collect Pickups');
+    t.assert.strictEqual(section.heading, 'Collect pickups');
+});
+
+t.test('render lists the collectibles on the zone with their counts', function () {
+    var r = uiRig([{ name: 'Bush', count: 3 }, { name: 'Chest', count: 1 }]);
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-card-meta').eq(0).text(), '2 collectible types');
+    var $rows = $main.find('tbody tr');
+    t.assert.strictEqual($rows.length, 2);
+    t.assert.strictEqual($rows.eq(0).children('td').eq(0).text(), 'Bush');
+    t.assert.strictEqual($rows.eq(0).children('td').eq(1).text(), '3 on zone');
+    t.assert.strictEqual($main.find('.steward-empty').length, 0);
+});
+
+t.test('render with no collectibles shows the empty state and still offers Discover', function () {
+    var r = uiRig([]);
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-empty-title').text(), 'Nothing to collect here right now.');
+    t.assert.strictEqual($main.find('table').length, 0);
+    t.assert.strictEqual($main.find('.steward-card-meta').eq(0).text(), '0 collectible types');
+    t.assert.strictEqual($main.find('button').length, 1);
+});
+
+t.test('tiles describe the zone and the adventure setting from the buffer', function () {
+    var r = uiRig([{ name: 'Bush', count: 3 }]);
+    var one = r.mod.tiles(r.h);
+    t.assert.strictEqual(one.length, 1);
+    t.assert.strictEqual(one[0].title, 'Collect pickups');
+    t.assert.strictEqual(one[0].lines[0], '1 collectible type on this zone');
+    t.assert.strictEqual(one[0].lines[1], 'Home island only');
+    r.h.set('collect', 'adventureZones', true);
+    t.assert.strictEqual(r.mod.tiles(r.h)[0].lines[1], 'Also picks up on adventures');
+    r.H.Steward.core.buildings.collectiblesByName = function () { return []; };
+    t.assert.strictEqual(r.mod.tiles(r.h)[0].lines[0], 'Nothing collectible on this zone');
+});

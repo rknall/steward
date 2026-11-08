@@ -51,8 +51,7 @@
     }
 
     // Count busy geologists currently searching the given depositIndex
-    // (i.e. spec.GetTask().GetSubType() matches). autoTSO uses the same
-    // approach at user_auto.js:5136-5138.
+    // (their task sub type matches). autoTSO counts the same way.
     function busyOnDeposit(geos, depositIndex) {
         var c = S.core.specialists;
         var count = 0;
@@ -62,11 +61,7 @@
             try {
                 if (c.status(g) === S.SpecialistStatus.Idle) continue;
             } catch (e) { continue; }
-            try {
-                var task = (typeof g.GetTask === 'function') ? g.GetTask() : null;
-                if (!task || typeof task.GetSubType !== 'function') continue;
-                if (task.GetSubType() === depositIndex) count++;
-            } catch (e) { /* skip */ }
+            if (c.searchingIndex(g) === depositIndex) count++;
         }
         return count;
     }
@@ -147,7 +142,8 @@
         var depCfg = (s && s.deposits) || {};
         var overrides = (s && s.overrides) || {};
         var assigned = {};   // uid → true (this tick)
-        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay : 1500;
+        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay
+            : S.modules.geologists.defaultSettings.dispatchDelay;
         var picks = [];
         // A sent geologist can read Idle for a while before its task shows;
         // counting it as on task keeps a second geologist off the same slot.
@@ -207,6 +203,8 @@
         }
         S.kernel.log('geologists', 'queued dispatch for', count, 'geologist(s)');
     }
+
+    S.modules.geologists.busyOnDeposit = busyOnDeposit;
 
     function boot() {
         if (!S.kernel.settings.read('geologists')) {
@@ -278,23 +276,18 @@
                 id:    'geologists',
                 title: 'Geologists',
                 icon:  '⛏',
-                render: function ($body, h) {
-                    if (S.modules.geologists.renderSection) {
-                        return S.modules.geologists.renderSection($body, h);
-                    }
+                wide:  true,
+                side: function ($side, h) {
+                    if (S.modules.geologists.side) S.modules.geologists.side($side, h);
                 },
-                summary: function () {
-                    return S.modules.geologists.summary
-                        ? S.modules.geologists.summary()
-                        : '';
+                render: function ($main, h) {
+                    if (S.modules.geologists.render) S.modules.geologists.render($main, h);
                 },
-                action: {
-                    label:   'Show ranking + state',
-                    onClick: function () {
-                        if (S.modules.geologists.showRanking) {
-                            S.modules.geologists.showRanking();
-                        }
-                    }
+                summary: function (h) {
+                    return S.modules.geologists.summary ? S.modules.geologists.summary(h) : '';
+                },
+                tiles: function (h) {
+                    return S.modules.geologists.tiles ? S.modules.geologists.tiles(h) : [];
                 }
             }
         }

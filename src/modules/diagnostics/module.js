@@ -32,6 +32,7 @@
                 id:    'diagnostics',
                 title: 'Diagnostics',
                 icon:  '⚙',
+                runsNow: true,
                 render: function ($body, h) {
                     if (S.modules.diagnostics.renderSection) {
                         return S.modules.diagnostics.renderSection($body, h);

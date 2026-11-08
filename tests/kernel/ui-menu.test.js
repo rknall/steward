@@ -956,7 +956,18 @@ t.test('selecting Settings opens the settings modal', function () {
     settingsItem(s.rootMenu).onSelect();
     t.assert.strictEqual(made.length, 1);
     t.assert.strictEqual(made[0].id, 'StewardSettings');
-    t.assert.strictEqual(made[0].title, 'Steward — Settings');
+    t.assert.strictEqual(made[0].title, 'Steward settings');
+});
+
+t.test('opening Settings over the lengthless stub body logs no render error', function () {
+    var s = setup();
+    hostStubs.installModal(s.H);
+    s.H.clearLogs();
+    settingsItem(s.rootMenu).onSelect();
+    var errors = s.H.logs().filter(function (l) {
+        return l.level === 'error' && /render|threw/.test(l.args.join(' '));
+    });
+    t.assert.strictEqual(errors.length, 0);
 });
 
 t.test('selecting Settings without a host Modal logs an error and does not throw', function () {

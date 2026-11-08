@@ -24,7 +24,7 @@
  * CollectionsManager.getBuildingIsCollectible(name) alone also matches
  * terrain rocks, depleted mines and charcoal piles (what the client's F4
  * "pickup all" sweeps), so a name pattern is required on top. Use
- * Steward -> Collect -> "Discover collectibles" to log every candidate on
+ * the Discover button on the Buildings tab to log every candidate on
  * the current map and tune the pattern list.
  */
 
@@ -193,29 +193,28 @@
         boot:     boot,
         isReady:  isReady,
         plan:     plan,
-        // Render / summary are wrapped in closures so they resolve
-        // S.modules.collect.* at call time. ui.js loads AFTER module.js
-        // (alphabetical concat order), so a direct reference here would
-        // be undefined and validateUi would reject the spec.
+        // Hooks are wrapped in closures so they resolve S.modules.collect.*
+        // at call time. ui.js loads AFTER module.js (alphabetical concat
+        // order), so a direct reference here would be undefined and
+        // validateUi would reject the spec.
         ui: {
             tab: 'buildings',
             section: {
-                id:    'collect_pickups',
-                title: 'Collect Pickups',
-                icon:  '★',
-                render: function ($body, h) {
-                    if (S.modules.collect.renderSection) {
-                        return S.modules.collect.renderSection($body, h);
-                    }
+                id:      'collect_pickups',
+                title:   'Collect Pickups',
+                heading: 'Collect pickups',
+                icon:    '★',
+                side: function ($side, h) {
+                    if (S.modules.collect.side) S.modules.collect.side($side, h);
                 },
-                summary: function () {
-                    return S.modules.collect.summary ? S.modules.collect.summary() : '';
+                render: function ($main, h) {
+                    if (S.modules.collect.render) S.modules.collect.render($main, h);
                 },
-                action: {
-                    label:   'Discover collectibles (log)',
-                    onClick: function () {
-                        if (S.modules.collect.discover) S.modules.collect.discover();
-                    }
+                summary: function (h) {
+                    return S.modules.collect.summary ? S.modules.collect.summary(h) : '';
+                },
+                tiles: function (h) {
+                    return S.modules.collect.tiles ? S.modules.collect.tiles(h) : [];
                 }
             }
         }
