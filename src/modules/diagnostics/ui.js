@@ -482,48 +482,113 @@
 
     function summary() { return 'read-only probes'; }
 
-    function renderSection($rows, h) {
-        $rows.append(h.formRow('Inspect specialists on current zone',
-            h.button('Run', { onClick: inspectSpecialists })));
-        $rows.append(h.formRow('Deep dump explorers (every owned, all states)',
-            h.button('Run', { onClick: deepInspectExplorerTypes })));
-        $rows.append(h.formRow('Deep dump geologists (every owned, all states)',
-            h.button('Run', { onClick: deepInspectGeologistTypes })));
-        $rows.append(h.formRow('Inspect current zone',
-            h.button('Run', { onClick: inspectCurrentZone })));
-        $rows.append(h.formRow('Dump host snapshot',
-            h.button('Run', { onClick: dumpHostSnapshot })));
-        $rows.append(h.formRow('Dump kernel state',
-            h.button('Run', { onClick: dumpKernelState })));
+    // Last tool run this session, shown in the banner.
+    var lastRun = '';
 
-        // Army probes live in army.js; resolved per click so a reloaded
-        // bundle's functions are the ones that run.
-        function army() { return S.modules.diagnostics.army; }
-        $rows.append(h.formRow('Dump generals (task, squads)',
-            h.button('Run', { onClick: function () { army().dumpGenerals(); } })));
-        $rows.append(h.formRow('Dump army (free, assigned, units)',
-            h.button('Run', { onClick: function () { army().dumpArmy(); } })));
-        $rows.append(h.formRow('Dump quests on this zone (triggers, end conditions)',
-            h.button('Run', { onClick: function () { army().dumpQuests(); } })));
-        $rows.append(h.formRow('Dump buildings on this zone (JSON in steward/dumps)',
-            h.button('Run', { onClick: function () { army().dumpBuildings(); } })));
-        $rows.append(h.formRow('Dump active adventures',
-            h.button('Run', { onClick: function () { army().dumpAdventures(); } })));
-        $rows.append(h.formRow('Dump adventure and buff definitions',
-            h.button('Run', { onClick: function () { army().dumpDefinitions(); } })));
+    function clock(ms) {
+        var total = Math.max(0, Math.round(ms / 1000));
+        var sec = total % 60;
+        return Math.floor(total / 60) + ':' + (sec < 10 ? '0' : '') + sec;
+    }
 
-        function samplerLabel() { return army().samplerRunning() ? 'Stop' : 'Start'; }
+    // Span text for the sampler help, derived from the sampler's own plan.
+    function spanText(ms) {
+        var total = Math.round(ms / 1000);
+        if (total < 60) return total + ' s';
+        if (total % 60 === 0) return (total / 60) + ' min';
+        return clock(ms);
+    }
+
+    function nowText() {
+        return S.kernel.ui.helpers.clock();
+    }
+
+    // Armies and sampler resolved per click so a reloaded bundle's
+    // functions are the ones that run.
+    function army() { return S.modules.diagnostics.army; }
+
+    function samplerLabel() {
+        var left = army().samplerLeftMs();
+        return left === null ? 'Start' : 'Stop (' + clock(left) + ' left)';
+    }
+
+    // The button the tick hook refreshes; ignored once it left the document.
+    var $samplerBtn = null;
+
+    function onSamplerTick() {
+        if (!$samplerBtn || !$samplerBtn.length) return;
+        if (!$samplerBtn.closest('body').length) return;
+        $samplerBtn.text(samplerLabel());
+    }
+
+    function renderSection($main, h) {
+        var $last = $('<b>').text(lastRun || 'none yet');
+        function ran(label) {
+            lastRun = label + ' at ' + nowText();
+            $last.text(lastRun);
+        }
+
+        var $note = $('<span>')
+            .append($('<span>').text(
+                'Each button runs at once and writes to steward/dumps or the log. ' +
+                'Save is not needed. Last run: '))
+            .append($last)
+            .append($('<span>').text('.'));
+        $main.append(h.banner($note, { icon: '⚡' }));
+
+        // A tool row: runs the probe, then notes it as the last run.
+        function tool(label, small, run) {
+            return h.toolRow(label, small, h.button('Run', {
+                size: 'sm',
+                onClick: function () { run(); ran(label); }
+            }));
+        }
+        function card(icon, title, rows) {
+            var $c = h.card({ icon: icon, title: title });
+            for (var i = 0; i < rows.length; i++) $c.append(rows[i]);
+            return $c;
+        }
+
+        var plan = army().samplerPlan();
+        var sampleHelp = 'every ' + spanText(plan.everyMs) + ' for ' + spanText(plan.totalMs);
         var $sample = h.button(samplerLabel(), {
+            size: 'sm',
             onClick: function () {
                 army().toggleSampler();
                 $sample.text(samplerLabel());
+                ran('Sample generals');
             }
         });
-        $rows.append(h.formRow('Sample generals every 5 s for 3 min', $sample));
+        $samplerBtn = $sample;
+
+        $main.append(h.grid(2, [
+            card('⚒', 'Specialists', [
+                tool('Inspect specialists', 'on this zone', inspectSpecialists),
+                tool('Dump all explorers', 'every owned one, all states', deepInspectExplorerTypes),
+                tool('Dump all geologists', 'every owned one, all states', deepInspectGeologistTypes)
+            ]),
+            card('◎', 'This zone', [
+                tool('Inspect zone', '', inspectCurrentZone),
+                tool('Dump quests', 'triggers and end conditions', function () { army().dumpQuests(); }),
+                tool('Dump buildings', 'JSON file in steward/dumps', function () { army().dumpBuildings(); })
+            ]),
+            card('⚔', 'Army', [
+                tool('Dump generals', 'task, squads', function () { army().dumpGenerals(); }),
+                tool('Dump army', 'free, assigned, units', function () { army().dumpArmy(); }),
+                h.toolRow('Sample generals', sampleHelp, $sample)
+            ]),
+            card('⚙', 'Game data and steward', [
+                tool('Dump active adventures', '', function () { army().dumpAdventures(); }),
+                tool('Dump adventure and buff definitions', '', function () { army().dumpDefinitions(); }),
+                tool('Dump host snapshot', '', dumpHostSnapshot),
+                tool('Dump kernel state', '', dumpKernelState)
+            ])
+        ]));
     }
 
     S.modules.diagnostics.renderSection             = renderSection;
     S.modules.diagnostics.summary                   = summary;
+    S.modules.diagnostics.onSamplerTick             = onSamplerTick;
     S.modules.diagnostics.inspectSpecialists        = inspectSpecialists;
     S.modules.diagnostics.inspectCurrentZone        = inspectCurrentZone;
     S.modules.diagnostics.dumpHostSnapshot          = dumpHostSnapshot;

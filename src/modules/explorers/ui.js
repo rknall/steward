@@ -1,16 +1,19 @@
 /*
  * Dashboard surface for the explorers module.
  *
- * Renders inside the Specialists tab as an "Explorers" section. Per-explorer
- * override editing is deferred — for now the override map is still hand-
- * edited in settings.json. The section action dumps current state (overrides,
- * idle/busy counts, pickTask results) to the log so users can see what
- * dispatches will look like before turning the module on.
+ * Renders inside the Explorers tab: a settings column (`side`) beside a live
+ * table of every explorer (`render`). The per-explorer override map is still
+ * hand-edited in settings.json; the "Show in log" button dumps the current
+ * state (overrides, idle/busy counts, pickTask results) to the log so users
+ * can see what dispatches will look like before turning the module on.
  */
 
 (function (S) {
 
     if (!S.modules.explorers) S.modules.explorers = {};
+
+    // Row filter of the live table, kept while the dashboard stays loaded.
+    var filter = 'all';
 
     function readSettings() {
         var stored = S.kernel.settings.read('explorers') || {};
@@ -31,7 +34,7 @@
         catch (e) { /* best effort */ }
     }
 
-    // Section action: dump explorer state + per-explorer pickTask results
+    // Runs-now button: dump explorer state + per-explorer pickTask results
     // to the log. Helps users tune overrides before flipping `enabled`.
     function showOverrides() {
         var s = readSettings();
@@ -97,69 +100,6 @@
         notify('Explorer state dumped to log.');
     }
 
-    function summary() {
-        var s = readSettings();
-        if (!s.enabled) return 'disabled';
-        var n = Object.keys(s.overrides || {}).length;
-        return n + ' override' + (n === 1 ? '' : 's');
-    }
-
-    function renderSection($panel, h) {
-        var s = h.settings('explorers');
-
-        $panel.append(h.formRow('Run on Startup', h.toggle({
-            checked:  !!s.enabled,
-            onChange: function (next) {
-                h.update('explorers', { enabled: next });
-            }
-        })));
-
-        $panel.append(h.formRow('Dispatch delay', h.input({
-            type:     'number',
-            value:    s.dispatchDelay || 1500,
-            width:    '90px',
-            onChange: function (val) {
-                var n = parseInt(val, 10);
-                if (!isNaN(n) && n >= 0) {
-                    h.update('explorers', { dispatchDelay: n });
-                }
-            }
-        }), 'ms — pause between sends'));
-
-        // forceTreasureOnEvents — when ON, every explorer goes on a
-        // treasure dispatch during a treasure event's _Content phase
-        // (cooldown / shop-only doesn't trigger this — see
-        // core/specialists.activeEventContext). When OFF, adventure-
-        // biased explorers (Royal, Love Struck, Keener, Nora) stay on
-        // adventures even during events.
-        $panel.append(h.formRow('Force treasure during events', h.toggle({
-            checked:  s.forceTreasureOnEvents !== false,  // default ON
-            onChange: function (next) {
-                h.update('explorers', { forceTreasureOnEvents: next });
-            }
-        }), 'no event items drop on adventures — keep ON unless you are deliberately farming adventure scrolls'));
-
-        // Default task — applies to vanilla explorers (no per-type
-        // trait) and to inactive-trait cases (off-event Fluffy Butte).
-        // The trait-aware algorithm in core/specialists.pickTask uses
-        // this as its fallback before the host's autoTSO-installed
-        // mainSettings.explDefTask (which usually defaults to Short).
-        $panel.append(h.formRow('Default task', h.dropdown(
-            defaultTaskOptions(),
-            {
-                selected: s.defaultTask || '',
-                onChange: function (val) {
-                    h.update('explorers', { defaultTask: val || null });
-                }
-            }
-        ), 'used for explorers without a trait recommendation'));
-
-        // Per-explorer state table — alphabetical sort, host portrait,
-        // localised task labels. Renders directly into the panel as a
-        // sequence of BS3 rows (autoTSO style).
-        appendExplorerTable($panel, h, s);
-    }
-
     // Build dropdown options for the "Default task" picker. Values are
     // ExplorerTask enum strings (matching `core/specialists.taskLabel`).
     // Empty value = "use Steward's longest-available baseline (Prolonged)".
@@ -189,108 +129,178 @@
         return opts;
     }
 
-    // Best-effort remaining-time read for a busy explorer. Returns the
-    // formatted host string (e.g. "2h 14m") or null if the host APIs
-    // aren't reachable. Mirrors autoTSO's
-    // `loca.FormatDuration(item.GetTask().GetRemainingTime(), 1)`.
-    function remainingTimeFor(spec) {
-        try {
-            if (typeof spec.GetTask !== 'function') return null;
-            var task = spec.GetTask();
-            if (!task || typeof task.GetRemainingTime !== 'function') return null;
-            var ms = task.GetRemainingTime();
-            if (typeof ms !== 'number' || ms <= 0) return null;
-            if (typeof loca !== 'undefined' && loca && typeof loca.FormatDuration === 'function') {
-                return loca.FormatDuration(ms, 1);
-            }
-            // Fallback: HH:MM if the host helper isn't available.
-            var totalMinutes = Math.round(ms / 60000);
-            var hours = Math.floor(totalMinutes / 60);
-            var minutes = totalMinutes % 60;
-            return hours + 'h ' + (minutes < 10 ? '0' + minutes : minutes) + 'm';
-        } catch (e) { return null; }
+    // Label of a stored default task, taken from the same options the picker shows.
+    function taskLabelFor(value) {
+        var opts = defaultTaskOptions();
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].value === (value || '')) return opts[i].label;
+        }
+        return String(value);
     }
 
-    function appendExplorerTable($panel, h, s) {
-        if (!S.core.specialists || !S.core.specialists.explorers) return;
-        var explorers;
-        try { explorers = S.core.specialists.explorers(); }
-        catch (e) { return; }
-        if (!explorers || !explorers.length) return;
+    function summary(h) {
+        var s = h.settings('explorers');
+        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay : S.modules.explorers.defaultSettings.dispatchDelay;
+        return delay + ' ms · ' +
+            (s.forceTreasureOnEvents !== false ? 'treasure in events' : 'adventures in events') +
+            ' · ' + taskLabelFor(s.defaultTask);
+    }
 
+    // Every owned explorer, alphabetical by display name (stable across
+    // renders). An unreadable list is an empty one.
+    function listExplorers() {
         var c = S.core.specialists;
+        var list;
+        try { list = c.explorers(); }
+        catch (e) { return []; }
+        if (!list || !list.length) return [];
+        list.sort(c.compareByName);
+        return list;
+    }
 
-        // Alphabetical by display name. Stable across renders.
-        explorers.sort(function (a, b) {
-            var na = (c.name(a) || '').toLowerCase();
-            var nb = (c.name(b) || '').toLowerCase();
-            if (na < nb) return -1;
-            if (na > nb) return 1;
-            return 0;
-        });
+    function overrideCount(s) {
+        return Object.keys((s && s.overrides) || {}).length;
+    }
 
-        var overrides = (s && s.overrides) || {};
+    function side($side, h) {
+        // The buffer starts from the stored settings so edits count as changes.
+        h.baseline('explorers', readSettings());
+        var s = h.settings('explorers');
 
-        // Table header (tblHeader band).
-        $panel.append(h.gridRow(
-            [[5, 'Name'], [2, 'Status'], [2, 'Current'], [3, 'Next']],
-            { headerCells: true }
-        ));
+        var $card = h.card({ icon: '⌖', title: 'Explorers', meta: 'settings' });
+        $card.append(h.field('Send explorers', 'Module on or off',
+            h.toggle({ ns: 'explorers', path: 'enabled', label: 'Send explorers' })));
+        $card.append(h.field('Delay between sends', null,
+            h.number({ ns: 'explorers', path: 'dispatchDelay', unit: 'ms',
+                       label: 'Delay between sends' })));
+        // forceTreasureOnEvents: when ON, every explorer goes on a treasure
+        // dispatch during a treasure event's content phase (cooldown or
+        // shop-only does not trigger this, see core/specialists
+        // activeEventContext). When OFF, adventure-biased explorers stay on
+        // adventures even during events.
+        $card.append(h.field('Treasure during events',
+            'No event items drop on adventures. Keep on unless you farm adventure scrolls.',
+            h.toggle({ ns: 'explorers', path: 'forceTreasureOnEvents',
+                       checked: s.forceTreasureOnEvents !== false,
+                       label: 'Treasure during events' })));
+        // Applies to vanilla explorers and to inactive-trait cases; pickTask
+        // consults it before the host's own default task.
+        $card.append(h.field('Default task', 'For explorers without a trait recommendation',
+            h.dropdown(defaultTaskOptions(), {
+                ns: 'explorers', path: 'defaultTask',
+                selected: s.defaultTask || '',
+                write: function (val) { h.set('explorers', 'defaultTask', val || null); }
+            }), { wrap: true }));
+        $card.append(h.field('Per-explorer overrides',
+            overrideCount(s) + ' have a fixed task (edited in settings.json)',
+            $('<span>').append(h.now()).append(' ').append(
+                h.button('Show in log', { size: 'sm', onClick: showOverrides })),
+            { wide: true, wrap: true }));
+        $side.append($card);
+    }
 
-        // One BS3 row per explorer.
-        for (var i = 0; i < explorers.length; i++) {
-            var spec = explorers[i];
-            var name = c.name(spec) || '?';
-            var st = c.status(spec);
-            var isIdle = (st === S.SpecialistStatus.Idle);
+    function render($main, h) {
+        var s = h.settings('explorers');
+        var c = S.core.specialists;
+        var $slot = $('<div>');
+        $main.append($slot);
 
-            // Portrait: host's getIconID + getImageTag. Falls back to a
-            // gray dot if the helpers aren't available (e.g. early boot).
-            var portrait = '';
-            try {
-                if (typeof spec.getIconID === 'function' &&
-                    typeof getImageTag === 'function') {
-                    var iconId = spec.getIconID();
-                    if (iconId) portrait = getImageTag(iconId, '20px') + ' ';
+        // Rebuilds only the live card, so a chip click keeps the rest of the tab.
+        function draw() {
+            var explorers = listExplorers();
+            var overrides = (s && s.overrides) || {};
+            var rows = [];
+            var busy = 0, ov = 0;
+
+            for (var i = 0; i < explorers.length; i++) {
+                var spec = explorers[i];
+                var name = c.name(spec) || '?';
+                var isIdle = (c.status(spec) === S.SpecialistStatus.Idle);
+                var hasOv = !!c.namedOverride(overrides, name);
+                if (!isIdle) busy++;
+                if (hasOv) ov++;
+                if (filter === 'busy' && isIdle) continue;
+                if (filter === 'idle' && !isIdle) continue;
+                if (filter === 'ov' && !hasOv) continue;
+
+                var portrait = c.portraitTag(spec);
+                if (portrait) portrait += ' ';
+
+                var $status = h.statusBadge(isIdle, isIdle ? null : c.orders.remaining(spec));
+
+                var current = null;
+                if (!isIdle && c.currentTask) {
+                    var ct = c.currentTask(spec);
+                    if (ct) current = c.taskLabel(ct);
                 }
-            } catch (e) { /* ignore */ }
-            var nameCell = portrait + h.escape(name);
+                var next = '?';
+                try {
+                    var nt = c.pickTask(spec);
+                    if (nt) next = c.taskLabel(nt);
+                } catch (ePick) { /* keep '?' */ }
+                var $next = $('<span>').text(next).attr('title', next);
+                if (hasOv) $next.append(' ').append(h.badge('tag', 'override'));
 
-            // Status with a leading dot (CSS coloured via row class).
-            // Append the remaining time for busy explorers when the
-            // host exposes it (e.g. "● Busy — 2h 14m").
-            var statusCell;
-            if (isIdle) {
-                statusCell = '○ Idle';
-            } else {
-                var rem = remainingTimeFor(spec);
-                statusCell = '● Busy' + (rem ? ' — ' + rem : '');
+                rows.push([
+                    { html: portrait + '<span>' + h.escape(name) + '</span>', title: name, cls: 'steward-who' },
+                    $status,
+                    current ? current : { text: '—', cls: 'steward-muted' },
+                    $next
+                ]);
             }
 
-            // Localised task labels.
-            var current = '—';
-            if (!isIdle && c.currentTask) {
-                var ct = c.currentTask(spec);
-                current = ct ? c.taskLabel(ct) : '—';
-            }
-            var next = '?';
-            try {
-                var nt = c.pickTask(spec);
-                if (nt) next = c.taskLabel(nt);
-            } catch (e) { /* keep '?' */ }
-            if (c.namedOverride(overrides, name)) next = next + ' *';
-
-            var rowClass = isIdle ? 'steward-row-idle' : 'steward-row-busy';
-            $panel.append(h.gridRow(
-                [[5, nameCell], [2, statusCell], [2, current], [3, next]]
-            ).addClass(rowClass));
+            var $card = h.card({
+                title: 'Live state',
+                meta: explorers.length + ' explorers · updated ' + h.clock()
+            });
+            $card.append(h.chips([
+                { id: 'all',  label: 'All ' + explorers.length },
+                { id: 'busy', label: 'Busy ' + busy },
+                { id: 'idle', label: 'Idle ' + (explorers.length - busy) },
+                { id: 'ov',   label: 'Overrides ' + ov }
+            ], filter, function (id) { filter = id; draw(); }));
+            $card.append(h.table({
+                fill: true,
+                cols: [
+                    { label: 'Explorer',     width: '34%' },
+                    { label: 'Status',       width: '20%' },
+                    { label: 'Current task', width: '22%' },
+                    { label: 'Next task',    width: '24%' }
+                ],
+                rows: rows,
+                emptyText: explorers.length ? 'No explorers match this filter.' : 'No explorers found.'
+            }));
+            $slot.empty().append($card);
+            h.fit();
         }
+
+        draw();
+    }
+
+    function tiles(h) {
+        var c = S.core.specialists;
+        var explorers = listExplorers();
+        var busy = 0;
+        for (var i = 0; i < explorers.length; i++) {
+            if (c.status(explorers[i]) !== S.SpecialistStatus.Idle) busy++;
+        }
+        var s = h.settings('explorers');
+        var $line = $('<span>').text(explorers.length + ' explorers · ')
+            .append($('<span>', { 'class': 'steward-warn' }).text(busy + ' busy'))
+            .append(' · ' + (explorers.length - busy) + ' idle');
+        return [{
+            title: 'Explorers',
+            icon: '⌖',
+            lines: [$line, 'Default task: ' + taskLabelFor(s.defaultTask)]
+        }];
     }
 
     S.modules.explorers.readSettings   = readSettings;
     S.modules.explorers.writeSettings  = writeSettings;
-    S.modules.explorers.renderSection  = renderSection;
+    S.modules.explorers.side           = side;
+    S.modules.explorers.render         = render;
     S.modules.explorers.summary        = summary;
+    S.modules.explorers.tiles          = tiles;
     S.modules.explorers.showOverrides  = showOverrides;
 
 }(Steward));

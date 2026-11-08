@@ -3,11 +3,12 @@
 var t = require('../runner');
 var harness = require('../harness');
 
-// The shared jQuery stub has no empty() and the vm context has no
-// document; the helpers and the section's redraw need both.
-function withEmpty(H) {
-    H.host.$.fn.empty = function () { return H.host.$.fn; };
-    H.ctx.document = { createTextNode: function (s) { return { nodeValue: s }; } };
+var jq = require('../stubs/jq');
+
+// The element-tree jQuery fake gives the helpers and the section's redraw
+// a real tree to build and inspect.
+function withJq(H) {
+    H.$ = jq.install(H);
     return H;
 }
 
@@ -53,13 +54,20 @@ t.test('showEstimateAlert with no event shows the "no event" text', function () 
     t.assert.strictEqual(shown[0], 'Steward: no event with explorer items is live');
 });
 
-t.test('renderSection does not throw with the jQuery stub (no event)', function () {
-    var H = withEmpty(harness.boot());
-    H.Steward.modules.eventcalc.renderSection(H.host.$(), H.Steward.kernel.ui.helpers);
+t.test('renderSection without a live event shows the two empty states', function () {
+    var H = withJq(harness.boot());
+    var $p = H.$('<div>');
+    H.Steward.modules.eventcalc.renderSection($p, H.Steward.kernel.ui.helpers);
+    var titles = [];
+    $p.find('.steward-empty-title').each(function () { titles.push(H.$(this).text()); });
+    t.assert.deepStrictEqual(titles, [
+        'No event with explorer items is live.',
+        'No event with refillable fields is live.'
+    ]);
 });
 
 t.test('renderSection draws the refill table while a deposit event is live', function () {
-    var H = withEmpty(harness.boot());
+    var H = withJq(harness.boot());
     liveHalloween(H);
     var refill = H.Steward.core.events.refill;
     var calls = [];
@@ -69,9 +77,73 @@ t.test('renderSection draws the refill table while a deposit event is live', fun
         return orig(rows, T, route, upi);
     };
     H.Steward.modules.eventcalc.resetSession();
-    H.Steward.modules.eventcalc.renderSection(H.host.$(), H.Steward.kernel.ui.helpers);
+    var $p = H.$('<div>');
+    H.Steward.modules.eventcalc.renderSection($p, H.Steward.kernel.ui.helpers);
     t.assert.strictEqual(calls.length, 1);
     t.assert.strictEqual(calls[0].route, 6);
     t.assert.strictEqual(calls[0].upi, 1);
     t.assert.ok(calls[0].rows.length > 0, 'template or game rows present');
+    t.assert.ok($p.find('tbody tr').length > 0, 'one table row per field');
+});
+
+t.test('refill compute receives the buffered route and units, not the saved ones', function () {
+    var H = withJq(harness.boot());
+    liveHalloween(H);
+    var h = H.Steward.kernel.ui.helpers;
+    var refill = H.Steward.core.events.refill;
+    var calls = [];
+    var orig = refill.compute;
+    refill.compute = function (rows, T, route, upi) {
+        calls.push({ route: route, upi: upi });
+        return orig(rows, T, route, upi);
+    };
+    H.Steward.modules.eventcalc.resetSession();
+    h.set('eventcalc', 'routeSeconds', 11);
+    h.set('eventcalc', 'unitsPerItem', 4);
+    H.Steward.modules.eventcalc.renderSection(H.$('<div>'), h);
+    t.assert.strictEqual(calls[0].route, 11);
+    t.assert.strictEqual(calls[0].upi, 4);
+    t.assert.strictEqual(H.settings.read('eventcalc'), null, 'nothing saved by rendering');
+});
+
+t.test('eventPhase names the treasure and cooldown phases', function () {
+    var H = harness.boot();
+    var phase = H.Steward.modules.eventcalc.eventPhase;
+    t.assert.strictEqual(phase({ categories: { treasure: true, shop: true } }).label, 'Treasure phase');
+    t.assert.strictEqual(phase({ categories: { shop: true } }).label, 'Cooldown phase');
+    t.assert.strictEqual(phase({ categories: { shop: true } }).kind, 'busy');
+    t.assert.strictEqual(phase({ categoryList: ['a', 'b'] }).label, 'a, b');
+    t.assert.strictEqual(phase({}).label, 'Live');
+});
+
+t.test('tiles gives nothing without an event and one tile per live event', function () {
+    var H = withJq(harness.boot());
+    var mod = H.Steward.modules.eventcalc;
+    t.assert.strictEqual(mod.tiles(H.Steward.kernel.ui.helpers).length, 0);
+    liveHalloween(H);
+    var live = H.Steward.core.events.active();
+    var tiles = mod.tiles(H.Steward.kernel.ui.helpers);
+    t.assert.strictEqual(tiles.length, live.length);
+    t.assert.ok(tiles.length > 0, 'a live event is reported');
+    t.assert.strictEqual(tiles[0].title, live[0].name);
+    t.assert.strictEqual(tiles[0].badge.text, 'Live');
+    t.assert.strictEqual(tiles[0].links[0].tab, 'events');
+});
+
+t.test('the Events card uses the spacing classes and sets no inline spacing', function () {
+    var H = withJq(harness.boot());
+    liveHalloween(H);
+    H.Steward.modules.eventcalc.resetSession();
+    var $p = H.$('<div>');
+    H.Steward.modules.eventcalc.renderSection($p, H.Steward.kernel.ui.helpers);
+    t.assert.ok($p.find('.steward-inline').length > 0, 'inline row');
+    t.assert.ok($p.find('.steward-inline-item').length > 0, 'inline items');
+    t.assert.ok($p.find('.steward-card-foot').length > 0, 'bottom row');
+    var spaced = ['.steward-inline', '.steward-inline-item', '.steward-card-foot', '.steward-card-badge', '.steward-note'];
+    spaced.forEach(function (sel) {
+        $p.find(sel).each(function () {
+            var style = H.$(this)[0].style;
+            t.assert.deepStrictEqual(Object.keys(style), [], sel + ' has no inline style');
+        });
+    });
 });

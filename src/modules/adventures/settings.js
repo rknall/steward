@@ -16,7 +16,7 @@
  * `stuckMinutes` is the stuck-step limit: a run step on the island that has
  * watched a wait this many minutes takes a zone trip home and back, which
  * makes the host refresh what it reports. 0 switches the trip off. It is
- * edited in the Adventures section of the Settings screen. `stuckMinutes()`
+ * edited in the Adventures group of the Settings screen. `stuckMinutes()`
  * is the reader the trip uses.
  *
  * `retrain` switches retraining of the troops lost on a map on or off for
@@ -30,6 +30,8 @@
  * cannot be topped up with a population buff. `retrainSettlersOnly()` is its
  * reader. Both switches default to off, and any stored value that is not
  * exactly `true` reads as off, so a hand-edited file never turns them on.
+ * On the Settings screen the second switch is greyed out while the first
+ * is off, since it has no effect then; its stored value is kept.
  *
  * Run templates are not settings: each one is its own JSON file under the
  * steward folder (see templates.js), so they can be shared and survive a
@@ -80,32 +82,74 @@
         return S.modules.adventures.defaultSettings.stuckMinutes;
     }
 
-    // Settings screen section. Reads and writes go through the shared
-    // settings buffer, so Save and Discard on the screen cover this field.
-    S.modules.adventures.renderSettings = function ($body, h) {
+    var SETTLERS_HELP = 'With too few settlers and no population buff, skip retraining instead of pausing the series';
+    var SETTLERS_NEEDS = 'Needs Retrain lost troops';
+
+    // The Adventures group of the Settings screen. Reads and writes go
+    // through the shared settings buffer, so Save and Close on the screen
+    // cover these fields. The shown values have the defaults filled in, and
+    // the baseline makes them the saved state, so a default nobody stored
+    // does not count as a change.
+    S.modules.adventures.renderSettings = function ($main, h) {
+        h.baseline('adventures', settingsNow());
         var s = h.settings('adventures');
 
-        $body.append(h.formRow('Stuck step limit (min)', h.input({
-            type:     'number',
-            value:    minutesOf(s),
-            width:    '70px',
-            onChange: function (val) {
-                var n = parseInt(val, 10);
-                if (!isNaN(n) && n >= 0) {
-                    h.update('adventures', { stuckMinutes: n });
-                }
-            }
-        }), 'a step on the island waiting this long goes home and back; 0 = off'));
+        var $run = h.card({ icon: '⚔', title: 'Running an adventure' });
+        $run.append(h.field('Stuck step limit',
+            'A step on the island that waits this long goes home and back. 0 turns it off.',
+            h.number({
+                ns:    'adventures',
+                path:  'stuckMinutes',
+                value: minutesOf(s),
+                unit:  'min',
+                label: 'Stuck step limit'
+            })));
+        $main.append($run);
 
-        $body.append(h.formRow('Retrain lost troops', h.toggle({
-            checked:  s.retrain === true,
-            onChange: function (on) { h.update('adventures', { retrain: !!on }); }
-        }), 'after each map, order the troops lost on it'));
-
-        $body.append(h.formRow('Only retrain with enough settlers', h.toggle({
+        // The settlers switch only means something while retraining is on,
+        // so it follows the buffered retrain switch in place: a redraw here
+        // would run at the blur of another field and swallow a Save click.
+        var retrainOn = s.retrain === true;
+        var $settlers = h.toggle({
+            ns:       'adventures',
+            path:     'retrainSettlersOnly',
             checked:  s.retrainSettlersOnly === true,
-            onChange: function (on) { h.update('adventures', { retrainSettlersOnly: !!on }); }
-        }), 'too few settlers and no population buff: skip retraining instead of pausing'));
+            disabled: !retrainOn,
+            label:    'Only with enough settlers'
+        });
+        var $settlersField = h.field('Only with enough settlers',
+            retrainOn ? SETTLERS_HELP : SETTLERS_NEEDS, $settlers,
+            { sub: true, disabled: !retrainOn });
+
+        var $after = h.card({ title: 'After each map' });
+        $after.append(h.field('Retrain lost troops', 'Order the troops lost on the map', h.toggle({
+            ns:       'adventures',
+            path:     'retrain',
+            checked:  retrainOn,
+            label:    'Retrain lost troops',
+            onChange: function (on) {
+                var enable = on === true;
+                $settlersField.toggleClass('steward-dis', !enable);
+                $settlersField.children('.steward-field-lbl').children('.steward-field-help')
+                    .text(enable ? SETTLERS_HELP : SETTLERS_NEEDS);
+                $settlers.toggleClass('steward-disabled', !enable);
+                $settlers.children('input').prop('disabled', !enable);
+            }
+        })));
+        $after.append($settlersField);
+        $main.append($after);
+
+        $main.append(h.banner('Templates have their own window. Runs start from ~Steward~ › Adventures ' +
+            'and are paused or stopped in the ~Adventures~ menu.', {
+            icon:    'ℹ',
+            $action: h.button('Run templates…', {
+                size:    'sm',
+                onClick: function () {
+                    var d = S.modules.adventures.dialog;
+                    if (d && d.open) d.open();
+                }
+            })
+        }));
     };
 
     // The stored stuck-step limit in minutes. The trip and the Settings

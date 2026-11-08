@@ -382,6 +382,28 @@
         return '';
     }
 
+    // Portrait <img> markup for table views, '' when it cannot be built.
+    // getImageTag is a host global that does not exist early in boot, and the
+    // icon getter can throw on a half-initialised specialist, so every read is
+    // guarded and a miss simply means "no portrait".
+    function portraitTag(spec, size) {
+        try {
+            if (typeof getImageTag !== 'function') return '';
+            if (!spec || typeof spec.getIconID !== 'function') return '';
+            var icon = spec.getIconID();
+            if (!icon) return '';
+            return getImageTag(icon, size || '20px') || '';
+        } catch (e) { return ''; }
+    }
+
+    // Array.sort comparator: case-insensitive by display name; an unreadable
+    // name counts as '' and so sorts first.
+    function compareByName(a, b) {
+        var an = (specName(a) || '').toLowerCase();
+        var bn = (specName(b) || '').toLowerCase();
+        return an < bn ? -1 : (an > bn ? 1 : 0);
+    }
+
     // Looks up a hand-edited settings map keyed by specialist name. The exact
     // key wins. Otherwise keys are cleaned the way name() is, which also
     // accepts keys saved with entities or the host's raw markup.
@@ -498,6 +520,17 @@
             return rawToExplorerTask(type, sub);
         } catch (e) { /* ignore */ }
         return null;
+    }
+
+    // The task's raw sub type as a number, or null (idle, unreadable, not a
+    // number). For a geologist this is the index of the deposit it searches.
+    function searchingIndex(spec) {
+        var task = specTask(spec);
+        if (!task) return null;
+        try {
+            var sub = (typeof task.GetSubType === 'function') ? task.GetSubType() : null;
+            return typeof sub === 'number' ? sub : null;
+        } catch (e) { return null; }
     }
 
     function isAttacking(spec)   {
@@ -1021,6 +1054,7 @@
     S.core.specialists.skillTreeMap     = skillTreeMap;
     S.core.specialists.hasSkill         = hasSkill;
     S.core.specialists.currentTask      = currentTask;
+    S.core.specialists.searchingIndex   = searchingIndex;
     S.core.specialists.taskLabel        = taskLabel;
     S.core.specialists.knownTask        = knownTask;
     S.core.specialists.rawToExplorerTask = rawToExplorerTask;
@@ -1033,6 +1067,8 @@
     S.core.specialists.recall           = recall;
 
     S.core.specialists.name             = specName;
+    S.core.specialists.portraitTag      = portraitTag;
+    S.core.specialists.compareByName    = compareByName;
     S.core.specialists.namedOverride    = namedOverride;
     S.core.specialists.uniqueIdKey      = uniqueIdKey;
 

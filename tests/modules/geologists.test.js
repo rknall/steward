@@ -2,6 +2,8 @@
 
 var t = require('../runner');
 var harness = require('../harness');
+var jq = require('../stubs/jq');
+var jq = require('../stubs/jq');
 
 // Settings helper: only the named deposit is enabled. Others stay defined
 // (defaults' enabled:true would otherwise leak through the deep-merge in
@@ -313,56 +315,132 @@ t.test('plan queues the clean name as the dispatch label', function () {
     t.assert.strictEqual(q[0].params[1], 'A & B');
 });
 
-// renderSection with the helpers a headless context lacks replaced; gridRow
-// records its cells, deposit rows included.
-function renderRows(H, settingsObj) {
-    var real = H.Steward.kernel.ui.helpers;
-    var h = {};
-    var k;
-    for (k in real) {
-        if (Object.prototype.hasOwnProperty.call(real, k)) h[k] = real[k];
-    }
-    var rows = [];
-    function blank() { return H.host.$(); }
-    h.formRow = blank;
-    h.toggle = blank;
-    h.input = blank;
-    h.dropdown = blank;
-    h.settings = function () { return settingsObj; };
-    h.gridRow = function (cells) {
-        rows.push(cells);
-        return { addClass: function () { return this; } };
-    };
-    H.Steward.modules.geologists.renderSection(H.host.$(), h);
-    return rows;
+// The Live state card (render) or the settings column (side) of the module,
+// built with the real helpers over the element-tree jq fake.
+function build(H, part) {
+    jq.install(H);
+    var $el = H.ctx.$('<div>');
+    H.Steward.modules.geologists[part]($el, H.Steward.kernel.ui.helpers);
+    return $el;
 }
 
-function mountNamed(H, name) {
+function rowsOf($el) { return $el.find('tbody tr'); }
+
+// The table row whose first cell carries the raw `name` as its tooltip.
+function rowFor($el, name) {
+    var $rows = rowsOf($el);
+    for (var i = 0; i < $rows.length; i++) {
+        if ($rows.eq(i).find('td').eq(0).attr('title') === name) return $rows.eq(i);
+    }
+    return null;
+}
+
+function mountList(H, list) {
     var z = H.zone.zone()
         .deposits('IronOre', [])
-        .specialists([H.specs.geologist({ name: name, uid: 'g1' })])
+        .specialists(list)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
 }
 
-t.test('the name cell escapes the decoded name', function () {
+// A geologist that is busy or idle from the start.
+function geoWith(H, name, uid, busy) {
+    var s = H.specs.geologist({ name: name, uid: uid });
+    var task = busy ? H.specs.task(1, 1, 1000) : null;
+    s.GetTask = function () { return task; };
+    s.IsInUse = function () { return !!task; };
+    return s;
+}
+
+t.test('the name cell escapes the decoded name and keeps it raw in the tooltip', function () {
     var H = harness.boot();
-    mountNamed(H, 'A &amp; &lt;B&gt;');
-    var rows = renderRows(H, { overrides: {}, deposits: {} });
-    var row = rows[rows.length - 1];
-    t.assert.strictEqual(row[0][1], 'A &amp; &lt;B&gt;');
+    mountList(H, [H.specs.geologist({ name: 'A &amp; &lt;B&gt;', uid: 'g1' })]);
+    var $name = rowsOf(build(H, 'render')).eq(0).find('td').eq(0);
+    t.assert.ok($name.hasClass('steward-who'));
+    t.assert.strictEqual($name.html(), '<span>A &amp; &lt;B&gt;</span>');
+    t.assert.strictEqual($name.attr('title'), 'A & <B>');
 });
 
-t.test('the override star shows for an entity-form key only', function () {
+t.test('the chips carry the filter counts and a click narrows the table', function () {
     var H = harness.boot();
-    mountNamed(H, 'A &amp; &lt;B&gt;');
-    var rows = renderRows(H, { overrides: { 'A &amp; &lt;B&gt;': ['IronOre'] }, deposits: {} });
-    var row = rows[rows.length - 1];
-    t.assert.ok(/ \*$/.test(row[0][1]), String(row[0][1]));
-    t.assert.ok(/^A &amp; &lt;B&gt;/.test(row[0][1]), String(row[0][1]));
-    rows = renderRows(H, { overrides: {}, deposits: {} });
-    row = rows[rows.length - 1];
-    t.assert.ok(!/ \*$/.test(row[0][1]), String(row[0][1]));
+    mountList(H, [geoWith(H, 'bee', 'g1', true), geoWith(H, 'ida', 'g2', false), geoWith(H, 'ivo', 'g3', false)]);
+    var $main = build(H, 'render');
+    var $chips = $main.find('.steward-chip');
+    t.assert.deepStrictEqual([0, 1, 2, 3].map(function (i) { return $chips.eq(i).text(); }),
+        ['All 3', 'Busy 1', 'Idle 2', 'With a trait 0']);
+    t.assert.strictEqual(rowsOf($main).length, 3);
+    t.assert.strictEqual($main.find('.steward-card-meta').eq(0).text(), '3 geologists · 1 busy');
+
+    $chips.eq(2).trigger('click');
+    t.assert.strictEqual(rowsOf($main).length, 2);
+    $main.find('.steward-chip').eq(3).trigger('click');
+    t.assert.strictEqual(rowsOf($main).eq(0).find('td').eq(0).text(), 'No geologist has a trait.');
+});
+
+t.test('a busy geologist with remaining 0 or null shows a plain Busy, a positive time shows it', function () {
+    [0, null, 90 * 60000].forEach(function (rem) {
+        var H = harness.boot();
+        mountList(H, [geoWith(H, 'bee', 'g1', true)]);
+        H.Steward.core.specialists.orders.remaining = function () { return rem; };
+        var text = rowsOf(build(H, 'render')).eq(0).find('.steward-b-busy').text();
+        if (rem) t.assert.ok(/^Busy .+/.test(text), String(text));
+        else t.assert.strictEqual(text, 'Busy', String(rem));
+    });
+});
+
+t.test('deposit names go through the locale and keep the raw name as the tooltip', function () {
+    var H = harness.boot();
+    H.Steward.core.locale.res = function (name) { return 'Res ' + name; };
+    var $first = rowsOf(build(H, 'side')).eq(0).find('td').eq(0);
+    var raw = $first.attr('title');
+    t.assert.ok(raw && raw.length > 0);
+    t.assert.strictEqual($first.text(), 'Res ' + raw);
+});
+
+t.test('switching a deposit on keeps its stored max, and a missing row starts from the defaults', function () {
+    var H = harness.boot();
+    H.settings.write('geologists', { deposits: { IronOre: { enabled: false, max: 7 } } });
+    rowFor(build(H, 'side'), 'IronOre').find('input').eq(0).prop('checked', true).trigger('change');
+    var kept = H.Steward.kernel.ui.helpers.get('geologists', 'deposits.IronOre');
+    t.assert.strictEqual(kept.enabled, true);
+    t.assert.strictEqual(kept.max, 7);
+
+    var fresh = harness.boot();
+    fresh.settings.write('geologists', { deposits: {} });
+    var defaults = fresh.Steward.modules.geologists.readSettings().deposits.IronOre;
+    rowFor(build(fresh, 'side'), 'IronOre').find('input').eq(0).prop('checked', !defaults.enabled).trigger('change');
+    var row = fresh.Steward.kernel.ui.helpers.get('geologists', 'deposits.IronOre');
+    t.assert.strictEqual(row.max, defaults.max);
+    t.assert.strictEqual(row.enabled, !defaults.enabled);
+});
+
+t.test('tiles count the geologists and the searched deposit types', function () {
+    var H = harness.boot();
+    mountList(H, [geoWith(H, 'bee', 'g1', true), geoWith(H, 'ida', 'g2', false)]);
+    H.settings.write('geologists', onlyEnable('IronOre', 2));
+    jq.install(H);
+    var tiles = H.Steward.modules.geologists.tiles(H.Steward.kernel.ui.helpers);
+    t.assert.strictEqual(tiles.length, 1);
+    t.assert.strictEqual(tiles[0].title, 'Geologists');
+    t.assert.strictEqual(tiles[0].lines[0], '2 geologists · 1 busy · 1 idle');
+    t.assert.strictEqual(tiles[0].lines[1], '1 deposit type searched, 1 below max');
+
+    H = harness.boot();
+    mountList(H, [geoWith(H, 'ida', 'g2', false)]);
+    H.settings.write('geologists', onlyEnable('IronOre', 0));
+    jq.install(H);
+    tiles = H.Steward.modules.geologists.tiles(H.Steward.kernel.ui.helpers);
+    t.assert.strictEqual(tiles[0].lines[0], '1 geologist · all idle');
+    t.assert.strictEqual(tiles[0].lines[1], '1 deposit type searched, 0 below max');
+});
+
+t.test('the geologists module keeps its quick-toggle title and registers a wide screen spec', function () {
+    var mod = harness.boot().module('geologists');
+    t.assert.strictEqual(mod.ui.section.title, 'Geologists');
+    t.assert.strictEqual(mod.ui.section.wide, true);
+    t.assert.strictEqual(typeof mod.ui.section.render, 'function');
+    t.assert.strictEqual(typeof mod.ui.section.tiles, 'function');
+    t.assert.strictEqual(mod.ui.section.action, undefined);
 });
 
 // --- send guard ------------------------------------------------------------
@@ -477,3 +555,17 @@ t.test('guard: a geologist send that sends nothing leaves nothing pending', func
 function idleGeo(env, uid) {
     return env.H.specs.geologist({ name: uid, uid: uid });
 }
+
+t.test('busyOnDeposit is exported and counts only busy geologists on the given index', function () {
+    var H = harness.boot();
+    var g = H.Steward.modules.geologists;
+    t.assert.strictEqual(typeof g.busyOnDeposit, 'function');
+    var onTwo  = H.specs.geologist({ uid: 'a', task: H.specs.task(1, 2, 1000) });
+    var onTwoB = H.specs.geologist({ uid: 'b', task: H.specs.task(1, 2, 1000) });
+    var onFive = H.specs.geologist({ uid: 'c', task: H.specs.task(1, 5, 1000) });
+    var idle   = H.specs.geologist({ uid: 'd' });
+    var list = [onTwo, onTwoB, onFive, idle, null];
+    t.assert.strictEqual(g.busyOnDeposit(list, 2), 2);
+    t.assert.strictEqual(g.busyOnDeposit(list, 5), 1);
+    t.assert.strictEqual(g.busyOnDeposit(list, 0), 0, 'idle geologist is not counted');
+});

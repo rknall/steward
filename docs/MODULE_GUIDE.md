@@ -109,7 +109,7 @@ That's a complete module. After `npm run build` it'll be bundled into `user_stew
 | `isReady`  | yes      | `(ctx)→bool` | Cheap. Errors are treated as `false`.                         |
 | `plan`     | yes      | `(ctx)→void` | Called when `isReady` returns true. Errors are swallowed and logged. |
 | `boot`     | no       | `()→void` | One-shot, called after registration completes.                   |
-| `ui`       | no       | object    | Dashboard section: `{ tab, section: { id, title, icon, render } }`. See [UI](#ui). |
+| `ui`       | no       | object    | Dashboard section: `{ tab, section: { id, title, icon, render, ... } }`. See [UI](#ui). |
 | `menu`     | no       | object    | Native `~Steward~` submenu: `{ title, items }`; `items` is an array or a function returning one. See [UI](#ui). |
 
 See [`SCHEDULER.md`](SCHEDULER.md) for the contract details.
@@ -204,7 +204,26 @@ Use your module's `id` as the category. Don't log inside hot loops.
 
 A module shows things in the native menu and the dashboard through two optional fields of its register spec.
 
-- `ui` adds a section to one dashboard tab. `tab` is one of `specialists`, `geologists`, `quests`, `buildings`, `events` or `misc`. `misc` renders on the Settings screen, for tools and module settings that need no dashboard tab (the diagnostics probes, the adventures stuck-step limit). `section.id` is unique and also the settings buffer key. `render($body, h)` runs when the dashboard draws the tab; `h` is `S.kernel.ui.helpers` (`headerRow`, `gridRow`, `formRow`, `input`, `dropdown`, `toggle`, `button`, `settings`, `update`, ...).
+- `ui` adds a section to one dashboard tab. `tab` is one of `specialists`, `geologists`, `mining`, `buildings`, `events` or `misc`. The Overview is built by the dashboard and is not a tab a module can target. `misc` renders on the Settings screen, for tools and module settings that need no dashboard tab (the diagnostics probes, the adventures stuck-step limit). `section.id` only has to be unique. It is not the settings buffer key: the buffer namespace is the module `id` (`collect` registers section `collect_pickups` and its buffer is `collect`). `render($main, h)` runs when the screen draws the section; `h` is `S.kernel.ui.helpers` (see below).
+- Section fields: `title` is the native quick-toggle label, so never change it for a module with an `enabled` flag; `heading` is the optional card, tile, nav and footer name (default `title`); `icon` is one Unicode glyph; `summary(h)` returns the compact strip text and reads the buffer through `h`; `side($side, h)` fills an optional settings column (split layout), with `wide: true` for the wider column; `render($main, h)` is required and fills the right column when `side` exists, else the whole panel; `tiles(h)` returns Overview tiles `{ title, icon, lines, badge, links, toggle }`; `runsNow: true` (misc only) lists the section under "Runs at once" and sets the footer note. There is no per-section action button: a module draws its own runs-now buttons with `h.button` and marks them with `h.now()`.
+- Use `title` for the native label and `heading` when the card needs a different name; the footer names a module's unsaved changes by `heading`.
+- Helpers: layout `card`, `subHead`, `field`, `grid`, `toolRow`, `banner`, `empty`; controls `toggle`, `input`, `number`, `dropdown`, `button`, `link`, `chips`; data `table`, `stats`, `badge`, `statusBadge`, `now`, `duration`, `clock`; buffer `settings`, `update`, `set`, `get`, `escape`, `isChanged`, `baseline`, `fit`.
+- Bound controls take `ns` (the module id) and `path` (dotted). On a change they write the value to the buffer through `h.set` (or `opts.write(value)`), mark themselves `steward-dirty` when it differs from the stored value, then call `opts.onChange`. A reverted value counts as no change.
+- `baseline(ns, shown)` tells the buffer what the screen shows when that differs from the stored value (defaults merged in by the module's own reader). Call it once in `render` before drawing, so showing a default never counts as an unsaved change.
+- Escaping: every string passed to a helper goes in as text. Only table cells written `{ html: '...' }` take markup, and the caller must have run `h.escape` on every user string in them.
+
+```js
+// shape only
+section: {
+    id: 'mining', title: 'Mining', heading: 'Mining', icon: '⛏',
+    summary: function (h) { return h.settings('mining').enabled ? 'On' : 'Off'; },
+    render: function ($main, h) {
+        h.baseline('mining', readSettings());
+        $main.append(h.card({ title: 'Mining' }).append(
+            h.field('Enabled', 'Run mining orders', h.toggle({ ns: 'mining', path: 'enabled' }))));
+    }
+}
+```
 - `menu` adds a submenu to the native `~Steward~` menu. Use it for read-only tools, such as opening a tab or showing an alert.
 
 ```js
@@ -243,7 +262,7 @@ A module may declare `barMenu: { title, items }` to add a root item beside `~Ste
 
 `items` may be a function. It is evaluated when the module's submenu is built (at init and on `S.kernel.ui.refreshModuleMenu(id)`), never at registration. When the set of items changes (for example a user saved a template), call `S.kernel.ui.refreshModuleMenu(id)` from the user action that caused it; it rebuilds only that module's submenu. Never call it on a timer: every rebuild leaks native objects in the AIR client. `S.kernel.ui.notify(text)` shows a game alert. The adventures module (`src/modules/adventures/menu.js`) is the example.
 
-Dashboard settings go through a buffer: `h.settings(id)` returns it, `h.update(id, patch)` merges changes into it, and the dashboard Save button writes them to the module's settings. Keep state that describes the current moment out of the buffer; a session-only value is cleared when the menu entry reopens the dashboard.
+Dashboard settings go through a buffer: `h.settings(id)` returns it, `h.update(id, patch)` merges changes into it, and the Save button in the footer writes only the namespaces that changed to the module's settings. Keep state that describes the current moment out of the buffer; a session-only value is cleared when the menu entry reopens the dashboard.
 
 A module can also own a dialog of its own, opened from its `menu` items, when a dashboard tab does not fit (the adventures module's template dialog is the example). Settings is a dialog of the same kind, with its own id. Such a module registers only a `menu` (plus, if it has settings, a `misc` section), so it gets no dashboard section and no quick toggle. Its dialog uses its own `Modal` id, calls `S.kernel.ui.ensureStyle(id)` before it is first shown so it shares the dashboard stylesheet, and passes every user string through `h.escape` before it reaches the page. Opening a modal hides the dashboard. A zone load closes host modals and drops unsaved edits.
 

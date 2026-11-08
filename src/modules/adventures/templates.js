@@ -277,6 +277,24 @@
         return id;
     }
 
+    // Pure. Whether another template already shows this label: trimmed and
+    // case-insensitive, since the menu lists templates by label and two equal
+    // entries there cannot be told apart. The record's own id and broken
+    // entries never count, so re-saving a template keeps its label.
+    function labelTaken(label, id, recs) {
+        var want = str(label).replace(/^\s+|\s+$/g, '').toLowerCase();
+        if (want === '') return false;
+        var list = recs || [];
+        for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            if (!r || r.error !== undefined || r.id === id) continue;
+            if (str(r.label).replace(/^\s+|\s+$/g, '').toLowerCase() === want) return true;
+        }
+        return false;
+    }
+
+    // Only a new save is refused for a taken label: files that already
+    // share one still load and list, so nothing the user has disappears.
     function save(rec, now) {
         var r = normalize(rec);
         var problems = validate(r);
@@ -284,6 +302,9 @@
 
         if (dirPath() === null) {
             return { ok: false, problems: [{ field: 'file', message: 'No writable steward folder' }] };
+        }
+        if (labelTaken(r.label, r.id, list())) {
+            return { ok: false, problems: [{ field: 'label', message: 'Another template uses this label' }] };
         }
         var id = validId(r.id) ? r.id : newId(now, ids());
         r.id = id;
@@ -442,6 +463,7 @@
         get:                 get,
         validate:            validate,
         newId:               newId,
+        labelTaken:          labelTaken,
         save:                save,
         remove:              remove,
         speedBuffChoice:     speedBuffChoice,

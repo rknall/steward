@@ -4,6 +4,7 @@ var t = require('../runner');
 var harness = require('../harness');
 var airfs = require('../stubs/airfs');
 var hostStubs = require('../stubs/host');
+var jq = require('../stubs/jq');
 
 var assert = t.assert;
 
@@ -156,7 +157,7 @@ t.test('a typing-only edit neither blocks opening nor survives it', function () 
 
 // ---- Parsers ----------------------------------------------------------------
 
-t.test('settingsParse sizeKB, keep and tickMs', function () {
+t.test('settingsParse sizeKB, whole and tickMs', function () {
     var K = harness.boot({ sections: ['kernel'] }).Steward.kernel;
     var p = K.ui.settingsParse;
     var min = K.TIMEOUTS.TICK_INTERVAL_MIN_MS;
@@ -169,12 +170,13 @@ t.test('settingsParse sizeKB, keep and tickMs', function () {
     assert.strictEqual(p.sizeKB('-1'), null);
     assert.strictEqual(p.sizeKB('abc'), null);
 
-    assert.strictEqual(p.keep('3'), 3);
-    assert.strictEqual(p.keep('2.7'), 2);
-    assert.strictEqual(p.keep('0'), 0);
-    assert.strictEqual(p.keep(''), null);
-    assert.strictEqual(p.keep('-1'), null);
-    assert.strictEqual(p.keep('many'), null);
+    assert.strictEqual(p.whole('3'), 3);
+    assert.strictEqual(p.whole('2.7'), 2);
+    assert.strictEqual(p.whole('0'), 0);
+    assert.strictEqual(p.whole(''), null);
+    assert.strictEqual(p.whole('-1'), null);
+    assert.strictEqual(p.whole('many'), null);
+    assert.strictEqual(p.keep, undefined);
 
     assert.strictEqual(p.tickMs('20'), 20000);
     assert.strictEqual(p.tickMs('12.5'), 12500);
@@ -193,7 +195,7 @@ t.test('openSettings opens the StewardSettings modal', function () {
     s.ui.openSettings();
     assert.strictEqual(rig.made.length, 1);
     assert.strictEqual(rig.made[0].id, 'StewardSettings');
-    assert.strictEqual(rig.made[0].title, 'Steward \u2014 Settings');
+    assert.strictEqual(rig.made[0].title, 'Steward settings');
     assert.strictEqual(rig.made[0].closable, true);
 });
 
@@ -223,7 +225,7 @@ t.test('stale dirty state does not block opening', function () {
     s.ui.openDashboard();
     assert.strictEqual(rig.made.length, 2);
     assert.strictEqual(rig.made[1].id, 'StewardDashboard');
-    assert.strictEqual(rig.made[1].title, 'Steward — Auto Settings');
+    assert.strictEqual(rig.made[1].title, 'Steward');
     assert.strictEqual(s.alerts.length, 0);
     s.ui.openSettings();
     assert.strictEqual(rig.made.length, 3);
@@ -257,12 +259,198 @@ t.test('open failures name the screen', function () {
 
 // ---- Tabs -------------------------------------------------------------------
 
-t.test('TAB_ORDER has no tools or misc and every other id is a known tab', function () {
+t.test('TAB_ORDER has no tools or misc and every other id is overview or a known tab', function () {
     var s = setup();
     var ids = s.ui.TAB_ORDER.map(function (tab) { return tab.id; });
     assert.strictEqual(ids.indexOf('tools'), -1);
     assert.strictEqual(ids.indexOf('misc'), -1);
     for (var i = 0; i < ids.length; i++) {
-        assert.ok(ids[i] === 'status' || s.S.kernel.registry.TABS[ids[i]] === true, ids[i]);
+        assert.ok(ids[i] === 'overview' || s.S.kernel.registry.TABS[ids[i]] === true, ids[i]);
     }
+});
+
+// ---- Screens built on the element-tree fake --------------------------------
+
+function setupJq() {
+    var s = setup();
+    s.$ = jq.install(s.H);
+    s.rig = hostStubs.installModal(s.H);
+    return s;
+}
+
+function bodyOf(s, i) { return s.rig.made[i || 0].modal.Body(); }
+function footerOf(s, i) { return s.rig.made[i || 0].modal.Footer(); }
+
+function misc(s, id, heading, extra) {
+    var section = { id: id, title: heading, heading: heading, render: function () {} };
+    for (var k in extra) section[k] = extra[k];
+    s.S.kernel.register({
+        id: id, priority: 'PriorityNormal',
+        isReady: function () { return true; }, plan: function () {},
+        ui: { tab: 'misc', section: section }
+    });
+}
+
+// The checkbox of the settings field with this label.
+function fieldControl(s, label) {
+    var found = null;
+    bodyOf(s).find('.steward-field').each(function (i, node) {
+        var $f = s.$(node);
+        if ($f.find('.steward-field-name').text() === label) found = $f;
+    });
+    assert.ok(found, 'no field ' + label);
+    return found.find('input');
+}
+
+function flip($input) {
+    $input.prop('checked', !$input.prop('checked'));
+    $input.trigger('change');
+}
+
+function alertsMatching(s, re) {
+    return s.alerts.filter(function (a) { return re.test(a); });
+}
+
+t.test('the screens carry the user-facing titles', function () {
+    var s = setupJq();
+    s.ui.openDashboard();
+    s.ui.closeDashboard(false);
+    s.ui.openSettings();
+    assert.strictEqual(s.rig.made[0].title, 'Steward');
+    assert.strictEqual(s.rig.made[1].title, 'Steward settings');
+});
+
+t.test('Close with changes says so, and without changes says nothing', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    s.ui.closeDashboard(false);
+    assert.strictEqual(s.alerts.length, 0);
+
+    s.ui.openSettings();
+    s.ui.helpers.update('logger', { keepRotated: 1 });
+    s.ui.closeDashboard(false);
+    assert.strictEqual(alertsMatching(s, /Changes discarded/).length, 1);
+    assert.strictEqual(s.H.settings.read('logger'), null);
+});
+
+t.test('the change count and names cover the logger and a misc module', function () {
+    var s = setup();
+    misc(s, 'zeta', 'Zeta', {});
+    s.H.settings.write('zeta', { keep: 'me' });
+    assert.strictEqual(s.ui.screen.changes().count, 0);
+
+    s.ui.helpers.update('logger', { keepRotated: 1, debugEnabled: true });
+    s.ui.helpers.update('zeta', { probe: 1 });
+    var c = s.ui.screen.changes();
+    assert.strictEqual(c.count, 3);
+    assert.deepStrictEqual(plain(c.names), ['Logging', 'Zeta']);
+    assert.strictEqual(c.byNs.logger, 2);
+    assert.strictEqual(c.byNs.zeta, 1);
+});
+
+t.test('reverting an edit clears the count and Save', function () {
+    var s = setup();
+    s.H.settings.write('zeta', { keep: 'me' });
+    s.ui.helpers.update('zeta', { probe: 1 });
+    assert.strictEqual(s.ui.screen.changes().count, 1);
+    assert.strictEqual(s.ui.canSave(), true);
+    s.ui.helpers.update('zeta', function (v) { delete v.probe; });
+    assert.strictEqual(s.ui.screen.changes().count, 0);
+    assert.strictEqual(s.ui.canSave(), false);
+});
+
+t.test('a logger toggle flipped twice counts no change', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    var $sw = fieldControl(s, 'Include debug lines');
+    flip($sw);
+    assert.strictEqual(s.ui.screen.changes().count, 1);
+    assert.ok(/1 unsaved change/.test(footerOf(s).text()), footerOf(s).text());
+    flip($sw);
+    assert.strictEqual(s.ui.screen.changes().count, 0);
+    assert.strictEqual(s.ui.canSave(), false);
+});
+
+t.test('Save writes only the namespaces that changed', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    flip(fieldControl(s, 'Include debug lines'));
+    footerOf(s).find('button').first().trigger('click');
+    assert.notStrictEqual(s.H.settings.read('logger'), null);
+    assert.strictEqual(s.H.settings.read('scheduler'), null);
+    assert.strictEqual(alertsMatching(s, /Configuration saved/).length, 1);
+});
+
+t.test('the footer Save is updated in place, never rebuilt', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    var before = footerOf(s).find('button')[0];
+    assert.strictEqual(before.props.disabled, true);
+    flip(fieldControl(s, 'Include debug lines'));
+    var after = footerOf(s).find('button')[0];
+    assert.strictEqual(after, before);
+    assert.strictEqual(after.props.disabled, false);
+    assert.ok(after.cls.indexOf('steward-primary') >= 0);
+});
+
+t.test('an open screen with edits blocks both screens, a throwing guard does not', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    s.rig.visible = true;
+    s.ui.helpers.update('logger', { keepRotated: 2 });
+    s.ui.openDashboard();
+    s.ui.openSettings('general');
+    assert.strictEqual(s.rig.made.length, 1);
+    assert.strictEqual(alertsMatching(s, /Save or close/).length, 2);
+
+    s.ui.closeDashboard(false);
+    s.ui.addEditGuard('win', function () { return true; });
+    s.ui.openDashboard();
+    assert.strictEqual(s.rig.made.length, 1);
+    s.ui.addEditGuard('win', function () { throw new Error('broken window'); });
+    s.H.clearLogs();
+    s.ui.openDashboard();
+    assert.strictEqual(s.rig.made.length, 2);
+    assert.ok(s.H.logs().some(function (l) {
+        return l.level === 'error' && /edit guard threw for win/.test(l.args.join(' '));
+    }));
+    s.ui.addEditGuard('win', null);
+});
+
+t.test('openSettings(group) selects the group, an unknown one falls back to General', function () {
+    var s = setupJq();
+    misc(s, 'adventures', 'Adventures', {});
+    s.ui.openSettings('adventures');
+    assert.strictEqual(s.ui.screen.state().group, 'adventures');
+    assert.strictEqual(bodyOf(s).find('.steward-snav-item.active').children('span').first().text(), 'Adventures');
+    s.ui.closeDashboard(false);
+
+    s.ui.openSettings('nope');
+    assert.strictEqual(s.ui.screen.state().group, 'general');
+    assert.strictEqual(bodyOf(s, 1).find('.steward-snav-item.active').children('span').first().text(), 'General');
+});
+
+t.test('a runsNow group is listed apart and replaces the idle note', function () {
+    var s = setupJq();
+    misc(s, 'tools', 'Diagnostics tools', { runsNow: true });
+    s.ui.openSettings();
+    assert.strictEqual(bodyOf(s).find('.steward-snav-grp').text(), 'RUNS AT ONCE');
+    assert.strictEqual(footerOf(s).find('.steward-foot-note').text(),
+        'No changes. Settings apply when you press Save.');
+
+    bodyOf(s).find('.steward-snav-item').last().trigger('click');
+    assert.strictEqual(s.ui.screen.state().group, 'tools');
+    assert.strictEqual(footerOf(s).find('.steward-foot-note').text(), 'Diagnostics tools don\'t use Save.');
+    assert.strictEqual(bodyOf(s).find('.steward-main').hasClass('steward-narrow'), false);
+});
+
+t.test('the Logging and Scheduler cards are titled by the shell\'s names', function () {
+    var s = setupJq();
+    s.ui.openSettings();
+    var titles = [];
+    bodyOf(s).find('.steward-card-h span').each(function (i, node) {
+        titles.push(s.$(node).text());
+    });
+    assert.ok(titles.indexOf(s.ui.screen.nsName('logger')) >= 0, titles.join('|'));
+    assert.ok(titles.indexOf(s.ui.screen.nsName('scheduler')) >= 0, titles.join('|'));
 });

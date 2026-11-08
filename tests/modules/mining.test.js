@@ -2,6 +2,7 @@
 
 var t = require('../runner');
 var harness = require('../harness');
+var jq = require('../stubs/jq');
 
 t.test('plan no-ops when module is disabled', function () {
     var H = harness.boot();
@@ -303,4 +304,128 @@ t.test('tryBuild enqueues nothing when byType fails', function () {
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
+});
+
+// --- dashboard surface ----------------------------------------------------
+
+// The settings column (side) or the main column (render) of the module,
+// built with the real helpers over the element-tree jq fake.
+function build(H, part) {
+    jq.install(H);
+    var $el = H.ctx.$('<div>');
+    H.Steward.modules.mining[part]($el, H.Steward.kernel.ui.helpers);
+    return $el;
+}
+
+// The table row whose first cell carries the raw `name` as its tooltip.
+function rowFor($el, name) {
+    var $rows = $el.find('tbody tr');
+    for (var i = 0; i < $rows.length; i++) {
+        if ($rows.eq(i).find('td').eq(0).attr('title') === name) return $rows.eq(i);
+    }
+    return null;
+}
+
+function mountQueue(H, used, max, buildings) {
+    var z = H.zone.zone().buildQueue(used, max);
+    for (var i = 0; i < (buildings || []).length; i++) z.building(buildings[i]);
+    z.mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+}
+
+t.test('mining registers on its own tab with a screen spec', function () {
+    var mod = harness.boot().module('mining');
+    t.assert.strictEqual(mod.ui.tab, 'mining');
+    t.assert.strictEqual(mod.ui.section.id, 'mining');
+    t.assert.strictEqual(mod.ui.section.title, 'Mining');
+    t.assert.strictEqual(typeof mod.ui.section.side, 'function');
+    t.assert.strictEqual(typeof mod.ui.section.render, 'function');
+    t.assert.strictEqual(typeof mod.ui.section.tiles, 'function');
+    t.assert.strictEqual(mod.ui.section.action, undefined);
+});
+
+t.test('the deposit table lists the mine types and the quarry types apart', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    var types = H.Steward.core.deposits.types();
+    var $main = build(H, 'render');
+    var rows = $main.find('tbody tr');
+    t.assert.strictEqual(rows.length, types.length);
+    types.forEach(function (info) {
+        var $r = rowFor($main, info.name);
+        t.assert.ok($r, info.name);
+        var muted = $r.find('.steward-muted').length > 0;
+        t.assert.strictEqual(muted, !info.mineName, info.name);
+        // Mine rows carry three switches and a level box, quarry rows none.
+        t.assert.strictEqual($r.find('input').length, info.mineName ? 4 : 0, info.name);
+    });
+    t.assert.strictEqual($main.find('.steward-subhead').text(), 'NOT MANAGED BY STEWARD');
+    t.assert.ok(/^\d+ mines active · none paused$/.test($main.find('.steward-card-meta').text()),
+        $main.find('.steward-card-meta').text());
+});
+
+t.test('deposit names go through the locale and keep the raw name as the tooltip', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    H.Steward.core.locale.res = function (name) { return 'Res ' + name; };
+    var $first = build(H, 'render').find('tbody tr').eq(0).find('td').eq(0);
+    t.assert.strictEqual($first.text(), 'Res ' + $first.attr('title'));
+});
+
+t.test('the level box takes any whole level from 1 and rejects the rest', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    var h = H.Steward.kernel.ui.helpers;
+    var $level = rowFor(build(H, 'render'), 'IronOre').find('input').eq(2);
+    ['0', '-1', 'abc', ''].forEach(function (bad) {
+        $level.val(bad).trigger('change');
+        t.assert.strictEqual(h.get('mining', 'deposits.IronOre.targetLevel'), 3, 'bad ' + bad);
+    });
+    $level.val('6').trigger('change');
+    t.assert.strictEqual(h.get('mining', 'deposits.IronOre.targetLevel'), 6);
+    $level.val('5').trigger('change');
+    t.assert.strictEqual(h.get('mining', 'deposits.IronOre.targetLevel'), 5);
+    $level.val('1').trigger('change');
+    t.assert.strictEqual(h.get('mining', 'deposits.IronOre.targetLevel'), 1);
+});
+
+t.test('switching Pause on keeps the rest of the stored deposit row', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    var $r = rowFor(build(H, 'render'), 'IronOre');
+    var $boxes = $r.find('input');
+    // Build, Upgrade, level, Pause in column order.
+    $boxes.eq(3).prop('checked', true).trigger('change');
+    var row = H.Steward.kernel.ui.helpers.get('mining', 'deposits.IronOre');
+    t.assert.strictEqual(row.pause, true);
+    t.assert.strictEqual(row.build, true);
+    t.assert.strictEqual(row.targetLevel, 3);
+    t.assert.strictEqual(row.upgrade, false);
+});
+
+t.test('tiles give the queue and licence line and the mines line', function () {
+    var H = harness.boot();
+    mountQueue(H, 1, 4);
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    jq.install(H);
+    var h = H.Steward.kernel.ui.helpers;
+    var tiles = H.Steward.modules.mining.tiles(h);
+    t.assert.strictEqual(tiles.length, 1);
+    t.assert.strictEqual(tiles[0].title, 'Mining');
+    t.assert.ok(/^Build queue \d+ of \d+ · licences 0 of 100$/.test(tiles[0].lines[0]), tiles[0].lines[0]);
+    t.assert.strictEqual(tiles[0].lines[1], '0 mines active, none paused');
+
+    h.set('mining', 'deposits.IronOre.pause', true);
+    tiles = H.Steward.modules.mining.tiles(h);
+    t.assert.strictEqual(tiles[0].lines[1], '0 mines active, 1 paused');
+});
+
+t.test('the settings column shows the queue and licence counts', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    var $side = build(H, 'side');
+    t.assert.strictEqual($side.find('.steward-stat').length, 2);
+    t.assert.ok(/of 100$/.test($side.find('.steward-stat').eq(1).text()), $side.find('.steward-stat').eq(1).text());
 });

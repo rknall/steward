@@ -669,9 +669,20 @@
         if (r.count >= SAMPLE_COUNT) {
             run = null;
             S.kernel.log('diag', 'sampler finished after ' + SAMPLE_COUNT + ' samples');
+            notifyTick();
             return;
         }
         arm(r);
+        notifyTick();
+    }
+
+    // The dashboard button shows the time left; it registers a hook rather
+    // than owning a timer, so the sampler stays the only one.
+    function notifyTick() {
+        var hook = S.modules.diagnostics.onSamplerTick;
+        if (typeof hook !== 'function') return;
+        try { hook(); }
+        catch (e) { S.kernel.warn('diag', 'sampler tick hook threw:', e); }
     }
 
     // Starts the sampler when idle, stops it when running. Returns whether
@@ -696,6 +707,15 @@
 
     function samplerRunning() { return run !== null; }
 
+    // The cadence and span of one run, for UI text derived from the constants.
+    function samplerPlan() {
+        return { everyMs: SAMPLE_MS, count: SAMPLE_COUNT, totalMs: SAMPLE_MS * SAMPLE_COUNT };
+    }
+
+    function samplerLeftMs() {
+        return run ? (SAMPLE_COUNT - run.count) * SAMPLE_MS : null;
+    }
+
     S.modules.diagnostics.army = {
         dumpGenerals:    dumpGenerals,
         dumpArmy:        dumpArmy,
@@ -704,7 +724,9 @@
         dumpBuildings:   dumpBuildings,
         dumpDefinitions: dumpDefinitions,
         toggleSampler:   toggleSampler,
-        samplerRunning:  samplerRunning
+        samplerRunning:  samplerRunning,
+        samplerPlan:     samplerPlan,
+        samplerLeftMs:   samplerLeftMs
     };
 
 }(Steward));

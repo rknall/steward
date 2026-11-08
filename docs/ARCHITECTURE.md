@@ -31,7 +31,7 @@ Steward
 │   ├── register({...}) ← module registration
 │   ├── scheduler       ← internal — tick loop, cursors
 │   ├── queue           ← internal — FIFO action queue
-│   └── ui              ← in-game menu shell
+│   └── ui              ← in-game menu shell, dashboard and Settings screens
 ├── core
 │   ├── zone
 │   ├── buildings
@@ -103,6 +103,8 @@ The numeric prefixes inside `src/kernel/` matter: `00_namespace.js` runs before 
 `05_reload.js` runs right after the namespace. When the host reloads userscripts into the same page and global, the new bundle finds the previous instance there and shuts it down before any later kernel file replaces its `Steward.kernel.*` slots. Every later kernel file must therefore come after it.
 
 `17_files.js` follows the same rule and sits before `20_logger.js`, because the logger resolves its own log file through the file API.
+
+The kernel UI is five files that rely on that order. `89_ui_style.js` loads first: it creates `Steward.kernel.ui` and `ui.views`, and owns the colour tokens, the layout numbers, the generated stylesheet and `ensureStyle`. `90_ui_shell.js` owns the native menu, pause, the settings buffer with its change counting, the screen lifecycle (open, footer, Save, Close) and edit guards. `91_ui_helpers.js` holds the helper set modules draw with (`Steward.kernel.ui.helpers`) plus `settingsParse` and `settingsShow`. `92_ui_dashboard.js` registers the dashboard view and `93_ui_settings.js` the Settings view. A view is looked up only when a screen opens, so no file needs a later one at load time. The dashboard's Overview tab is built by the dashboard itself from the registry (tiles, adventure state, build row); it is not a module tab.
 
 `16_text.js` holds the host-string cleaner and has no kernel dependencies, so it sits before everything that reads names.
 

@@ -123,7 +123,7 @@ if (Steward.core.specialists.dropped() !== before) return; // count is not relia
 
 ## Rule 3.6: specialist names are plain text
 
-`Steward.core.specialists.name(spec)` returns plain text, so never strip it again. Escape it before it reaches `html()` (`h.escape`, as in the gridRow cells). Identify specialists by `uniqueIdKey` and not by name. Read name-keyed settings with `namedOverride(map, name)`, which also accepts keys saved with entities or markup.
+`Steward.core.specialists.name(spec)` returns plain text, so never strip it again. Escape it before it reaches `html()` (`h.escape`, as in `{ html }` table cells). Identify specialists by `uniqueIdKey` and not by name. Read name-keyed settings with `namedOverride(map, name)`, which also accepts keys saved with entities or markup. Table views take the portrait from `portraitTag(spec)`, sort with `compareByName`, and read a geologist's searched deposit index with `searchingIndex(spec)` instead of reading `GetTask()` themselves.
 
 ## Rule 4: use the locale wrapper
 

@@ -42,6 +42,9 @@
                     if (S.modules.eventcalc.renderSection) {
                         return S.modules.eventcalc.renderSection($body, h);
                     }
+                },
+                tiles: function (h) {
+                    return S.modules.eventcalc.tiles ? S.modules.eventcalc.tiles(h) : [];
                 }
             }
         },

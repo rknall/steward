@@ -1,7 +1,7 @@
 /*
  * Dashboard surface for the eventcalc module.
  *
- * Renders inside the Events tab with two parts:
+ * Renders inside the Events tab with two cards:
  *   - Explorer event items: the core estimate (best task per explorer,
  *     summed) as items per day and until the item-drop phase ends.
  *   - Refill calculator: one row per event field with the deposit left, its
@@ -9,7 +9,7 @@
  *     (buffed value in parentheses while a production buff is active), and
  *     the refill units / items still needed, plus a total row.
  *
- * Route seconds and units per item are settings (dashboard buffer, Save
+ * Route seconds and units per item are saved settings (dashboard buffer, Save
  * persists). The remaining time and per-field deposit edits describe the
  * current moment, so they live in a module-level session that the
  * "Event calculator…" menu entry and the reset button clear.
@@ -39,7 +39,7 @@
         if (!isNum(ms)) return '—';
         var d = new Date(ms);
         return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-               ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+               ' ' + S.kernel.ui.helpers.clock(d);
     }
 
     function resName(resource) {
@@ -57,21 +57,58 @@
         return (v === null || typeof v === 'undefined') ? '—' : String(v);
     }
 
-    // A production figure, with the buffed value appended when a buff is active.
-    function buffedText(v, b) {
-        var text = textOrDash(v);
-        if (b !== null && typeof b !== 'undefined') text += ' (' + b + ')';
-        return text;
+    // A production figure with the buffed value in muted parentheses when a
+    // buff is active. Text only, so names and numbers from the host stay inert.
+    function buffedCell(v, b) {
+        var $c = $('<span>').text(textOrDash(v));
+        if (b !== null && typeof b !== 'undefined') {
+            $c.append($('<span>', { 'class': 'steward-muted' }).text(' (' + b + ')'));
+        }
+        return { cls: 'steward-num', $: $c };
     }
 
-    function buffedCell(v, b, bold) {
-        var $c = $(bold ? '<strong>' : '<span>').text(buffedText(v, b));
-        return $c;
+    // Which phase an event is in. Items drop in the treasure phase; with
+    // only the shop variant live the event is cooling down.
+    function eventPhase(ev) {
+        var cats = ev && ev.categories;
+        var inTreasure = !!(cats && cats.treasure);
+        var inCooldown = !!(cats && cats.shop && !inTreasure);
+        if (inTreasure) return { kind: 'phase', label: 'Treasure phase' };
+        if (inCooldown) return { kind: 'busy', label: 'Cooldown phase' };
+        var list = (ev && ev.categoryList) || [];
+        return { kind: 'off', label: list.length ? list.join(', ') : 'Live' };
     }
 
-    // gridRow renders strings as HTML, so names from the host go in as text.
-    function textCell(v) {
-        return $('<span>').text(textOrDash(v));
+    function liveEvents() {
+        try { return S.core.events.active() || []; }
+        catch (e) { S.kernel.warn('eventcalc', 'events.active threw:', e); }
+        return [];
+    }
+
+    function liveEvent(code) {
+        var list = liveEvents();
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].code === code) return list[i];
+        }
+        return null;
+    }
+
+    // The amount of the event currency held, or null when it is unknown.
+    function heldAmount(code) {
+        try {
+            if (S.core.events.eventResourceAmount) {
+                var n = S.core.events.eventResourceAmount(code);
+                return isNum(n) ? n : null;
+            }
+        } catch (e) { /* unreadable: no figure */ }
+        return null;
+    }
+
+    function eventResource(code) {
+        try {
+            if (S.core.events.eventResource) return S.core.events.eventResource(code) || null;
+        } catch (e) { /* unreadable: no figure */ }
+        return null;
     }
 
     function readSettings(h) {
@@ -100,30 +137,40 @@
     }
 
     // ---------------------------------------------------------------
-    // Estimate part
+    // Estimate card
     // ---------------------------------------------------------------
 
-    function drawEstimate($wrap, h) {
-        $wrap.append(h.headerRow('Explorer event items'));
+    function estimateCard(h) {
         var est = safeEstimate();
         if (!est) {
-            $wrap.append(h.formRow(
-                $('<em>').text('No event with explorer items is live.'), ''));
-            return;
+            return h.card({ title: 'Explorer event items' })
+                .append(h.empty('No event with explorer items is live.'));
         }
         var res = resName(est.resource);
-        $wrap.append(h.formRow('Explorers counted',
-            est.counted + ' of ' + est.explorers));
-        $wrap.append(h.formRow('Per day',
-            Math.round(est.perDay) + ' ' + res));
-        $wrap.append(h.formRow('Until items stop (' + formatDate(est.endTime) + ')',
-            textOrDash(est.untilEnd) + (est.untilEnd === null ? '' : ' ' + res)));
-        $wrap.append(h.indentRow(
-            'approx.: best task per explorer; loot-count traits not included'));
+        var held = heldAmount(est.code);
+        var meta = (held === null ? '' : res + ' ' + held + ' held · ') +
+                   'items stop ' + formatDate(est.endTime);
+        var ev = liveEvent(est.code);
+        var phase = ev ? eventPhase(ev) : null;
+        // The meta floats right, so a badge placed after it in the markup is
+        // still laid out next to the title.
+        var $badge = phase
+            ? h.badge(phase.kind, phase.label).addClass('steward-card-badge')
+            : null;
+        var $card = h.card({ icon: '⚑', title: est.name, meta: meta, $tools: $badge });
+        $card.append(h.stats([
+            { k: 'Explorers counted', v: est.counted, small: 'of ' + est.explorers },
+            { k: 'Explorers bring per day', v: Math.round(est.perDay), small: res },
+            { k: 'Until items stop', v: textOrDash(est.untilEnd),
+              small: est.untilEnd === null ? '' : res },
+            { k: 'How it is counted', $v: $('<span>', { 'class': 'steward-muted' }).text(
+                'Best task per explorer. Traits that change the loot count are not included.') }
+        ]));
+        return $card;
     }
 
     // ---------------------------------------------------------------
-    // Refill part
+    // Refill card
     // ---------------------------------------------------------------
 
     function currentRemaining(ev) {
@@ -163,7 +210,7 @@
         return label;
     }
 
-    function drawRemainingInputs($wrap, h, ev, redraw) {
+    function remainingInputs(h, ev, redraw) {
         var sec = currentRemaining(ev);
         var days = Math.floor(sec / 86400);
         var hours = Math.floor((sec % 86400) / 3600);
@@ -172,7 +219,8 @@
         $ctl.append(h.input({
             type:     'number',
             value:    days,
-            width:    '60px',
+            width:    '54px',
+            title:    'Days left',
             onChange: function (val) {
                 var n = parseNonNegInt(val);
                 if (n === null) return;
@@ -181,11 +229,12 @@
                 redraw();
             }
         }));
-        $ctl.append(document.createTextNode(' d '));
+        $ctl.append($('<span>', { 'class': 'steward-unit' }).text('d'));
         $ctl.append(h.input({
             type:     'number',
             value:    hours,
-            width:    '60px',
+            width:    '54px',
+            title:    'Hours left',
             onChange: function (val) {
                 var n = parseNonNegInt(val);
                 if (n === null) return;
@@ -194,43 +243,58 @@
                 redraw();
             }
         }));
-        $ctl.append(document.createTextNode(' h'));
-        $wrap.append(h.formRow('Remaining time', $ctl,
-            'until ' + formatDate(ev.endTime) + ' — this session only'));
+        $ctl.append($('<span>', { 'class': 'steward-unit' }).text('h'));
+        return $ctl;
     }
 
-    function drawSettingInputs($wrap, h, s, redraw) {
-        $wrap.append(h.formRow('Route', h.input({
-            type:     'number',
-            value:    s.routeSeconds,
-            width:    '60px',
-            onChange: function (val) {
-                var n = parseNonNegInt(val);
-                if (n === null) return;
-                h.update('eventcalc', { routeSeconds: n });
-                redraw();
-            }
-        }), 's one way between field and storehouse'));
+    // One labelled control in the inline row above the table.
+    function inlineItem(label, $ctl, note) {
+        var $i = $('<span>', { 'class': 'steward-inline-item' });
+        $i.append($('<span>').text(label + ' '));
+        $i.append($ctl);
+        if (note) $i.append($('<span>', { 'class': 'steward-muted' }).text(' ' + note));
+        return $i;
+    }
 
-        $wrap.append(h.formRow('Units per item', h.input({
-            type:     'number',
-            value:    s.unitsPerItem,
-            width:    '60px',
-            onChange: function (val) {
-                var n = parseNonNegInt(val);
-                if (n === null || n < 1) return;
-                h.update('eventcalc', { unitsPerItem: n });
-                redraw();
-            }
-        }), 'deposit units one refill item adds'));
+    // Route and units per item are saved settings, bound to the dashboard
+    // buffer; every edit recomputes the table from the buffered values.
+    function settingInputs(h, redraw) {
+        var parse = S.kernel.ui.settingsParse;
+        // The shown values are the baseline, so reverting an edit is no change.
+        h.baseline('eventcalc', readSettings(h));
+        var $route = h.number({
+            ns:       'eventcalc',
+            path:     'routeSeconds',
+            parse:    parse.whole,
+            width:    '54px',
+            label:    'Route seconds',
+            onChange: redraw
+        });
+        var $units = h.number({
+            ns:       'eventcalc',
+            path:     'unitsPerItem',
+            parse:    function (text) {
+                var n = parse.whole(text);
+                return (n === null || n < 1) ? null : n;
+            },
+            width:    '54px',
+            label:    'Units per item',
+            onChange: redraw
+        });
+        return [
+            inlineItem('Route', $route, 's one way, field to storehouse'),
+            inlineItem('Units per item', $units, null)
+        ];
     }
 
     function depositCell(h, row, redraw) {
+        var overridden = Object.prototype.hasOwnProperty.call(session.overrides, row.key);
         var $cell = $('<span>');
         $cell.append(h.input({
             type:     'number',
             value:    isNum(row.deposit) ? row.deposit : 0,
-            width:    '60px',
+            width:    '54px',
+            title:    'Deposit',
             onChange: function (val) {
                 var n = parseNonNegInt(val);
                 if (n === null) return;
@@ -238,76 +302,91 @@
                 redraw();
             }
         }));
-        $cell.append($('<span>', { 'class': 'steward-row-help' })
-            .text(row.source === 'game' ? '(game)' : '(manual)'));
-        return $cell;
+        var tag = overridden ? 'edited' : (row.source === 'game' ? 'game' : 'manual');
+        $cell.append($('<span>', { 'class': 'steward-muted' }).text(' ' + tag));
+        return { $: $cell };
     }
 
-    function drawRefill($wrap, h, s, redraw) {
+    function refillCard(h, redraw) {
         var api = refillApi();
         var ev = null;
         try { ev = api ? api.depositEvent() : null; }
         catch (e) { S.kernel.warn('eventcalc', 'depositEvent threw:', e); }
 
-        $wrap.append(h.headerRow('Refill calculator' + (ev ? ' — ' + ev.name : '')));
+        var $card = h.card({
+            title: 'Refill calculator',
+            meta:  'Route and units per item apply on Save; deposits and time left are for this session'
+        });
         if (!ev) {
-            $wrap.append(h.formRow(
-                $('<em>').text('No event with refillable fields is live.'), ''));
-            return;
+            return $card.append(h.empty('No event with refillable fields is live.'));
         }
 
         if (!session.snapshot) session.snapshot = api.rows(ev.code);
         var snap = session.snapshot || { source: 'manual', rows: [] };
+        var s = readSettings(h);
 
-        drawRemainingInputs($wrap, h, ev, redraw);
-        drawSettingInputs($wrap, h, s, redraw);
+        var $inline = $('<div>', { 'class': 'steward-inline' });
+        $inline.append(inlineItem('Time left', remainingInputs(h, ev, redraw),
+            'until ' + formatDate(ev.endTime)));
+        var inputs = settingInputs(h, redraw);
+        for (var n = 0; n < inputs.length; n++) $inline.append(inputs[n]);
+        $card.append($inline);
 
         if (snap.source === 'manual') {
-            $wrap.append(h.indentRow(
-                'Field data not readable here (home island only); values are editable.'));
+            $card.append($('<div>', { 'class': 'steward-muted steward-note' })
+                .text('Field data not readable here (home island only); values are editable.'));
         }
 
         var result = api.compute(rowsWithOverrides(snap.rows || []),
             currentRemaining(ev), s.routeSeconds, s.unitsPerItem);
 
-        $wrap.append(h.gridRow(
-            [[3, 'Field'], [2, 'Deposit'], [2, 'Per 12 h'],
-             [2, 'Until end'], [2, 'Refill'], [1, 'Items']],
-            { headerCells: true }
-        ));
-        $wrap.append(h.indentRow('Deposit, per 12 h and until end in ' +
-            resName(ev.resource) + '; (…) = with the active production buff. ' +
-            'Refill in deposit units, if kept refilled.'));
+        var rows = [];
         for (var i = 0; i < result.rows.length; i++) {
             var row = result.rows[i];
-            $wrap.append(h.gridRow(
-                [[3, textCell(fieldLabel(row))],
-                 [2, depositCell(h, row, redraw)],
-                 [2, buffedCell(row.rate12h, row.rate12hBuffed, false)],
-                 [2, buffedCell(row.untilEnd, row.untilEndBuffed, false)],
-                 [2, textCell(row.units)],
-                 [1, textCell(row.items)]]
-            ));
+            var label = fieldLabel(row);
+            rows.push([
+                { text: label, title: label },
+                depositCell(h, row, redraw),
+                buffedCell(row.rate12h, row.rate12hBuffed),
+                buffedCell(row.untilEnd, row.untilEndBuffed),
+                textOrDash(row.units),
+                textOrDash(row.items)
+            ]);
         }
-        $wrap.append(h.gridRow(
-            [[3, $('<strong>').text('Total')],
-             [2, $('<strong>').text(String(result.totalDeposit))],
-             [2, buffedCell(result.totalRate12h, result.totalRate12hBuffed, true)],
-             [2, buffedCell(result.totalUntilEnd, result.totalUntilEndBuffed, true)],
-             [2, $('<strong>').text(String(result.totalUnits))],
-             [1, $('<strong>').text(String(result.totalItems))]]
-        ));
+        $card.append(h.table({
+            fill: true,
+            cols: [
+                { label: 'Field',     width: '32%' },
+                { label: 'Deposit',   width: '16%' },
+                { label: 'Per 12 h',  width: '13%', cls: 'steward-num' },
+                { label: 'Until end', width: '13%', cls: 'steward-num' },
+                { label: 'Refill',    width: '13%', cls: 'steward-num' },
+                { label: 'Items',     width: '13%', cls: 'steward-num' }
+            ],
+            rows: rows,
+            foot: [
+                'Total',
+                String(result.totalDeposit),
+                buffedCell(result.totalRate12h, result.totalRate12hBuffed),
+                buffedCell(result.totalUntilEnd, result.totalUntilEndBuffed),
+                String(result.totalUnits),
+                String(result.totalItems)
+            ]
+        }));
 
-        var $btns = $('<span>');
-        $btns.append(h.button('Reset to game values', {
+        var $bottom = $('<div>', { 'class': 'steward-card-foot' });
+        $bottom.append($('<span>', { 'class': 'steward-muted' }).text(
+            resName(ev.resource) + '; (…) = with the active production buff. ' +
+            'Refill in deposit units. '));
+        $bottom.append(h.button('Reset to game values', {
             size: 'sm',
             onClick: function () {
                 resetSession();
                 redraw();
             }
         }));
-        $btns.append(document.createTextNode(' '));
-        $btns.append(h.button('Empty deposits', {
+        $bottom.append(document.createTextNode(' '));
+        $bottom.append(h.button('Empty deposits', {
             size: 'sm',
             onClick: function () {
                 var list = snap.rows || [];
@@ -315,23 +394,50 @@
                 redraw();
             }
         }));
-        $wrap.append(h.formRow('', $btns));
+        $card.append($bottom);
+        return $card;
     }
 
     function renderSection($panel, h) {
-        var $wrap = $('<div>', { 'class': 'steward-eventcalc' });
+        var $wrap = $('<div>', { 'class': 'steward-stack' });
         $panel.append($wrap);
 
         function draw() {
-            var s = readSettings(h);
-            drawEstimate($wrap, h);
-            drawRefill($wrap, h, s, redraw);
+            $wrap.append(estimateCard(h));
+            $wrap.append(refillCard(h, redraw));
         }
         function redraw() {
             $wrap.empty();
             draw();
+            h.fit();
         }
         draw();
+    }
+
+    // One Overview tile per live event.
+    function tiles() {
+        var out = [];
+        var list = liveEvents();
+        var est = list.length ? safeEstimate() : null;
+        for (var i = 0; i < list.length; i++) {
+            var ev = list[i];
+            var held = heldAmount(ev.code);
+            var res = resName(eventResource(ev.code));
+            var lines = [eventPhase(ev).label +
+                (held === null ? '' : ' · ' + (res ? res + ' ' : '') + held + ' held')];
+            if (est && est.code === ev.code) {
+                lines.push('Explorers bring about ' + Math.round(est.perDay) + ' a day until ' +
+                    formatDate(est.endTime));
+            }
+            out.push({
+                title: ev.name,
+                icon:  '⚑',
+                lines: lines,
+                badge: { kind: 'ok', text: 'Live' },
+                links: [{ label: 'Calculator', tab: 'events' }]
+            });
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------
@@ -359,6 +465,8 @@
 
     S.modules.eventcalc.resetSession      = resetSession;
     S.modules.eventcalc.renderSection     = renderSection;
+    S.modules.eventcalc.tiles             = tiles;
+    S.modules.eventcalc.eventPhase        = eventPhase;
     S.modules.eventcalc.showEstimateAlert = showEstimateAlert;
 
 }(Steward));

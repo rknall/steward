@@ -14,14 +14,23 @@
  *   ui: {
  *     tab: 'specialists',                    // one of TABS below
  *     section: {
- *       id:    'explorers',                  // unique; settings buffer key
- *       title: 'Explorers',                  // shown on the parchment band
- *       icon:  '⌖',                          // single character / emoji
- *       action: { label: 'Show overrides', onClick: function () {} },  // optional
- *       summary: function () { return '…'; },// shown on the Status tab
- *       render:  function ($body, h) { … }   // populates section-rows
+ *       id:      'explorers',                // unique section id (the settings buffer key is the module id)
+ *       title:   'Explorers',                // native quick-toggle label; keep it stable
+ *       heading: 'Collect pickups',          // optional display name; default = title
+ *       icon:    '⌖',                        // single character / emoji
+ *       summary: function (h) { return '…'; },    // optional: compact strip text
+ *       side:    function ($side, h) { … },       // optional: settings column
+ *       wide:    true,                            // optional: wider side column
+ *       render:  function ($main, h) { … },       // populates the main area
+ *       tiles:   function (h) { return [...]; },  // optional: Overview tiles
+ *       runsNow: true                             // optional, misc only
  *     }
  *   }
+ *
+ * `title` doubles as the native menu's quick-toggle label, so it must stay
+ * stable once a module has an `enabled` flag; `heading` is for display only
+ * and falls back to `title`. `summary`, `side` and `tiles` are kept only when
+ * they are functions, `runsNow` only when it is exactly true.
  *
  * Menu spec (optional): a module can add a submenu to the native ~Steward~
  * menu via a `menu` field. `items` is an array, or a function returning
@@ -72,12 +81,14 @@
  *
  * The `events` tab hosts read-only event tools.
  *
- * `misc` sections render on the Settings screen, not as a dashboard tab, for
- * tools and module settings that need no dashboard tab (the diagnostics probes,
- * the adventures stuck-step limit).
+ * The Overview is not a registry tab: the dashboard builds it from the
+ * sections' `tiles`. `misc` sections render as groups on the Settings screen,
+ * not as a dashboard tab, for tools and module settings that need no
+ * dashboard tab (the diagnostics probes, the adventures stuck-step limit).
+ * `runsNow` marks a misc section whose buttons act at once, so Settings lists
+ * it under "Runs at once" and does not wait for Save on it.
  *
- * The Status tab is reserved (rendered by the kernel's UI shell, not by a
- * module). Mail/Trades is deliberately omitted until that subsystem ships.
+ * Mail/Trades is deliberately omitted until that subsystem ships.
  */
 
 (function (S) {
@@ -85,7 +96,7 @@
     var TABS = {
         specialists: true,
         geologists:  true,
-        quests:      true,
+        mining:      true,
         buildings:   true,
         events:      true,
         misc:        true
@@ -110,18 +121,18 @@
             S.kernel.warn('registry', moduleId, 'ui.section requires id, title, render');
             return null;
         }
-        var action = null;
-        if (sec.action && typeof sec.action === 'object' && sec.action.label && isFunction(sec.action.onClick)) {
-            action = { label: String(sec.action.label), onClick: sec.action.onClick };
-        }
         return {
             tab: raw.tab,
             section: {
                 id:      String(sec.id),
                 title:   String(sec.title),
+                heading: sec.heading ? String(sec.heading) : String(sec.title),
                 icon:    sec.icon ? String(sec.icon) : '',
-                action:  action,
                 summary: isFunction(sec.summary) ? sec.summary : null,
+                side:    isFunction(sec.side) ? sec.side : null,
+                tiles:   isFunction(sec.tiles) ? sec.tiles : null,
+                wide:    sec.wide === true,
+                runsNow: sec.runsNow === true,
                 render:  sec.render
             }
         };

@@ -42,8 +42,13 @@
  * it by module.
  *
  * The templates live in their own dialog, opened from the native ~Steward~
- * menu, rather than in a dashboard tab: building a template needs a file
- * picker and a reorderable wave list that do not fit a tab section.
+ * menu, the Overview tile or the Settings group, rather than in a dashboard
+ * tab: building a template needs a file picker and a reorderable wave list
+ * that do not fit a tab section.
+ *
+ * The Overview tile only says whether a run is active; the run's progress
+ * stays in the ~Adventures~ menu, which is refreshed as the run moves, while
+ * the dashboard is drawn once per open.
  */
 
 (function (S) {
@@ -135,6 +140,64 @@
         }
     }
 
+    // Where the run series stands, for the Overview tile and the template
+    // window's banner: 'running', 'paused', 'requested' (a request with no
+    // run yet) or 'none'. A finished run counts as none, since nothing is
+    // left to pause or stop.
+    function runPhase() {
+        var st = S.modules.adventures.state;
+        if (!st) return 'none';
+        var rs = st.current();
+        var r = rs.run;
+        if (r && r.status === S.RunStatus.Running) return 'running';
+        if (r && r.status === S.RunStatus.Paused) return 'paused';
+        if (!r && rs.request) return 'requested';
+        return 'none';
+    }
+
+    var PHASE_LINES = {
+        running:   'A run is active',
+        paused:    'A run is paused',
+        requested: 'A run is requested',
+        none:      'No run active'
+    };
+
+    function openTemplates() {
+        var d = S.modules.adventures.dialog;
+        if (d && d.open) d.open();
+    }
+
+    function openSettings() {
+        if (S.kernel.ui && S.kernel.ui.openSettings) S.kernel.ui.openSettings('adventures');
+    }
+
+    // One Overview tile. The template count is the number of template files,
+    // broken ones included, as the template window lists them.
+    function tiles() {
+        var phase = runPhase();
+        var t = S.modules.adventures.templates;
+        var n = t ? t.ids().length : 0;
+        var badge = phase === 'running' ? { kind: 'busy', text: 'Running' }
+            : phase === 'paused' ? { kind: 'paused', text: 'Paused' }
+            : { kind: 'off', text: 'Idle' };
+        return [{
+            title: 'Adventures',
+            icon:  '⚔',
+            lines: [
+                PHASE_LINES[phase],
+                n + ' run template' + (n === 1 ? '' : 's') + ' · progress in the ~Adventures~ menu'
+            ],
+            badge: badge,
+            links: [
+                { label: 'Templates', onClick: openTemplates },
+                { label: 'Settings',  onClick: openSettings }
+            ]
+        }];
+    }
+
+    S.modules.adventures.runPhase = runPhase;
+    S.modules.adventures.tiles = tiles;
+
     // Seed defaults eagerly so the first read already returns the setting,
     // then pick up a persisted run (a fresh client has none in memory yet).
     function boot() {
@@ -158,10 +221,14 @@
             section: {
                 id:    'adventures',
                 title: 'Adventures',
-                render: function ($body, h) {
+                icon:  '⚔',
+                render: function ($main, h) {
                     if (S.modules.adventures.renderSettings) {
-                        return S.modules.adventures.renderSettings($body, h);
+                        return S.modules.adventures.renderSettings($main, h);
                     }
+                },
+                tiles: function (h) {
+                    return S.modules.adventures.tiles ? S.modules.adventures.tiles(h) : [];
                 },
                 summary: function () {
                     return S.modules.adventures.settingsSummary

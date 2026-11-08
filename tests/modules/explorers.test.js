@@ -2,6 +2,7 @@
 
 var t = require('../runner');
 var harness = require('../harness');
+var jq = require('../stubs/jq');
 
 // The classifier takes base type 1 for an explorer, so the stub's own explorer
 // type id (3) would not classify; build the entry with the real one.
@@ -175,47 +176,107 @@ t.test('plan queues the clean name as the dispatch label', function () {
     t.assert.strictEqual(q[0].params[1], 'Ghost #2 (Ghost General)');
 });
 
-// renderSection with the helpers a headless context lacks replaced; gridRow
-// records its cells. Returns the recorded rows.
-function renderRows(H, settingsObj) {
-    var real = H.Steward.kernel.ui.helpers;
-    var h = {};
-    var k;
-    for (k in real) {
-        if (Object.prototype.hasOwnProperty.call(real, k)) h[k] = real[k];
-    }
-    var rows = [];
-    function blank() { return H.host.$(); }
-    h.formRow = blank;
-    h.toggle = blank;
-    h.input = blank;
-    h.dropdown = blank;
-    h.settings = function () { return settingsObj; };
-    h.gridRow = function (cells) {
-        rows.push(cells);
-        return { addClass: function () { return this; } };
-    };
-    H.Steward.modules.explorers.renderSection(H.host.$(), h);
-    return rows;
+// The Live state card rendered into a fresh element with the real helpers
+// over the element-tree jq fake.
+function renderLive(H) {
+    jq.install(H);
+    var $main = H.ctx.$('<div>');
+    H.Steward.modules.explorers.render($main, H.Steward.kernel.ui.helpers);
+    return $main;
 }
 
-t.test('the name cell escapes the decoded name', function () {
+function rowsOf($main) { return $main.find('tbody tr'); }
+
+t.test('the name cell escapes the decoded name and keeps it raw in the tooltip', function () {
     var H = harness.boot();
     mount(H, [explorer(H, { name: 'A &amp; &lt;B&gt;', uid: 'e1' })]);
-    var rows = renderRows(H, { overrides: {} });
-    var row = rows[rows.length - 1];
-    t.assert.strictEqual(row[0][1], 'A &amp; &lt;B&gt;');
+    var $name = rowsOf(renderLive(H)).eq(0).find('td').eq(0);
+    t.assert.ok($name.hasClass('steward-who'));
+    t.assert.strictEqual($name.html(), '<span>A &amp; &lt;B&gt;</span>');
+    t.assert.strictEqual($name.attr('title'), 'A & <B>');
 });
 
-t.test('the override star shows for an entity-form key only', function () {
+t.test('the override tag shows for an entity-form key only', function () {
     var H = harness.boot();
     mount(H, [explorer(H, { name: 'A &amp; &lt;B&gt;', uid: 'e1' })]);
-    var rows = renderRows(H, { overrides: { 'A &amp; &lt;B&gt;': H.Steward.ExplorerTask.AdventureZoneLong } });
-    var row = rows[rows.length - 1];
-    t.assert.ok(/ \*$/.test(row[3][1]), String(row[3][1]));
-    rows = renderRows(H, { overrides: {} });
-    row = rows[rows.length - 1];
-    t.assert.ok(!/ \*$/.test(row[3][1]), String(row[3][1]));
+    var ovs = {};
+    ovs['A &amp; &lt;B&gt;'] = H.Steward.ExplorerTask.AdventureZoneLong;
+    H.settings.write('explorers', { overrides: ovs });
+    t.assert.strictEqual(rowsOf(renderLive(H)).eq(0).find('.steward-b-tag').text(), 'override');
+
+    H = harness.boot();
+    mount(H, [explorer(H, { name: 'A &amp; &lt;B&gt;', uid: 'e1' })]);
+    H.settings.write('explorers', { overrides: {} });
+    t.assert.strictEqual(rowsOf(renderLive(H)).eq(0).find('.steward-b-tag').length, 0);
+});
+
+// Three explorers: one busy, one idle with an override, one idle.
+function fleetOf3(H) {
+    var busy = busyable(H, { name: 'bee', uid: 'e1' });
+    busy.setBusy(true);
+    mount(H, [busy, busyable(H, { name: 'ova', uid: 'e2' }), busyable(H, { name: 'ida', uid: 'e3' })]);
+    var ovs = {};
+    ovs.ova = H.Steward.ExplorerTask.AdventureZoneLong;
+    H.settings.write('explorers', { overrides: ovs });
+}
+
+t.test('the chips carry the filter counts and a click narrows the table', function () {
+    var H = harness.boot();
+    fleetOf3(H);
+    var $main = renderLive(H);
+    var $chips = $main.find('.steward-chip');
+    t.assert.deepStrictEqual([0, 1, 2, 3].map(function (i) { return $chips.eq(i).text(); }),
+        ['All 3', 'Busy 1', 'Idle 2', 'Overrides 1']);
+    t.assert.strictEqual(rowsOf($main).length, 3);
+
+    $chips.eq(1).trigger('click');
+    t.assert.strictEqual(rowsOf($main).length, 1);
+    t.assert.strictEqual(rowsOf($main).eq(0).find('td').eq(0).attr('title'), 'bee');
+
+    $main.find('.steward-chip').eq(3).trigger('click');
+    t.assert.strictEqual(rowsOf($main).length, 1);
+    t.assert.strictEqual(rowsOf($main).eq(0).find('td').eq(0).attr('title'), 'ova');
+});
+
+t.test('the live card meta counts the explorers', function () {
+    var H = harness.boot();
+    fleetOf3(H);
+    var meta = renderLive(H).find('.steward-card-meta').eq(0).text();
+    t.assert.ok(/^3 explorers · updated \d\d:\d\d$/.test(meta), meta);
+});
+
+t.test('a busy explorer with remaining 0 or null shows a plain Busy, a positive time shows it', function () {
+    [0, null, 90 * 60000].forEach(function (rem) {
+        var H = harness.boot();
+        var busy = busyable(H, { name: 'bee', uid: 'e1' });
+        busy.setBusy(true);
+        mount(H, [busy]);
+        H.Steward.core.specialists.orders.remaining = function () { return rem; };
+        var text = rowsOf(renderLive(H)).eq(0).find('.steward-b-busy').text();
+        if (rem) t.assert.ok(/^Busy .+/.test(text), String(text));
+        else t.assert.strictEqual(text, 'Busy', String(rem));
+    });
+});
+
+t.test('tiles gives one Explorers tile with the counts and the default task', function () {
+    var H = harness.boot();
+    fleetOf3(H);
+    jq.install(H);
+    var tiles = H.Steward.modules.explorers.tiles(H.Steward.kernel.ui.helpers);
+    t.assert.strictEqual(tiles.length, 1);
+    t.assert.strictEqual(tiles[0].title, 'Explorers');
+    t.assert.strictEqual(tiles[0].lines[0].text(), '3 explorers · 1 busy · 2 idle');
+    t.assert.strictEqual(tiles[0].lines[0].find('.steward-warn').text(), '1 busy');
+    t.assert.strictEqual(tiles[0].lines[1], 'Default task: Auto (Prolonged baseline)');
+});
+
+t.test('the explorers module keeps its quick-toggle title and registers a screen spec', function () {
+    var mod = harness.boot().module('explorers');
+    t.assert.strictEqual(mod.ui.section.title, 'Explorers');
+    t.assert.strictEqual(typeof mod.ui.section.render, 'function');
+    t.assert.strictEqual(typeof mod.ui.section.side, 'function');
+    t.assert.strictEqual(typeof mod.ui.section.tiles, 'function');
+    t.assert.strictEqual(mod.ui.section.action, undefined);
 });
 
 // --- send guard ------------------------------------------------------------
@@ -397,4 +458,18 @@ t.test('guard: a client that never applies a send is bounded to the batch plus p
     t.assert.strictEqual(warns, 1);
     var probes = Math.floor(HOURS6 / env.g.PROBE_COOLDOWN_MS);
     t.assert.ok(sends >= 10 && sends <= 10 + probes, 'sends ' + sends + ' (max ' + (10 + probes) + ')');
+});
+
+t.test('the per-explorer overrides field wraps so its button sits under the label', function () {
+    var H = harness.boot();
+    fleetOf3(H);
+    jq.install(H);
+    var $side = H.ctx.$('<div>');
+    H.Steward.modules.explorers.side($side, H.Steward.kernel.ui.helpers);
+    var hit = false;
+    $side.find('.steward-field').each(function () {
+        var $el = H.ctx.$(this);
+        if (/^Per-explorer overrides/.test($el.text())) hit = $el.hasClass('steward-wrap');
+    });
+    t.assert.ok(hit);
 });
