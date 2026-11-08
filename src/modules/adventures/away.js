@@ -11,6 +11,13 @@
  * pending, so every step observes the game first and never relies on a
  * callback having fired.
  *
+ * A scenario run has no generals, so its run kind skips Depart, Arrive,
+ * Pickups, StarAll, the waves, PackStar, Pack and Recall. It passes Jump ->
+ * Apply -> Trip and then joins the template chain: at JumpHome while trips
+ * are left, at Clear after its last trip. Apply and Trip live with the other
+ * scenario steps; Jump and Close still hand over to their table successors,
+ * and the skip picks the scenario step.
+ *
  * Every acting step checks, in this order: the observed exit (the effect
  * is in the game, so the step moves on); a sent but unseen marker (wait
  * for its effect, then pause, never send it again on its own); the last
@@ -501,12 +508,12 @@
         st().pause(S.RunPause.ClearTimeout, 'last quest not finished after ' + min + ' min; camps standing: ' + camps);
     }
 
-    // The hold of Clear while quest objects are left. The quiet clock is fed
-    // without counting so it stays live and resumes where it was once the
-    // objects are gone. Fewer objects than last seen is progress and restarts
-    // the pickup clock.
-    function clearPickups(r, objs) {
-        var text = wt().pickupText(objs);
+    // The clock of a wait for quest objects: time with no battle, from the
+    // 'pickupClock' slot. The plain quiet clock is fed without counting so it
+    // stays live and resumes where it was once the objects are gone. Fewer
+    // objects than last seen is progress and restarts the pickup clock. Clear
+    // and the scenario trip end share it, so both judge progress alike.
+    function pickupClock(r, objs) {
         ld().quietClock(r, false);
         var p = ld().quietClock(r, !ld().anyAttacking(), 'pickupClock');
         var c = st().current().pickupClock;
@@ -515,6 +522,13 @@
             p.ms = 0;
         }
         if (c) c.count = objs.length;
+        return p;
+    }
+
+    // The hold of Clear while quest objects are left, on the pickup clock.
+    function clearPickups(r, objs) {
+        var text = wt().pickupText(objs);
+        var p = pickupClock(r, objs);
         ld().waitBusy(r, null, 'quest objects left: ' + text + ', ' + quietText(p, CLEAR_PICKUP_MAX_MS));
         if (p.ms < CLEAR_PICKUP_MAX_MS) return;
         var min = Math.round(CLEAR_PICKUP_MAX_MS / 60000);
@@ -841,6 +855,18 @@
         }
     }
 
+    // ---- Scenario steps -----------------------------------------------------
+
+    // Apply and Trip belong to the scenario steps, which load after this
+    // file, so they are looked up on each call.
+    function apply(r) {
+        S.modules.adventures.trips.apply(r);
+    }
+
+    function trip(r) {
+        S.modules.adventures.trips.trip(r);
+    }
+
     // ---- Dispatch -----------------------------------------------------------
 
     // [step, fn, needs the inventory]. Built at call time: state.js fills
@@ -852,8 +878,10 @@
         var rows = [
             [R.Jump,      jumpStep,  false],
             [R.Arrive,    arrive,    true],
+            [R.Apply,     apply,     false],
             [R.Pickups,   pickups,   false],
             [R.StarAll,   starAll,   true],
+            [R.Trip,      trip,      false],
             [R.Horseshoe, horseshoe, false],
             [R.Clear,     clear,     true],
             [R.PackStar,  packStar,  true],
@@ -899,7 +927,9 @@
         toHome:              toHome,
         toIsland:            toIsland,
         homeLoaded:          homeLoaded,
+        quietText:           quietText,
         islandLoaded:        islandLoaded,
+        pickupClock:         pickupClock,
         plan:                plan
     };
 

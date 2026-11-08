@@ -169,7 +169,7 @@ t.test('stock and isRunning return null on an unreadable host', function () {
 function acting(o) {
     var s = setup(o);
     var sent = AC.wire(s.H);
-    var env = { onSend: null, home: true, free: 10, own: [], buildings: {}, running: null };
+    var env = { onSend: null, home: true, adventure: true, free: 10, own: [], buildings: {}, running: null };
     var gi = s.H.host.game.gi;
     var send = gi.SendServerAction;
     gi.SendServerAction = function () {
@@ -178,6 +178,7 @@ function acting(o) {
     };
     gi.mZoneBuffManager = { isBuffRunning: function () { return env.running; } };
     s.S.core.zone.isHome = function () { return env.home; };
+    s.S.core.zone.isAdventure = function () { return env.adventure; };
     s.S.core.resources.freePopulation = function () { return env.free; };
     s.S.core.adventures.own = function () { return env.own; };
     s.S.core.buildings.byGrid = function (g) { return env.buildings[g] || null; };
@@ -414,4 +415,70 @@ t.test('populationStock returns the total and largest stack, null when unreadabl
     assert.deepStrictEqual(plain(s.buffs.populationStock()), { total: 55, largest: 35 });
     breakStock(s);
     assert.strictEqual(s.buffs.populationStock(), null);
+});
+
+// ---- adventure items and buff targets --------------------------------------------
+
+t.test('adventureItem refuses each bad input before sending', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 5 }] });
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 0, 1)).reason, 'no target grid');
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 7, 0)).reason, 'invalid amount');
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 7, 1.5)).reason, 'invalid amount');
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 7, 6)).reason, 'not enough in stock');
+    s.env.adventure = false;
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 7, 1)).reason, 'not on an adventure');
+    s.env.adventure = true;
+    breakStock(s);
+    assert.strictEqual(run(s, s.buffs.adventureItem('ItemA', 7, 1)).reason, 'buff stock unreadable');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('adventureItem sends action 61 with grid, amount and uid, verified on a stock drop', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    s.env.onSend = function (a) { buff.amount -= a.p3; };
+    var def = s.buffs.adventureItem('ItemA', 7, 10);
+    assert.strictEqual(def.label, 'item ItemA x10 -> 7');
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions[0].id, 61);
+    assert.strictEqual(s.sent.actions[0].p2, 7);
+    assert.strictEqual(s.sent.actions[0].p3, 10);
+    assert.strictEqual(s.sent.actions[0].data.toKeyString(), 'ItemA');
+    assert.strictEqual(def.describe({ stock: 20 }), 'stock 20 -> 10');
+});
+
+t.test('adventureItem is not verified without a stock drop', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    var def = s.buffs.adventureItem('ItemA', 7, 10);
+    var res = run(s, def);
+    assert.notStrictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(def.dropped(), null);
+});
+
+t.test('dropped is null before a verified check and the observed drop after it', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    var def = s.buffs.adventureItem('ItemA', 7, 10);
+    assert.strictEqual(def.dropped(), null);
+    // The game takes only what the grid still needs: 4 of the 10 offered.
+    s.env.onSend = function () { buff.amount -= 4; };
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(def.dropped(), 4);
+});
+
+t.test('targetsOf splits and trims the target description', function () {
+    var s = setup({ buffs: [], buffDefs: {
+        ItemA: { GetTargetDescription_string: function () { return ' Foo , Bar,, Baz '; } }
+    } });
+    assert.deepStrictEqual(plain(s.buffs.targetsOf('ItemA')), ['Foo', 'Bar', 'Baz']);
+});
+
+t.test('targetsOf is empty when the def or the method is missing', function () {
+    var s = setup({ buffs: [], buffDefs: { ItemA: {} } });
+    assert.deepStrictEqual(plain(s.buffs.targetsOf('ItemA')), []);
+    assert.deepStrictEqual(plain(s.buffs.targetsOf('Missing')), []);
+    var s2 = setup({ buffs: [], buffDefs: null });
+    assert.deepStrictEqual(plain(s2.buffs.targetsOf('ItemA')), []);
 });

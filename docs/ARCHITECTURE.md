@@ -46,11 +46,11 @@ Steward
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map
-│   ├── production      ← troop queues, order pricing and order action
+│   ├── production      ← troop and item queues, order pricing and order action
 │   ├── quests          ← quest pool and claim action
 │   └── resources       ← resource amount and free population reads
 ├── modules
-│   ├── adventures      ← run templates, the run series (home, travel, waves, end of map, return, retrain) and its executors
+│   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors
 │   └── <id>            ← exposed only if the module chooses to publish state
 └── (shared enums)
     ├── Priority
@@ -97,6 +97,7 @@ The build script (`scripts/build.js`) concatenates files in this order:
 2. `src/core/**/*.js` — sorted by filename within each directory.
 3. `src/modules/**/*.js` — sorted by directory then filename.
 4. `src/vendor/**/*.js` — optional, last.
+5. Generated scenarios chunk (`scenarios/*.json` as `Steward.modules.adventures.builtinScenarios`) — after the modules section.
 
 The numeric prefixes inside `src/kernel/` matter: `00_namespace.js` runs before `40_registry.js` runs before `70_lifecycle.js`. Once the kernel is fully attached, core files can rely on `Steward.kernel.*` being there. By the time module files are concatenated, both kernel and core are available.
 

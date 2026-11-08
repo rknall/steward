@@ -19,6 +19,11 @@
  * changes; a series keeps its count and rebuilds nothing. Labels read memory
  * only, never files.
  *
+ * A scenario run uses the same table: its general rows show the skip mark,
+ * the waves row is one skipped row instead of a row per wave, and its
+ * Produce, Apply and Trip rows carry the run. Its row set never changes, so
+ * it has one fixed signature.
+ *
  * Bundle slot: module file, in name order after run.js and before settings.js
  * and state.js; top level only assigns S.modules.adventures.runmenu; all else
  * runs at call time. Every call into the other adventures parts is late-bound
@@ -175,7 +180,9 @@
                 group = { label: row.group, rows: [] };
                 groups.push(group);
             }
-            if (row.waves) group.rows = group.rows.concat(waveRows(rs, r, row, pos));
+            if (row.waves && st().optionOff(r, row.option)) {
+                group.rows.push({ label: row.group, file: '', mark: 'skip', detail: 'not used' });
+            } else if (row.waves) group.rows = group.rows.concat(waveRows(rs, r, row, pos));
             else group.rows.push(stageRow(rs, r, row, pos));
         }
         return groups;
@@ -282,7 +289,8 @@
 
     function signature() {
         var r = st().run();
-        return r ? 'waves:' + r.paths.length : IDLE;
+        if (!r) return IDLE;
+        return st().isScenario(r) ? 'scenario' : 'waves:' + r.paths.length;
     }
 
     function items() {

@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "label": "Riches of the Mountain",
+  "adventure": "BuffAdventures_Riches_of_the_Mountain",
+  "trips": [
+    {},
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_PureOre",
+          "grids": [6367]
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_Dynamite",
+          "grids": [4046, 3913, 3641, 3368]
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_Shovel",
+          "grids": [3708, 3366]
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_TavernKit",
+          "grids": [3913]
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_StorageKit",
+          "grids": [3641]
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_MasonKit",
+          "grids": [3708, 4046, 3368]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "BattleBuffHurt_BuffAd_MountainDynamite",
+          "grids": [3839],
+          "amount": 5
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_ShaftConstruction",
+          "grids": [3703]
+        },
+        {
+          "buff": "EmptyEffectBuff_BuffAd_FoodProvision",
+          "grids": [4046, 3708]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "BattleBuffHurt_BuffAd_Glue",
+          "grids": [2631]
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_WaterSplash",
+          "grids": [2631],
+          "amount": 10
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_WaterSplash",
+          "grids": [2631],
+          "amount": 10
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_Explosive",
+          "grids": [2631]
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_Specialist",
+          "grids": [2631]
+        }
+      ]
+    }
+  ]
+}

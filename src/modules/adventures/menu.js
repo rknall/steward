@@ -11,8 +11,13 @@
  * change after load. Template labels are user-chosen and sorted, so a flat
  * list stays readable.
  *
+ * Scenarios follow the templates after a separator, one row per scenario
+ * with its map count, plus a disabled row per broken scenario file so the
+ * user sees why it is missing. With no scenarios the list is the template
+ * list alone.
+ *
  * Rebuilding the submenu leaks native objects in AIR, so sync() rebuilds it
- * only when the set of templates actually changed, and only user actions
+ * only when the set of templates or scenarios changed, and only user actions
  * (saving or deleting a template, opening the dialog) call it. Every call
  * into the other adventures parts is late-bound because a script reload may
  * replace them.
@@ -22,7 +27,7 @@
 
     if (!S.modules.adventures) S.modules.adventures = {};
 
-    // Signature of the templates the last items() call listed.
+    // Signature of the templates and scenarios the last items() call listed.
     var lastSignature = null;
 
     function records() {
@@ -34,10 +39,25 @@
         return out;
     }
 
-    function signature(recs) {
+    // Every scenario entry, broken ones included; empty when the store is not
+    // loaded.
+    function scenarioEntries() {
+        var sc = S.modules.adventures.scenarios;
+        return sc && sc.list ? sc.list() : [];
+    }
+
+    // recs: the readable templates; scens: the scenario entries, whose parts
+    // are prefixed so a scenario never matches a template of the same id.
+    function signature(recs, scens) {
         var parts = [];
-        for (var i = 0; i < recs.length; i++) {
+        var i;
+        for (i = 0; i < recs.length; i++) {
             parts.push(recs[i].id + '\t' + recs[i].label + '\t' + recs[i].adventure);
+        }
+        scens = scens || [];
+        for (i = 0; i < scens.length; i++) {
+            parts.push('s:' + scens[i].id + '\t' + (scens[i].error !== undefined ? '!'
+                : scens[i].label + '\t' + scens[i].adventure));
         }
         return parts.join('\n');
     }
@@ -52,6 +72,21 @@
             onSelect: function () {
                 var run = S.modules.adventures.run;
                 if (run) run.start(rec.id);
+            }
+        };
+    }
+
+    // A broken scenario file is listed disabled, so the user sees it is there.
+    function scenarioItem(rec) {
+        if (rec.error !== undefined) return { label: rec.id + ': broken scenario file', enabled: false };
+        return {
+            label: function (pass) {
+                var run = S.modules.adventures.run;
+                return rec.label + ' ×' + (run ? run.available(rec.adventure, pass) : 0);
+            },
+            onSelect: function () {
+                var run = S.modules.adventures.run;
+                if (run) run.startScenario(rec.id);
             }
         };
     }
@@ -85,7 +120,8 @@
 
     function items() {
         var recs = records();
-        lastSignature = signature(recs);
+        var scens = scenarioEntries();
+        lastSignature = signature(recs, scens);
 
         var list = [
             {
@@ -112,12 +148,15 @@
         } else {
             for (var i = 0; i < recs.length; i++) list.push(templateItem(recs[i]));
         }
+        if (scens.length) list.push({ separator: true });
+        for (var n = 0; n < scens.length; n++) list.push(scenarioItem(scens[n]));
         return list;
     }
 
-    // Rebuilds the submenu when the template set differs from the last build.
+    // Rebuilds the submenu when the template or scenario set differs from the
+    // last build.
     function sync() {
-        if (signature(records()) === lastSignature) return false;
+        if (signature(records(), scenarioEntries()) === lastSignature) return false;
         var ui = S.kernel.ui;
         return ui && ui.refreshModuleMenu ? ui.refreshModuleMenu('adventures') : false;
     }

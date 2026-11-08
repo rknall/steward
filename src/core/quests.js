@@ -33,10 +33,22 @@
  * adventure.
  *
  * clickNames() names the map objects that open quests still wait to have
- * clicked. It applies the client's own pick-up-all filter: the quest is not
- * finished and IsQuestActive() holds, the trigger has type 1 and condition 9
+ * clicked. It applies the client's own pick-up-all filter: the quest is read
+ * and started (not waiting in mode 2, since a click for an unstarted quest
+ * does not register), not finished and IsQuestActive() holds, the trigger has type 1 and condition 9
  * (click a named map object) and a non-empty name_string, and its entry in
  * mQuestTriggersFinished_vector (by triggerIdx) is missing or has status 0.
+ *
+ * itemWant() tells whether a started quest still waits for an item to be
+ * applied, placed or destroyed, so a caller never sends an item before its
+ * quest is read and started.
+ *
+ * Both take opts.running for the strict gate a scenario island needs: only a
+ * running quest counts, meaning in the pool, not finished, IsQuestActive()
+ * and in READ_MODE. Any other mode (unread, or one the client set for other
+ * reasons) never counts, because a pick-up or item spent on a quest that does
+ * not take it is lost and the scenario may run short. opts.held, when given,
+ * collects what waits only because its quest is not running yet.
  *
  * Bundle slot: core, after production.js and before resources.js (core files
  * load in name order). Everything here runs at call time; the top level only
@@ -235,6 +247,26 @@
         return typeof q.IsQuestActive === 'function' && q.IsQuestActive() === true;
     }
 
+    // The strict gate: the quest is open, the client counts it as active and
+    // it runs in READ_MODE. The one definition clickNames and itemWant use
+    // under opts.running.
+    function isRunning(q) {
+        return modeOf(q) === READ_MODE && isOpenActive(q);
+    }
+
+    // The quest's name, or '' when the read throws.
+    function nameOf(q) {
+        try {
+            return String(q.getQuestName_string());
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function hasOwn(obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
     // True when the trigger asks for a click on a named map object.
     function isClickTrigger(t) {
         return !!t && t.type === CLICK_TRIGGER_TYPE && t.condition === CLICK_TRIGGER_CONDITION &&
@@ -250,17 +282,25 @@
         return st.status === 0;
     }
 
-    // { name: true } for every map object an open, active quest still waits
-    // to have clicked; null when the pool cannot be read. A quest whose read
-    // throws is skipped, as list() does.
-    function clickNames() {
+    // { name: true } for every map object an open, active, started quest
+    // still waits to have clicked; null when the pool cannot be read. A quest
+    // whose read throws is skipped, as list() does. With opts.running only
+    // running quests count, and opts.held (an object), when given, gets
+    // name -> { quest, mode } for each object that only a quest not running
+    // yet waits for.
+    function clickNames(opts) {
+        opts = opts || {};
+        var strict = opts.running === true;
         var qs = readPool();
         if (qs === null) return null;
         var out = {};
+        var held = {};
         for (var i = 0; i < qs.length; i++) {
             try {
                 var q = qs[i];
-                if (!isQuest(q) || !isOpenActive(q)) continue;
+                if (!isQuest(q) || q.isFinished() === true) continue;
+                var counts = strict ? isRunning(q) : (modeOf(q) !== UNREAD_MODE && isOpenActive(q));
+                if (!counts && !strict) continue;
                 var def = definition(q).def;
                 var triggers = def ? toList(def.questTriggers_vector) : null;
                 if (!triggers) continue;
@@ -268,13 +308,104 @@
                 for (var k = 0; k < triggers.length; k++) {
                     var t = triggers[k];
                     if (!isClickTrigger(t) || !isTriggerOpen(statuses, t)) continue;
-                    out[t.name_string] = true;
+                    if (counts) out[t.name_string] = true;
+                    else if (!hasOwn(held, t.name_string)) held[t.name_string] = { quest: nameOf(q), mode: modeOf(q) };
                 }
             } catch (e) {
                 S.kernel.warn('quests', 'quest entry ' + i + ' threw:', e);
             }
         }
+        // An object that a running quest also wants is listed, not held.
+        if (opts.held) {
+            for (var name in held) {
+                if (hasOwn(held, name) && !hasOwn(out, name)) opts.held[name] = held[name];
+            }
+        }
         return out;
+    }
+
+    // The end-condition actions that name an item to apply, place or destroy.
+    var ITEM_ACTIONS = ['buffappliedonadventure', 'onmap', 'buildingdestroyed'];
+
+    // The main quest repeats the conditions of its sub-quests, so counting it
+    // would report an item as wanted before any sub-quest is started.
+    var MAIN_QUEST_MARK = 'Main';
+
+    function inList(list, value) {
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] === value) return true;
+        }
+        return false;
+    }
+
+    // The condition of one quest that names one of the wanted items, or null.
+    // End conditions with an item action come first; the quest's triggers of
+    // type 1 are the fallback.
+    function itemCondition(def, names) {
+        var ends = toList(def.endConditions_vector);
+        var i;
+        if (ends) {
+            for (i = 0; i < ends.length; i++) {
+                var en = ends[i];
+                if (en && inList(ITEM_ACTIONS, en.action_string) && inList(names, en.item_string)) return en;
+            }
+        }
+        var trig = toList(def.questTriggers_vector);
+        if (trig) {
+            for (i = 0; i < trig.length; i++) {
+                var t = trig[i];
+                if (t && t.type === 1 && inList(names, t.item_string || t.name_string || t.type_string)) return t;
+            }
+        }
+        return null;
+    }
+
+    // Whether a started quest still waits for the named item (or one of the
+    // extra target names): 'open' while a matching condition is unmet, 'done'
+    // when every match is met or its quest finished, 'none' when no quest
+    // asks for it, null when the pool cannot be read. Unread quests and the
+    // main quest do not count. A quest whose read throws is skipped.
+    // With opts.running only a running quest can make it 'open'. A quest not
+    // running yet whose condition is still unmet makes it 'held', ahead of
+    // 'done' because the item is still needed, and opts.held (an array),
+    // when given, gets { quest, mode } for each such quest.
+    function itemWant(name, targets, opts) {
+        opts = opts || {};
+        var strict = opts.running === true;
+        var qs = readPool();
+        if (qs === null) return null;
+        var names = [name].concat(targets || []);
+        var seenDone = false;
+        var seenHeld = false;
+        for (var i = 0; i < qs.length; i++) {
+            try {
+                var q = qs[i];
+                if (!isQuest(q)) continue;
+                if (!strict && modeOf(q) === UNREAD_MODE) continue;
+                var qname = nameOf(q);
+                if (qname.indexOf(MAIN_QUEST_MARK) !== -1) continue;
+                var fin = q.isFinished() === true;
+                var counts = fin || (strict ? isRunning(q) : isOpenActive(q));
+                if (!counts && !strict) continue;
+                var def = definition(q).def;
+                if (!def) continue;
+                var cond = itemCondition(def, names);
+                if (!cond) continue;
+                var unmet = !fin && isTriggerOpen(toList(q.mQuestTriggersFinished_vector), cond);
+                if (!counts) {
+                    if (!unmet) continue;
+                    seenHeld = true;
+                    if (opts.held) opts.held.push({ quest: qname, mode: modeOf(q) });
+                    continue;
+                }
+                if (unmet) return 'open';
+                seenDone = true;
+            } catch (e) {
+                S.kernel.warn('quests', 'quest entry ' + i + ' threw:', e);
+            }
+        }
+        if (seenHeld) return 'held';
+        return seenDone ? 'done' : 'none';
     }
 
     // The live host quest with this uid key, or null. Always re-found, never
@@ -480,5 +611,6 @@
     S.core.quests.read     = read;
     S.core.quests.definition = definition;
     S.core.quests.clickNames = clickNames;
+    S.core.quests.itemWant = itemWant;
 
 }(Steward));

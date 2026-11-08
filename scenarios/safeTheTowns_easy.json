@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "label": "Save the Towns (easy)",
+  "adventure": "BuffAdventures_safeTheTowns_easy",
+  "trips": [
+    {},
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_Repairkit",
+          "grids": [3774]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_Bread",
+          "grids": [3091, 3356, 3491]
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_Beer",
+          "grids": [4786, 4655, 4792]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_Sausage",
+          "grids": [3774]
+        }
+      ]
+    }
+  ]
+}

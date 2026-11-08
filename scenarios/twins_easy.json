@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "label": "Twins (easy)",
+  "adventure": "BuffAdventures_twins_easy",
+  "trips": [
+    {},
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_Bridge",
+          "grids": [3768, 2956, 4318]
+        },
+        {
+          "buff": "ChangeSkin_BuffAd_Broadsheet",
+          "grids": [4863, 3981, 4396]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_BuffAd_Rescueparty",
+          "grids": [2215]
+        }
+      ]
+    }
+  ]
+}

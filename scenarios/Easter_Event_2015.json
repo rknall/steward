@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "label": "Easter Event 2015",
+  "adventure": "BuffAdventures_Easter_Event_2015",
+  "trips": [
+    {},
+    {
+      "items": [
+        {
+          "buff": "ChangeSkin_Easter_BuffAd_Polecat_Spray",
+          "grids": [5475, 5813, 5748, 5951, 6023]
+        },
+        {
+          "buff": "BattleBuffHurt_BuffAd_Fitch_Gin",
+          "grids": [6216, 5536, 6023, 4797, 3294, 2202, 1388]
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "buff": "Easter_Event_2015_Buff_Adventure_Scared_Chicken",
+          "grids": [5475, 5813, 5748, 5951, 6023]
+        },
+        {
+          "buff": "EmptyEffectBuff_Easter_BuffAd_ChickWellness",
+          "grids": [5475, 5813, 5748, 5951, 6023]
+        }
+      ]
+    }
+  ]
+}

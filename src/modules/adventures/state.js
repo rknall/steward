@@ -16,6 +16,15 @@
  * so no second list of steps exists to drift from it. Wave steps always run on
  * the run's island.
  *
+ * Two run kinds share the table. A template run sends generals through the
+ * waves; a scenario run (run.scenarioId set) sends none and instead produces
+ * items at home, applies them on the island and repeats trips on one map.
+ * Each row names the option that switches it off, and go() skips forward over
+ * the rows the run kind switches off (kindOff), so both kinds walk the one
+ * table and no second chain of steps exists. A scenario run persists its
+ * scenarioId, its normalised trips (copied at start) and the index of the
+ * current trip.
+ *
  * Storage: one file, <steward folder>/adventures/run.json, written whole
  * with S.kernel.files.writeText (temp file, then move). The file replaces
  * the previous one, so a field that is dropped from the run never lingers;
@@ -99,9 +108,15 @@
     var ADVENTURE = 2;  // the run's adventure island is viewed
     var ANY = 3;        // any zone; the step itself handles where it is
 
-    // The options a template can switch off, as named in the table below.
+    // The options that switch a row off, as named in the table below. A
+    // template switches off the horseshoe and retraining. The run kind
+    // switches off the rest: a scenario run sends no generals, so it skips
+    // the OPT_GENERALS rows (and the horseshoe and retraining, which need
+    // generals), and a template run skips the OPT_SCENARIO rows.
     var OPT_HORSESHOE = 'horseshoe';
     var OPT_RETRAIN = 'retrain';
+    var OPT_GENERALS = 'generals';
+    var OPT_SCENARIO = 'scenario';
 
     // The waves are no series steps: they run between this row and the next
     // one and show as one group of their own.
@@ -111,33 +126,44 @@
     // The series steps in run order: [key, value, where, group, row, option,
     // long]. The one table: S.RunStep, partOf(), readyOn(), the menu rows of
     // stepRows() and waitsLong() are all read from it. Steps next to each other
-    // with the same group and row fold into one menu row; option names what
-    // switches the row off. long marks a step that waits minutes for the game,
-    // where the 10 s tick looks often enough and a faster pass only adds reads.
+    // with the same group, row and option fold into one menu row; option names
+    // what switches the row off. long marks a step that waits minutes for the
+    // game, where the 10 s tick looks often enough and a faster pass only adds
+    // reads.
+    //
+    // Both run kinds walk this one table. go() skips forward over the rows the
+    // run kind switches off (kindOff), so every step hands over to its table
+    // successor and each kind still takes its own chain: Muster goes on to
+    // Produce, which a template run skips for Validate, and StartMap goes on
+    // to Depart, which a scenario run skips for Jump. The order of the rows
+    // therefore decides the next step of both kinds.
     var RUN_STEPS = [
-        ['Muster',     'RunMuster',     HOME,      'Home',       'Check generals and files',   '', true],
-        ['Validate',   'RunValidate',   HOME,      'Home',       'Check generals and files',   ''],
-        ['Deploy',     'RunDeploy',     HOME,      'Home',       'Load generals',              ''],
-        ['Snapshot',   'RunSnapshot',   HOME,      'Home',       'Load generals',              ''],
-        ['Supply',     'RunSupply',     HOME,      'Home',       'Load generals',              ''],
-        ['Unload',     'RunUnload',     HOME,      'Home',       'Load generals',              ''],
-        ['Load',       'RunLoad',       HOME,      'Home',       'Load generals',              ''],
-        ['Verify',     'RunVerify',     HOME,      'Home',       'Load generals',              ''],
+        ['Muster',     'RunMuster',     HOME,      'Home',       'Wait between maps',          '',            true],
+        ['Produce',    'RunProduce',    HOME,      'Home',       'Produce items',              OPT_SCENARIO,  true],
+        ['Validate',   'RunValidate',   HOME,      'Home',       'Check generals and files',   OPT_GENERALS],
+        ['Deploy',     'RunDeploy',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['Snapshot',   'RunSnapshot',   HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['Supply',     'RunSupply',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['Unload',     'RunUnload',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['Load',       'RunLoad',       HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['Verify',     'RunVerify',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
         ['StartMap',   'RunStartMap',   HOME,      'Home',       'Start map',                  ''],
-        ['Depart',     'RunDepart',     HOME,      'Home',       'Send generals',              ''],
+        ['Depart',     'RunDepart',     HOME,      'Home',       'Send generals',              OPT_GENERALS],
         ['Jump',       'RunJump',       ANY,       'Travel',     'Jump to the map',            ''],
-        ['Arrive',     'RunArrive',     ADVENTURE, 'Travel',     'Wait for all generals',      '', true],
-        ['Pickups',    'RunPickups',    ADVENTURE, 'Travel',     'Pick up items',              ''],
-        ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       ''],
+        ['Arrive',     'RunArrive',     ADVENTURE, 'Travel',     'Wait for all generals',      OPT_GENERALS,  true],
+        ['Apply',      'RunApply',      ADVENTURE, 'Travel',     'Apply items',                OPT_SCENARIO],
+        ['Pickups',    'RunPickups',    ADVENTURE, 'Travel',     'Pick up items',              OPT_GENERALS],
+        ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       OPT_GENERALS],
+        ['Trip',       'RunTrip',       ADVENTURE, 'Travel',     'Quests and pick-ups',        OPT_SCENARIO],
         ['Horseshoe',  'RunHorseshoe',  ADVENTURE, 'Travel',     'Horseshoe',                  OPT_HORSESHOE],
-        ['PackStar',   'RunPackStar',   ADVENTURE, 'End of map', 'Place carriers',             ''],
-        ['Pack',       'RunPack',       ADVENTURE, 'End of map', 'Pack leftover troops',       ''],
-        ['Clear',      'RunClear',      ADVENTURE, 'End of map', 'Wait for last quest',        '', true],
+        ['PackStar',   'RunPackStar',   ADVENTURE, 'End of map', 'Place carriers',             OPT_GENERALS],
+        ['Pack',       'RunPack',       ADVENTURE, 'End of map', 'Pack leftover troops',       OPT_GENERALS],
+        ['Clear',      'RunClear',      ADVENTURE, 'End of map', 'Wait for last quest',        '',            true],
         ['LastQuest',  'RunLastQuest',  ANY,       'End of map', 'Claim last quest and close', ''],
         ['Close',      'RunClose',      ANY,       'End of map', 'Claim last quest and close', ''],
-        ['Recall',     'RunRecall',     ANY,       'Back home',  'Return home',                ''],
+        ['Recall',     'RunRecall',     ANY,       'Back home',  'Send generals home',         OPT_GENERALS],
         ['JumpHome',   'RunJumpHome',   ANY,       'Back home',  'Return home',                ''],
-        ['ArriveHome', 'RunArriveHome', HOME,      'Back home',  'Return home',                '', true],
+        ['ArriveHome', 'RunArriveHome', HOME,      'Back home',  'Return home',                '',            true],
         ['Account',    'RunAccount',    HOME,      'Back home',  'Count lost troops',          OPT_RETRAIN],
         ['Population', 'RunPopulation', HOME,      'Back home',  'Retrain',                    OPT_RETRAIN],
         ['Retrain',    'RunRetrain',    HOME,      'Back home',  'Retrain',                    OPT_RETRAIN],
@@ -177,6 +203,7 @@
     S.RunPause.ClearTimeout      = 'PauseClearTimeout';
     S.RunPause.RetrainShort      = 'PauseRetrainShort';
     S.RunPause.RetrainFailed     = 'PauseRetrainFailed';
+    S.RunPause.ItemShort         = 'PauseItemShort';
     S.RunPause.Stuck             = 'PauseStuck';
 
     // The phases of the zone trip, persisted in run.json as run.resolve.phase.
@@ -377,30 +404,51 @@
 
     // The menu rows in run order: { group, label, option, first, last, waves },
     // where first and last are the positions the row covers. waves marks the
-    // one row that stands for all wave steps.
+    // one row that stands for all wave steps; the waves need generals, so that
+    // row carries OPT_GENERALS. Only steps with the same option fold, so a row
+    // is used or skipped as a whole.
     function stepRows() {
         var rows = [];
         for (var i = 0; i < RUN_STEPS.length; i++) {
             var step = RUN_STEPS[i];
             var prev = rows.length ? rows[rows.length - 1] : null;
-            if (prev && prev.group === step[3] && prev.label === step[4]) {
+            if (prev && prev.group === step[3] && prev.label === step[4] && prev.option === step[5]) {
                 prev.last = i;
             } else {
                 rows.push({ group: step[3], label: step[4], option: step[5], first: i, last: i, waves: false });
             }
             if (step[0] === WAVES_AFTER) {
                 var p = position(S.WaveStep.Gate);
-                rows.push({ group: WAVES_GROUP, label: '', option: '', first: p, last: p, waves: true });
+                rows.push({ group: WAVES_GROUP, label: '', option: OPT_GENERALS, first: p, last: p, waves: true });
             }
         }
         return rows;
     }
 
-    // Whether this run skips the stage of an option. Retraining follows the
-    // module setting, read now so a change shows at once; a bundle without
-    // the settings reader reads as off. A run started on an open map took no
-    // snapshot once it is past that step, so it retrains nothing.
+    // ---- Run kinds ----------------------------------------------------------
+
+    // A scenario run carries the id of its scenario file; a template run has
+    // none.
+    function isScenario(r) {
+        return !!r && typeof r.scenarioId === 'string' && r.scenarioId !== '';
+    }
+
+    // Whether the run kind switches off a row option. A scenario run sends no
+    // generals, so the general rows, the horseshoe and retraining are off; a
+    // template run has no items to produce or apply.
+    function kindOff(r, option) {
+        if (!r) return false;
+        if (isScenario(r)) return option === OPT_GENERALS || option === OPT_HORSESHOE || option === OPT_RETRAIN;
+        return option === OPT_SCENARIO;
+    }
+
+    // Whether this run skips the stage of an option: first the run kind, then
+    // the template's choices. Retraining follows the module setting, read now
+    // so a change shows at once; a bundle without the settings reader reads as
+    // off. A run started on an open map took no snapshot once it is past that
+    // step, so it retrains nothing.
     function optionOff(r, option) {
+        if (kindOff(r, option)) return true;
         if (option === OPT_HORSESHOE) return r.speedBuff === S.SpeedBuffChoice.None;
         if (option === OPT_RETRAIN) {
             var a = S.modules.adventures;
@@ -481,9 +529,21 @@
         return q && num(q.count) !== null && q.count >= 1 ? Math.floor(q.count) : 1;
     }
 
-    // The run and its place in the series, shared by both status texts.
+    // The trip of a scenario run ('trip 2/3'), or '' for a template run.
+    // r.trip reaches trips.length once the last trip is over, so the label
+    // then stays on the last trip.
+    function tripLabel() {
+        var r = run();
+        if (!isScenario(r)) return '';
+        var n = isArray(r.trips) ? r.trips.length : 0;
+        return 'trip ' + Math.min(r.trip + 1, n) + '/' + n;
+    }
+
+    // The run and its place in the series, shared by both status texts and
+    // the run menu; a scenario run adds its trip.
     function runPart(r) {
-        return r.label + ', run ' + (finishedRuns() + 1) + '/' + requestedRuns();
+        return r.label + ', run ' + (finishedRuns() + 1) + '/' + requestedRuns() +
+            (isScenario(r) ? ', ' + tripLabel() : '');
     }
 
     function status() {
@@ -641,6 +701,12 @@
     // per travelling unit at the last read where only a landing could raise
     // it (null: no valid read). stopReason is the reason the series was
     // stopped (null: not stopped).
+    //
+    // scenarioId names the scenario file of a scenario run ('' for a template
+    // run, which is what tells the kinds apart). trips is a copy of the
+    // scenario's normalised trips taken at start, so the run stays bound to
+    // the trips validated at start, like paths. trip is the 0-based index of
+    // the current trip; it equals trips.length once the last trip is over.
     function newRun(start) {
         var s = isPlainObject(start) ? start : {};
         var t = clock();
@@ -656,6 +722,9 @@
             loadoutKeys: isPlainObject(s.loadoutKeys) ? s.loadoutKeys : {},
             waveIndex:   count(s.waveIndex),
             speedBuff:   str(s.speedBuff),
+            scenarioId:  str(s.scenarioId),
+            trips:       isArray(s.trips) ? s.trips.slice(0) : [],
+            trip:        count(s.trip),
             step:        isStep(s.step) ? s.step : S.WaveStep.Gate,
             status:      S.RunStatus.Running,
             since:       t,
@@ -782,9 +851,22 @@
     // and then each known field is normalised; a field without a normaliser
     // still round-trips. loadoutKeys may come back null here, which the
     // repair below turns into a WaveFile pause.
+    //
+    // The trips of a scenario run go through the scenario file's own
+    // normaliser, read at call time. Trips it refuses (or a bundle without it)
+    // cannot be run, so the run pauses until the user starts it again.
     function normRun(v) {
         if (!isPlainObject(v)) return { run: null, repaired: [] };
         var repaired = [];
+        var scenarioId = str(v.scenarioId);
+        var trips = [];
+        var badTrips = false;
+        if (scenarioId !== '') {
+            var sc = S.modules.adventures.scenarios;
+            var norm = sc && sc.normTrips ? sc.normTrips(v.trips) : null;
+            if (isArray(norm)) trips = norm;
+            else badTrips = true;
+        }
         var facts = {
             id:          num(v.id) !== null ? v.id : 0,
             templateId:  str(v.templateId),
@@ -795,7 +877,10 @@
             loadoutPath: str(v.loadoutPath),
             loadoutKeys: normKeys(v.loadoutKeys),
             waveIndex:   count(v.waveIndex),
-            speedBuff:   str(v.speedBuff)
+            speedBuff:   str(v.speedBuff),
+            scenarioId:  scenarioId,
+            trips:       trips,
+            trip:        count(v.trip)
         };
         var r = newRun(facts);
         var k;
@@ -841,6 +926,10 @@
             repaired.push('no loadout keys -> Paused');
             r.loadoutKeys = {};
             filePause(r, S.RunPause.WaveFile, 'state file has no loadout keys; Stop and start the run again');
+        }
+        if (badTrips) {
+            repaired.push('bad scenario trips -> Paused');
+            filePause(r, S.RunPause.WaveFile, 'state file has no valid scenario trips; Stop and start the run again');
         }
         if (r.status === S.RunStatus.Paused && !r.pause) {
             repaired.push('paused without a reason');
@@ -896,6 +985,12 @@
     // change drops the waiting deadline and the busy wait; a waiting step sets
     // its own. A step change also ends any zone trip, while the trip count
     // lasts as long as the run stays at the same wave or series step.
+    //
+    // A series step the run kind switches off gives way to the next row of the
+    // table, as often as needed; the log line names the skipped steps and all
+    // else applies to the step the run lands on. The last row is used by both
+    // kinds, so the skip always ends on a step. Wave steps are not in the
+    // table and are never skipped.
     function go(step, why, opts) {
         var rs = current();
         var r = rs.run;
@@ -904,6 +999,15 @@
             S.kernel.warn('adventures', 'not a run step:', step);
             return false;
         }
+        var skipped = [];
+        var i = stepIndex(step);
+        while (i >= 0 && i + 1 < RUN_STEPS.length && kindOff(r, RUN_STEPS[i][5])) {
+            skipped.push(RUN_STEPS[i][0]);
+            i++;
+        }
+        if (skipped.length) step = RUN_STEPS[i][1];
+        var note = why ? String(why) : '';
+        if (skipped.length) note += (note ? '; ' : '') + 'skipped ' + skipped.join(', ');
         var from = r.step;
         // Leaving a wave keeps the wave in the log line (wave 3/3: Confirm ->
         // PackStar); otherwise the line names where the run now is.
@@ -922,7 +1026,7 @@
         // Gate re-reads the wave file, so an edit made during a pause is seen.
         if (step === S.WaveStep.Gate) rs.cache = null;
         S.kernel.log('adventures', where + ': ' + stepName(from) + ' -> ' +
-            stepName(step) + (why ? ' (' + why + ')' : ''));
+            stepName(step) + (note ? ' (' + note + ')' : ''));
         save();
         refresh();
         return true;
@@ -1259,6 +1363,9 @@
         position:      position,
         stepRows:      stepRows,
         optionOff:     optionOff,
+        isScenario:    isScenario,
+        kindOff:       kindOff,
+        tripLabel:     tripLabel,
         isStep:        isStep,
         isWaveStep:    isWaveStep,
         partOf:        partOf,

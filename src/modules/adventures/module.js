@@ -21,6 +21,14 @@
  * without sending an order twice. The run shows in its own ~Adventures~ bar
  * menu (runmenu.js) while it is Running or Paused.
  *
+ * A scenario run (a scenario file instead of a template) is the same run
+ * without generals: it walks the same steps table, skipping the general
+ * steps, and repeats trips on one map. At home it produces the trip's items,
+ * on the island it applies them to their grids while the quests still want
+ * them, then the quest watcher and the collect module finish the trip; the
+ * last trip ends the map like a template run. Scenarios are listed after the
+ * templates in the native ~Steward~ menu.
+ *
  * A run takes its next step as soon as the game allows: a pass that moved a
  * step or left queue work asks the scheduler for another at once, a short
  * wait polls every WAIT_MS, and a long wait stays on the scheduler tick.

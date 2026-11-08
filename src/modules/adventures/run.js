@@ -17,6 +17,16 @@
  * A fatal check problem stores nothing. End repetition lets the series stop
  * after the current run.
  *
+ * Start of a scenario (startScenario) needs no generals and no battle
+ * files: it starts from home only, because the first step produces the
+ * scenario's items there. Every item must be a produceable buff the game
+ * knows; an unreadable definition list asks the user to try again, since
+ * that is a moment after load, not a broken file. When the map is already
+ * open a prompt asks for the start trip (default 1), so a series stopped
+ * mid-map can carry on; otherwise the run starts at the first trip. Quest
+ * objects are clicked by the collect module, so a scenario started while
+ * collect does not pick up on adventures warns but still starts.
+ *
  * Menu handlers only change state. They never enqueue: an entry added from
  * a menu callback carries no module tag, so cancelByModule could not remove
  * it. The scheduler's plan() enqueues every step. Pause, Stop and replacing
@@ -253,21 +263,24 @@
         return true;
     }
 
-    function start(id) {
-        var rec = S.modules.adventures.templates.get(id);
+    // The prompts every start shares: the record is readable, a map is in the
+    // star menu, the user agrees to replace a current run and names a count.
+    // kind names the record in the notice ('Template', 'Scenario'). Returns
+    // { rec, count, advLabel }, or null when the start ends here.
+    function startPrompts(rec, id, kind) {
         if (!rec) {
-            notify('Template ' + id + ' cannot be read.');
-            return false;
+            notify(kind + ' ' + id + ' cannot be read.');
+            return null;
         }
         var maps = available(rec.adventure);
         var advLabel = S.core.adventures.label(rec.adventure) || rec.adventure;
         if (maps < 1) {
             notify('No ' + advLabel + ' map in the star menu.');
-            return false;
+            return null;
         }
         var rs = store().current();
         if (rs.request || rs.run) {
-            if (!agree(replaceQuestion(rs))) return false;
+            if (!agree(replaceQuestion(rs))) return null;
             // The old run must not act while the prompts below are answered. A
             // queued attack leaves its round half sent; later exits keep the
             // run, so the round goes with the queue.
@@ -278,14 +291,102 @@
         var r = countFrom(answer, maps);
         if (!r.ok) {
             if (r.reason === 'invalid') notify('Not a run count: ' + answer);
+            return null;
+        }
+        return { rec: rec, count: r.count, advLabel: advLabel };
+    }
+
+    function start(id) {
+        var p = startPrompts(S.modules.adventures.templates.get(id), id, 'Template');
+        if (!p) return false;
+        var rec = p.rec;
+
+        var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
+        if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, p.count, zoneId);
+        if (S.core.zone.isHome() === true) return startHome(rec, p.count, zoneId);
+        notify('Go home or view the ' + p.advLabel + ' island, then choose the template again.');
+        return false;
+    }
+
+    // A scenario's items the game cannot produce, or null when the definitions
+    // cannot be read now.
+    function unknownItems(rec) {
+        var names = S.modules.adventures.scenarios.buffsOf(rec);
+        var out = [];
+        for (var i = 0; i < names.length; i++) {
+            var known = S.core.production.isProduceable(names[i]);
+            if (known === null || known === undefined) return null;
+            if (known === false) out.push('unknown item ' + names[i]);
+        }
+        return out;
+    }
+
+    // The start trip index: 0 unless the map is open, then the user's answer.
+    // null when the prompt was cancelled or not a trip number.
+    function startTrip(rec, zoneId) {
+        if (typeof zoneId !== 'number') return 0;
+        var trips = rec.trips.length;
+        var answer = ask('Start at which trip of "' + rec.label + '"? 1..' + trips, '1');
+        var w = waveFrom(answer, trips);
+        if (!w.ok) {
+            if (w.reason === 'invalid') notify('Not a trip number: ' + answer);
+            return null;
+        }
+        return w.wave - 1;
+    }
+
+    function startScenario(id) {
+        var p = startPrompts(S.modules.adventures.scenarios.get(id), id, 'Scenario');
+        if (!p) return false;
+        var rec = p.rec;
+        if (S.core.zone.isHome() !== true) {
+            notify('Go home, then choose the scenario again.');
             return false;
+        }
+        var unknown = unknownItems(rec);
+        if (unknown === null) {
+            notify('Item definitions cannot be read right now; try again in a moment.');
+            return false;
+        }
+        if (unknown.length) return checkFailed(rec, unknown);
+
+        var warnings = [];
+        var watcher = S.modules.adventures.watcher;
+        if (!watcher || !watcher.patterns || watcher.patterns() === null) {
+            warnings.push('collect does not pick up on adventures: quest objects will not be clicked');
+        }
+        for (var i = 0; i < warnings.length; i++) {
+            S.kernel.warn('adventures', 'start check "' + rec.label + '":', warnings[i]);
         }
 
         var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
-        if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, r.count, zoneId);
-        if (S.core.zone.isHome() === true) return startHome(rec, r.count, zoneId);
-        notify('Go home or view the ' + advLabel + ' island, then choose the template again.');
-        return false;
+        if (typeof zoneId !== 'number') zoneId = null;
+        var trip = startTrip(rec, zoneId);
+        if (trip === null) return false;
+
+        var run = store().newRun({
+            id:          store().now(),
+            templateId:  '',
+            scenarioId:  rec.id,
+            label:       rec.label,
+            adventure:   rec.adventure,
+            zoneId:      zoneId,
+            paths:       [],
+            loadoutPath: '',
+            loadoutKeys: {},
+            waveIndex:   0,
+            step:        S.RunStep.Muster,
+            speedBuff:   S.SpeedBuffChoice.None,
+            trips:       rec.trips,
+            trip:        trip
+        });
+        store().begin(makeRequest({ id: '', label: rec.label, adventure: rec.adventure }, p.count), run);
+        wakeRun();
+        S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + p.count, 'at trip',
+            trip + 1, 'of', rec.trips.length, 'zone', zoneId, '(' + warnings.length + ' warning(s))');
+        notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', trip ' + (trip + 1) +
+            ' of ' + rec.trips.length + '.' + (warnings.length ? ' Warning: ' + warnings.join('; ') + '.' : ''));
+        return true;
     }
 
     // True while runs are requested beyond the one in progress, so there is
@@ -384,6 +485,7 @@
         available:     available,
         can:           can,
         start:         start,
+        startScenario: startScenario,
         pause:         pause,
         resume:        resume,
         stop:          stop,

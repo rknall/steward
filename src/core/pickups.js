@@ -4,7 +4,9 @@
  * targets() lists two kinds of map object. Quest objects are the map objects
  * an open quest still waits to have clicked (S.core.quests.clickNames()),
  * read only on an adventure zone. Collectibles are the objects the host flags
- * as collectible whose name matches one of the given patterns. Which kinds to
+ * as collectible whose name matches one of the given patterns. On request
+ * the quest objects are limited to running quests, and the ones that wait
+ * for their quest to run are reported apart. Which kinds to
  * ask for, which patterns to use and when to click stay with the caller; this
  * file decides nothing.
  *
@@ -93,6 +95,10 @@
     // order, or null when the map cannot be read. opts.patterns is an
     // already expanded pattern list (missing or empty: no collectibles);
     // opts.quests true includes quest objects on an adventure zone.
+    // opts.running true takes quest objects of running quests only (the
+    // strict gate of S.core.quests.clickNames), and opts.held (an array), when
+    // given, gets the same target shape plus { quest, mode } for each quest
+    // object on the map that waits only for its quest to run.
     function targets(opts) {
         opts = opts || {};
         var bld = S.core.buildings;
@@ -100,8 +106,9 @@
         if (typeof zoneId !== 'number') return null;
         if (!bld.readable()) return null;
         var names = null;
+        var held = opts.held ? {} : null;
         if (opts.quests === true && S.core.zone.isAdventure()) {
-            names = S.core.quests.clickNames();
+            names = S.core.quests.clickNames(opts.running === true ? { running: true, held: held } : null);
             if (names === null) return null;
         }
         var pats = (opts.patterns && opts.patterns.length) ? opts.patterns : null;
@@ -117,6 +124,10 @@
             if (names && hasOwn(names, n) && isQuestObject(b)) kind = 'quest';
             else if (pats && bld.isCollectible(b) && matches(n, pats)) kind = 'collectible';
             if (kind) out.push({ grid: g, name: n, kind: kind, zoneId: zoneId });
+            else if (held && hasOwn(held, n) && isQuestObject(b)) {
+                opts.held.push({ grid: g, name: n, kind: 'quest', zoneId: zoneId,
+                    quest: held[n].quest, mode: held[n].mode });
+            }
         }
         return out;
     }

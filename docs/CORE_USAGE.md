@@ -216,6 +216,11 @@ adventures reads collect's `enabled`, `adventureZones` and `namePatterns`, to
 decide whether its Pickups step waits for collect. Renaming or reshaping any of
 them must update that reader.
 
+The second exception runs the other way: collect asks
+`S.modules.adventures.trips.scenarioViewed()` at call time, read-only, to skip
+collectibles on a scenario island. Absence means no scenario island, so collect
+behaves as before. Renaming it must update collect.
+
 ## When to extend core
 
 Core grows as patterns become apparent. The flow:

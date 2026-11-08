@@ -597,6 +597,152 @@ t.test('clickNames reads the definition from the field when the getter is absent
     t.assert.strictEqual(names(b), 'crate');
 });
 
+t.test('clickNames skips an unread quest and lists a read one', function () {
+    var unreadQ = clickQuest({ triggers: [trig('wait', 0)], statuses: [{ status: 0 }] });
+    unreadQ.mQuestMode = 2;
+    var readQ = clickQuest({ triggers: [trig('go', 0)], statuses: [{ status: 0 }] });
+    readQ.mQuestMode = 3;
+    var b = bootClick([unreadQ, readQ]);
+    t.assert.strictEqual(names(b), 'go');
+});
+
+// ---- itemWant -----------------------------------------------------------------
+
+// A quest for itemWant: opts.name, mode, finished, ends, triggers, statuses.
+function itemQuest(opts) {
+    var q = clickQuest({
+        triggers: opts.triggers || [], statuses: opts.statuses, finished: opts.finished
+    });
+    var def = q.GetQuestDefinition();
+    def.endConditions_vector = opts.ends || [];
+    q.getQuestName_string = function () { return opts.name || 'Sub quest'; };
+    if (opts.mode !== undefined) q.mQuestMode = opts.mode;
+    return q;
+}
+
+function endCond(item, idx, action) {
+    return { action_string: action || 'buffappliedonadventure', item_string: item, triggerIdx: idx };
+}
+
+function want(list, name, targets) {
+    return bootClick(list).Q.itemWant(name, targets);
+}
+
+t.test('itemWant is open while the matching end condition is unmet', function () {
+    var q = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(want([q], 'Shovel'), 'open');
+});
+
+t.test('itemWant is done when the trigger status is finished or the quest is finished', function () {
+    var q = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 1 }], mode: 3 });
+    t.assert.strictEqual(want([q], 'Shovel'), 'done');
+    var f = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], finished: true });
+    t.assert.strictEqual(want([f], 'Shovel'), 'done');
+});
+
+t.test('itemWant ignores unread and Main quests', function () {
+    var unreadQ = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 2 });
+    t.assert.strictEqual(want([unreadQ], 'Shovel'), 'none');
+    var main = itemQuest({ name: 'Main quest', ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(want([main], 'Shovel'), 'none');
+});
+
+t.test('itemWant matches a target name and ignores other items and actions', function () {
+    var q = itemQuest({ ends: [endCond('Camp', 0, 'onmap')], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(want([q], 'Tent', ['Camp']), 'open');
+    t.assert.strictEqual(want([q], 'Tent'), 'none');
+    var other = itemQuest({ ends: [endCond('Shovel', 0, 'kill')], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(want([other], 'Shovel'), 'none');
+});
+
+t.test('itemWant falls back to the quest triggers of type 1', function () {
+    var q = itemQuest({
+        triggers: [{ triggerIdx: 0, type: 1, item_string: 'Shovel' }],
+        statuses: [{ status: 0 }], mode: 3
+    });
+    t.assert.strictEqual(want([q], 'Shovel'), 'open');
+});
+
+t.test('itemWant prefers open over done and is none for an empty pool', function () {
+    var d = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 1 }], mode: 3 });
+    var o = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(want([d, o], 'Shovel'), 'open');
+    t.assert.strictEqual(want([], 'Shovel'), 'none');
+});
+
+t.test('itemWant is null when the pool cannot be read', function () {
+    var b = boot([]);
+    b.H.host.game.quests = undefined;
+    t.assert.strictEqual(b.Q.itemWant('Shovel'), null);
+});
+
+// ---- strict gate (opts.running) -------------------------------------------------
+
+t.test('clickNames running lists only mode-3 quests and holds the others with their mode', function () {
+    var modes = [2, 1, 0, undefined, 3];
+    var list = [];
+    for (var i = 0; i < modes.length; i++) {
+        var q = clickQuest({ triggers: [trig('obj' + i, 0)], statuses: [{ status: 0 }] });
+        if (modes[i] !== undefined) q.mQuestMode = modes[i];
+        q.getQuestName_string = (function (n) { return function () { return n; }; }('Q' + i));
+        list.push(q);
+    }
+    var b = bootClick(list);
+    var held = {};
+    var n = b.Q.clickNames({ running: true, held: held });
+    t.assert.deepStrictEqual(Object.keys(n), ['obj4']);
+    t.assert.deepStrictEqual(Object.keys(held).sort(), ['obj0', 'obj1', 'obj2', 'obj3']);
+    t.assert.strictEqual(JSON.stringify(held.obj0), JSON.stringify({ quest: 'Q0', mode: 2 }));
+    t.assert.strictEqual(JSON.stringify(held.obj3), JSON.stringify({ quest: 'Q3', mode: null }));
+    // The loose gate still lists everything but the unread quest.
+    t.assert.strictEqual(names(b), 'obj1,obj2,obj3,obj4');
+});
+
+t.test('clickNames running skips inactive and finished quests and lists a held name a running quest wants', function () {
+    var inactive = clickQuest({ triggers: [trig('a', 0)], statuses: [{ status: 0 }], active: false });
+    inactive.mQuestMode = 3;
+    var fin = clickQuest({ triggers: [trig('b', 0)], statuses: [{ status: 0 }], finished: true });
+    fin.mQuestMode = 3;
+    var unreadQ = clickQuest({ triggers: [trig('c', 0)], statuses: [{ status: 0 }] });
+    unreadQ.mQuestMode = 2;
+    var runQ = clickQuest({ triggers: [trig('c', 0)], statuses: [{ status: 0 }] });
+    runQ.mQuestMode = 3;
+    var held = {};
+    var n = bootClick([inactive, fin, unreadQ, runQ]).Q.clickNames({ running: true, held: held });
+    t.assert.deepStrictEqual(Object.keys(n), ['c']);
+    t.assert.deepStrictEqual(Object.keys(held), ['a']);
+});
+
+t.test('itemWant running is open only for a mode-3 quest and held otherwise', function () {
+    var b;
+    var held;
+    var modes = [2, 1, 0];
+    for (var i = 0; i < modes.length; i++) {
+        var q = itemQuest({ name: 'Bridges', ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: modes[i] });
+        held = [];
+        b = bootClick([q]);
+        t.assert.strictEqual(b.Q.itemWant('Shovel', null, { running: true, held: held }), 'held', 'mode ' + modes[i]);
+        t.assert.strictEqual(JSON.stringify(held), JSON.stringify([{ quest: 'Bridges', mode: modes[i] }]));
+    }
+    var run = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(bootClick([run]).Q.itemWant('Shovel', null, { running: true }), 'open');
+    // The loose gate counts the mode-1 quest as open.
+    var m1 = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 1 });
+    t.assert.strictEqual(want([m1], 'Shovel'), 'open');
+});
+
+t.test('itemWant running: held beats done, met held quests and finished quests are done', function () {
+    var done = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 1 }], mode: 3 });
+    var waiting = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 2 });
+    t.assert.strictEqual(bootClick([done, waiting]).Q.itemWant('Shovel', null, { running: true }), 'held');
+    var metHeld = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 1 }], mode: 2 });
+    t.assert.strictEqual(bootClick([metHeld]).Q.itemWant('Shovel', null, { running: true }), 'none');
+    var fin = itemQuest({ ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], finished: true, mode: 3 });
+    t.assert.strictEqual(bootClick([fin]).Q.itemWant('Shovel', null, { running: true }), 'done');
+    var main = itemQuest({ name: 'Main quest', ends: [endCond('Shovel', 0)], statuses: [{ status: 0 }], mode: 2 });
+    t.assert.strictEqual(bootClick([main]).Q.itemWant('Shovel', null, { running: true }), 'none');
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };

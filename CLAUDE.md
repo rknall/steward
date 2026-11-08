@@ -41,6 +41,7 @@ reload scripts from the client menu. Runtime output goes to
 - [docs/CORE_USAGE.md](docs/CORE_USAGE.md): rules for calling `Steward.core.*`.
 - [docs/SCHEDULER.md](docs/SCHEDULER.md): priority tiers, tick and queue contract.
 - [docs/analysis/HOST_INTEGRATION.md](docs/analysis/HOST_INTEGRATION.md): how the AIR client loads userscripts and which globals it provides.
+- [docs/SCENARIOS.md](docs/SCENARIOS.md): scenario runs, file format, known limits.
 - [docs/TSO_API.md](docs/TSO_API.md), [docs/LOGGING.md](docs/LOGGING.md).
 
 ## Workflow

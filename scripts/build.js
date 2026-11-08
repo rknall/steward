@@ -11,6 +11,7 @@
  *   1. src/kernel/<NN>_*.js   (lexicographic, numeric prefix drives order)
  *   2. src/core/**\/*.js       (lexicographic per directory)
  *   3. src/modules/**\/*.js    (lexicographic per directory)
+ *   3b. scenarios/*.json as built-in scenarios (generated, after modules)
  *   4. src/vendor/**\/*.js     (lexicographic, optional)
  *
  * Usage:
@@ -24,6 +25,7 @@ const { execSync } = require("child_process");
 const { minify } = require("terser");
 const loadOrder = require("../tests/load-order");
 const version = require("./version");
+const scenarios = require("./scenarios");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const BUILD_DIR = path.join(REPO_ROOT, "build");
@@ -78,8 +80,15 @@ async function build() {
 	const parts = [];
 	let totalFiles = 0;
 
+	const builtin = scenarios.collect(REPO_ROOT);
+
 	for (let i = 0; i < SECTION_NAMES.length; i++) {
 		const sectionName = SECTION_NAMES[i];
+		// Generated scenarios chunk goes right after the modules section.
+		if (sectionName === "vendor" && builtin.length > 0) {
+			parts.push("/* ===== scenarios ===== */");
+			parts.push(scenarios.chunk(builtin));
+		}
 		const files = collectFiles(sectionName);
 		if (files.length === 0) continue;
 
@@ -143,6 +152,7 @@ async function build() {
 			v +
 			" / " +
 			sha +
+			(builtin.length > 0 ? ", " + builtin.length + " scenario(s)" : "") +
 			")\n",
 	);
 }

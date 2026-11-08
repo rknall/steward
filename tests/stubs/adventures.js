@@ -24,6 +24,24 @@
  * read as unreadable (core.buildings.readable() false), so no camp counts as
  * gone.
  *
+ * Scenario items: o.items = { buffName: { group, yield, costs } } makes those
+ * names produceable buffs (game.def('BuffSystem::cBuff')) and installs a host
+ * quest pool (game.quests) built from w.quests, so core quests.itemWant reads
+ * the world. W.startScenario(w, rec, opts) stores a scenario run. Knobs:
+ *   - w.setStock(buff, n) / w.stockOf(buff): the star-menu stock of an item;
+ *   - an order of an item lands in queue 1 (group other), 6 (group '5') or 11
+ *     (group '11'); w.produce() moves runs x yield into the star-menu stock;
+ *   - action 61 of an item to a grid takes min(amount, what the grid still
+ *     needs): w.gridNeed[buff + ':' + grid], else w.gridNeed[grid], else the
+ *     whole amount. A grid with nothing left takes 0, so the stock does not
+ *     drop. Every item send lands in w.itemSends { buff, grid, amount, took };
+ *   - a quest { key, name, item, grids, finished, unread, stayOpen } wants
+ *     item: its end condition 'buffappliedonadventure' (triggerIdx 0) stays
+ *     open until every grid of grids has a need of 0, then the quest is met
+ *     and finished (stayOpen: met but not finished). An unread quest is in
+ *     mode 2 (not started), others in mode 3;
+ *   - w.produceableUnreadable = true makes the definition list unreadable.
+ *
  * Nothing here edits the shared stubs; host fakes are installed on the booted
  * harness only.
  */
@@ -277,7 +295,10 @@ function world(o) {
         adventures: home && !o.mapOpen ? [] : [{ adventureName: 'BlackKnights', zoneID: ZONE }],
         stock: [],
         lists: {},
-        frees: {}
+        frees: {},
+        items: o.items || {},
+        gridNeed: o.gridNeed || {},
+        itemSends: []
     };
     w.lists[home ? HOME : ZONE] = fighters;
     w.frees[home ? HOME : ZONE] = w.free;
@@ -406,6 +427,36 @@ function world(o) {
         travel: RAW[S.GeneralTask.TravelToZone], recover: RAW[S.GeneralTask.Recovering]
     };
 
+    // The key of w.gridNeed that holds what a grid still takes of an item,
+    // or null when the grid takes whatever it is offered.
+    function needKey(buff, grid) {
+        if (typeof w.gridNeed[buff + ':' + grid] === 'number') return buff + ':' + grid;
+        if (typeof w.gridNeed[grid] === 'number') return String(grid);
+        return null;
+    }
+
+    function gridMet(buff, grid) {
+        var k = needKey(buff, grid);
+        return k !== null && w.gridNeed[k] <= 0;
+    }
+
+    // An item applied to a grid: the game takes at most what the grid still
+    // needs, and a quest whose grids are all met finishes.
+    function itemAction(e, grid, amount) {
+        var k = needKey(e.type, grid);
+        var left = k === null ? amount : Math.max(0, w.gridNeed[k]);
+        var took = Math.min(amount, left, e.amount);
+        e.amount -= took;
+        if (k !== null) w.gridNeed[k] -= took;
+        w.itemSends.push({ buff: e.type, grid: grid, amount: amount, took: took, t: w.t });
+        (w.quests || []).forEach(function (q) {
+            if (q.item !== e.type || !q.grids || q.met) return;
+            if (!q.grids.every(function (g) { return gridMet(q.item, g); })) return;
+            q.met = true;
+            if (!q.stayOpen) q.finished = true;
+        });
+    }
+
     // Buff action: spends the star-menu entry and applies its effect.
     function buffAction(grid, amount, uid) {
         var key = uid && typeof uid.toKeyString === 'function' ? uid.toKeyString() : null;
@@ -415,6 +466,10 @@ function world(o) {
         }
         w.buffActions.push({ type: e ? e.type : null, resource: e ? e.resource : null, grid: grid, amount: amount, t: w.t });
         if (!e) return;
+        if (Object.prototype.hasOwnProperty.call(w.items, e.type)) {
+            itemAction(e, grid, amount);
+            return;
+        }
         if (e.type === POPULATION_TYPE) {
             e.amount -= amount;
             if (!w.popNoEffect) w.pop += amount;
@@ -461,7 +516,10 @@ function world(o) {
         sendMessage.apply(this, arguments);
         if (id === MESSAGE_ORDER && home) {
             w.productionOrders.push({ unit: data.type_string, amount: data.amount * data.stacks, t: w.t });
-            var q = data.buildingGrid === w.queues[8].grid ? w.queues[8] : w.queues[0];
+            var q = w.queues[0];
+            Object.keys(w.queues).forEach(function (id) {
+                if (w.queues[id].grid === data.buildingGrid) q = w.queues[id];
+            });
             q.entries.push({ type: data.type_string, amount: data.amount * data.stacks });
             return;
         }
@@ -505,6 +563,7 @@ function world(o) {
     });
 
     if (home) installHome(w, o, gi, units);
+    installItems(w);
 
     // A Steward Pause: the kernel queue is emptied with no reload, so the
     // pending attempts vanish while the sends they made have gone out.
@@ -537,7 +596,10 @@ function installHome(w, o, gi, units) {
     w.stock = homeStock(o, S.core.resources.POPULATION);
     w.queues = {
         0: { entries: [], grid: 111, type: 1 },
-        8: { entries: [], grid: 222, type: 2 }
+        8: { entries: [], grid: 222, type: 2 },
+        1: { entries: [], grid: 333, type: 3 },
+        6: { entries: [], grid: 444, type: 4 },
+        11: { entries: [], grid: 555, type: 5 }
     };
     w.lists[HOME].forEach(withRemaining);
     awayList.forEach(withRemaining);
@@ -619,11 +681,18 @@ function installHome(w, o, gi, units) {
         });
     };
 
-    // The production queues finish: their units join the home free pool.
+    // The production queues finish: their units join the home free pool, and
+    // each item run puts its yield into the star-menu stock.
     w.produce = function () {
         var pool = w.frees[HOME];
         Object.keys(w.queues).forEach(function (id) {
-            w.queues[id].entries.forEach(function (e) { pool[e.type] = (pool[e.type] || 0) + e.amount; });
+            w.queues[id].entries.forEach(function (e) {
+                if (Object.prototype.hasOwnProperty.call(w.items, e.type)) {
+                    w.setStock(e.type, w.stockOf(e.type) + e.amount * itemYield(w, e.type));
+                    return;
+                }
+                pool[e.type] = (pool[e.type] || 0) + e.amount;
+            });
             w.queues[id].entries = [];
         });
     };
@@ -634,6 +703,69 @@ function installHome(w, o, gi, units) {
         if (!w.lists[zoneId]) w.lists[zoneId] = [];
         w.lists[zoneId].push(g);
         return g;
+    };
+}
+
+function itemYield(w, buff) {
+    var it = w.items[buff];
+    return it && typeof it.yield === 'number' ? it.yield : 1;
+}
+
+// Item stock helpers on every world; the produceable buff definitions and the
+// host quest pool only with o.items, so the other tests keep their host as it
+// was.
+function installItems(w) {
+    w.stockOf = function (buff) {
+        for (var i = 0; i < w.stock.length; i++) if (w.stock[i].type === buff) return w.stock[i].amount;
+        return 0;
+    };
+    w.setStock = function (buff, n) {
+        for (var i = 0; i < w.stock.length; i++) {
+            if (w.stock[i].type === buff) {
+                w.stock[i].amount = n;
+                return;
+            }
+        }
+        w.stock.push({ type: buff, resource: '', amount: n, uid: 'item:' + buff });
+    };
+    if (!Object.keys(w.items).length) return;
+    var game = w.H.host.game;
+
+    w.sent.registerDef('BuffSystem::cBuff', {
+        GetProduceableBuffDefinitions: function () {
+            if (w.produceableUnreadable) return null;
+            return Object.keys(w.items).map(function (name) {
+                var it = w.items[name];
+                return {
+                    GetName_string: function () { return name; },
+                    GetGroup_string: function () { return it.group || '0'; },
+                    GetCosts_vector: function () { return it.costs || []; },
+                    GetProductionAmount: function () { return itemYield(w, name); }
+                };
+            });
+        }
+    });
+
+    function hostQuest(q) {
+        var ends = q.item ? [{ action_string: 'buffappliedonadventure', item_string: q.item, triggerIdx: 0 }] : [];
+        return {
+            isFinished: function () { return !!q.finished; },
+            getQuestName_string: function () { return q.name || ''; },
+            mQuestMode: q.unread ? 2 : 3,
+            IsActive: function () { return true; },
+            IsQuestActive: function () { return true; },
+            GetUniqueId: function () { return { toKeyString: function () { return q.key; } }; },
+            GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: [] }; },
+            mQuestTriggersFinished_vector: [{ status: q.met ? 1 : 0 }]
+        };
+    }
+
+    game.quests = {
+        GetQuestPool: function () {
+            return {
+                GetQuest_vector: function () { return w.quests === null ? null : w.quests.map(hostQuest); }
+            };
+        }
     };
 }
 
@@ -731,6 +863,26 @@ function startRun(w, paths, over) {
     return w.st.run();
 }
 
+// A scenario run at opts.step (default Muster), trip opts.trip (default 0),
+// of a series of opts.count maps. rec: { id, label, trips } as the scenario
+// store gives it; the map is the world's BlackKnights. opts.zoneId is the
+// open map's zone (default none); opts.closedAt the end of the previous map.
+function startScenario(w, rec, opts) {
+    opts = opts || {};
+    var r = w.st.newRun({
+        id: opts.id || 42, templateId: '', scenarioId: rec.id, label: rec.label, adventure: 'BlackKnights',
+        zoneId: opts.zoneId === undefined ? null : opts.zoneId,
+        paths: [], loadoutPath: '', loadoutKeys: {}, waveIndex: 0,
+        step: opts.step || w.S.RunStep.Muster, speedBuff: w.S.SpeedBuffChoice.None,
+        trips: plain(rec.trips), trip: opts.trip || 0
+    });
+    w.st.begin({
+        templateId: '', label: rec.label, adventure: 'BlackKnights', count: opts.count || 1, ended: false,
+        requested: w.t, finished: 0, closedAt: opts.closedAt === undefined ? null : opts.closedAt
+    }, r);
+    return w.st.run();
+}
+
 function stepName(w) { return w.st.stepName(w.st.run().step); }
 
 module.exports = {
@@ -750,5 +902,6 @@ module.exports = {
     play:              play,
     runOut:            runOut,
     startRun:          startRun,
+    startScenario:     startScenario,
     stepName:          stepName
 };

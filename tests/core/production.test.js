@@ -24,8 +24,17 @@ function setup(opts) {
         },
         stock: { Gold: 1000 },
         free: 100,
-        unreadable: false
+        unreadable: false,
+        buffs: [
+            { name: 'BB_Plank', group: '3', yield: 3, costs: [{ name_string: 'Gold', amount: 5 }] },
+            { name: 'BB_Fish', group: '5', yield: 2, costs: [{ name_string: 'Gold', amount: 7 }] },
+            { name: 'BB_Wine', group: '11', yield: 1, costs: [{ name_string: 'Gold', amount: 9 }] }
+        ],
+        buffsUnreadable: false
     };
+    world.queues[1] = { entries: [], grid: 333, type: 3 };
+    world.queues[6] = { entries: [], grid: 666, type: 6 };
+    world.queues[11] = { entries: [], grid: 1111, type: 11 };
 
     function queueFake(id) {
         var q = world.queues[id];
@@ -64,6 +73,19 @@ function setup(opts) {
             };
         }
     });
+    sent.registerDef('BuffSystem::cBuff', {
+        GetProduceableBuffDefinitions: function () {
+            if (world.buffsUnreadable) throw new Error('buff list failed');
+            return world.buffs.map(function (d) {
+                return {
+                    GetName_string: function () { return d.name; },
+                    GetGroup_string: function () { return d.group; },
+                    GetProductionAmount: function () { return d.yield; },
+                    GetCosts_vector: function () { return d.costs; }
+                };
+            });
+        }
+    });
     return { H: H, S: H.Steward, P: H.Steward.core.production, sent: sent, world: world };
 }
 
@@ -79,7 +101,10 @@ function deliver(b) {
     var m = b.sent.messages;
     for (var i = 0; i < m.length; i++) {
         var vo = m[i].data;
-        var q = vo.buildingGrid === 222 ? b.world.queues[8] : b.world.queues[0];
+        var q = b.world.queues[0];
+        for (var id in b.world.queues) {
+            if (b.world.queues[id].grid === vo.buildingGrid) q = b.world.queues[id];
+        }
         q.entries.push({ type: vo.type_string, amount: vo.amount * vo.stacks });
     }
     b.sent.messages.length = 0;
@@ -264,4 +289,95 @@ t.test('jointShortfalls returns null when a cost is unreadable; shortfalls answe
     assert.strictEqual(one[0].need, 5);
     assert.strictEqual(one[0].have, 3);
     assert.strictEqual(b.P.shortfalls('Nobody', 1), null);
+});
+
+function entryLogs(b) {
+    return b.H.logs().filter(function (l) {
+        return l.category === 'production' && String(l.args[0]).indexOf('queue entry') === 0;
+    });
+}
+
+t.test('a buff is queued by its group: other -> 1, 5 -> 6, 11 -> 11', function () {
+    var b = setup();
+    assert.strictEqual(b.P.queueIdFor('BB_Plank'), 1);
+    assert.strictEqual(b.P.queueIdFor('BB_Fish'), 6);
+    assert.strictEqual(b.P.queueIdFor('BB_Wine'), 11);
+    assert.strictEqual(b.P.queueIdFor('Rifleman'), 0);
+    assert.strictEqual(b.P.queueIdFor('Nothing'), null);
+});
+
+t.test('isProduceable is true, false or null', function () {
+    var b = setup();
+    assert.strictEqual(b.P.isProduceable('BB_Fish'), true);
+    assert.strictEqual(b.P.isProduceable('Rifleman'), false);
+    assert.strictEqual(b.P.isProduceable('Nothing'), false);
+    b.world.buffsUnreadable = true;
+    assert.strictEqual(b.P.isProduceable('BB_Fish'), null);
+    assert.strictEqual(b.P.queueIdFor('BB_Fish'), null);
+});
+
+t.test('yieldOf: unit 1, buff its production amount, bad amount null', function () {
+    var b = setup();
+    assert.strictEqual(b.P.yieldOf('Rifleman'), 1);
+    assert.strictEqual(b.P.yieldOf('BB_Plank'), 3);
+    b.world.buffs[0].yield = 0;
+    assert.strictEqual(b.P.yieldOf('BB_Plank'), null);
+    b.world.buffs[0].yield = 'x';
+    assert.strictEqual(b.P.yieldOf('BB_Plank'), null);
+    assert.strictEqual(b.P.yieldOf('Nothing'), null);
+});
+
+t.test('queuedItems is runs times yield', function () {
+    var b = setup();
+    b.world.queues[1].entries.push({ type: 'BB_Plank', amount: 4 });
+    b.world.queues[1].entries.push({ type: 'Other', amount: 9 });
+    assert.strictEqual(b.P.queued('BB_Plank'), 4);
+    assert.strictEqual(b.P.queuedItems('BB_Plank'), 12);
+    b.world.queues[0].entries.push({ type: 'Rifleman', amount: 5 });
+    assert.strictEqual(b.P.queuedItems('Rifleman'), 5);
+    b.world.buffs[0].yield = 0;
+    assert.strictEqual(b.P.queuedItems('BB_Plank'), null);
+});
+
+t.test('the queue entry line is logged once per buff and never for a unit', function () {
+    var b = setup();
+    b.world.queues[1].entries.push({ type: 'BB_Plank', amount: 4 });
+    b.world.queues[6].entries.push({ type: 'BB_Fish', amount: 1 });
+    b.world.queues[0].entries.push({ type: 'Rifleman', amount: 5 });
+    b.H.clearLogs();
+    b.P.queued('BB_Plank');
+    b.P.queued('BB_Plank');
+    b.P.queued('Rifleman');
+    b.P.queued('BB_Fish');
+    var lines = entryLogs(b);
+    assert.strictEqual(lines.length, 2);
+    assert.strictEqual(lines[0].args[0], 'queue entry BB_Plank: GetAmount 4, yield 3');
+    assert.strictEqual(lines[1].args[0], 'queue entry BB_Fish: GetAmount 1, yield 2');
+});
+
+t.test('costs of a buff come from its definition, per run', function () {
+    var b = setup();
+    assert.strictEqual(JSON.stringify(b.P.costs('BB_Fish')), '[{"name":"Gold","amount":7}]');
+    assert.strictEqual(b.P.costs('Nothing'), null);
+    assert.strictEqual(b.P.shortfalls('BB_Fish', 200).length, 1);
+    assert.strictEqual(b.P.shortfalls('BB_Fish', 10).length, 0);
+});
+
+t.test('order of a buff sends message 91 to its queue building in stacks of 25', function () {
+    var b = setup();
+    var r = run(b, b.P.order('BB_Plank', 30));
+    var m = b.sent.messages;
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(m[0].id, 91);
+    assert.strictEqual(m[0].data.type_string, 'BB_Plank');
+    assert.strictEqual(m[0].data.buildingGrid, 333);
+    assert.strictEqual(m[0].data.productionType, 3);
+    assert.strictEqual(m[0].data.amount, 25);
+    assert.strictEqual(m[0].data.stacks, 1);
+    assert.strictEqual(m[1].data.amount, 5);
+
+    var c = setup();
+    var v = run(c, c.P.order('BB_Wine', 3), function (n) { if (n === 1) deliver(c); });
+    assert.strictEqual(v.results[0].status, c.S.ActionResult.Verified);
+    assert.strictEqual(c.world.queues[11].entries[0].type, 'BB_Wine');
 });

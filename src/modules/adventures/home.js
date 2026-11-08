@@ -8,6 +8,11 @@
  *   -> Load -> Verify -> StartMap -> Depart, then the island ...,
  *   ArriveHome -> Account -> Population -> Retrain -> Next.
  *
+ * A scenario run has no generals: the run kind skips the general and
+ * retrain steps, so it takes Muster -> Produce -> StartMap, then the island,
+ * and back home ArriveHome -> Produce for its next trip, or Next once the
+ * last trip is over. Produce itself lives with the other scenario steps.
+ *
  * Deploy runs only when a loadout general stands in the star menu at home: it
  * places him back on the home grid he was last seen on, and waits with no
  * limit when it cannot.
@@ -225,7 +230,9 @@
             noteOnce(r, 'waiting ' + Math.round(GAP_MS / 1000) + ' s after the last map');
             return;
         }
-        gather(r, inv, S.RunStep.Validate, 'generals home');
+        // Produce is a scenario step; go() takes a template run on to
+        // Validate.
+        gather(r, inv, S.RunStep.Produce, 'generals home');
     }
 
     function sameKeys(a, b) {
@@ -654,7 +661,14 @@
 
     // ---- After the map ------------------------------------------------------
 
+    // A scenario run with a trip left goes back to Produce for it; after its
+    // last trip it ends the map like a template run, whose retrain steps its
+    // kind skips on the way to Next.
     function arriveHome(r, inv) {
+        if (st().isScenario(r) && r.trip < r.trips.length) {
+            st().go(S.RunStep.Produce, 'trip ' + (r.trip + 1) + ' next');
+            return;
+        }
         gather(r, inv, S.RunStep.Account, 'generals home');
     }
 
@@ -717,6 +731,8 @@
         st().go(S.RunStep.Next, 'retrain skipped');
     }
 
+    // The rows of a joint shortfall as 'name need/have; ...' for pause and
+    // wait texts. Exported so the item shortfalls of a scenario read the same.
     function shortText(list) {
         var out = [];
         for (var i = 0; i < list.length; i++) {
@@ -939,6 +955,7 @@
             // A new id, so nothing of the finished run is taken for this one.
             id:          Math.max(now(), r.id + 1),
             templateId:  r.templateId,
+            scenarioId:  r.scenarioId,
             label:       r.label,
             adventure:   r.adventure,
             zoneId:      null,
@@ -950,9 +967,18 @@
             speedBuff:   r.speedBuff,
             transit:     carried,
             transitBase: base,
-            homeGrids:   r.homeGrids
+            homeGrids:   r.homeGrids,
+            // Every map of a scenario series starts again at its first trip.
+            trips:       r.trips,
+            trip:        0
         }));
         S.kernel.log(CATEGORY, 'run ' + (finished + 1) + '/' + total + ' begins: ' + r.label);
+    }
+
+    // Produce belongs to the scenario steps, which load after this file, so
+    // it is looked up on each call.
+    function produce(r, inv) {
+        S.modules.adventures.trips.produce(r, inv);
     }
 
     // Built at call time: state.js fills S.RunStep and loads after this file
@@ -960,6 +986,7 @@
     function stepFn(step) {
         var RS = S.RunStep;
         if (step === RS.Muster)     return muster;
+        if (step === RS.Produce)    return produce;
         if (step === RS.Validate)   return validate;
         if (step === RS.Deploy)     return deploy;
         if (step === RS.Snapshot)   return snapshot;
@@ -1002,6 +1029,7 @@
         GAP_MS:                 GAP_MS,
         PRODUCTION_WAIT_MAX_MS: PRODUCTION_WAIT_MAX_MS,
         DEPLOY_RETRY_MS:        DEPLOY_RETRY_MS,
+        shortText:              shortText,
         plan:                   plan
     };
 

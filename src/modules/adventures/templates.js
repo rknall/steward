@@ -179,10 +179,12 @@
         return name.substr(0, name.length - EXT.length);
     }
 
-    // Template files in the folder: { id, path } for each base name that is a
-    // valid id. Null when there is no writable steward folder.
-    function entries() {
-        var p = dirPath();
+    // Files of one steward subfolder: { id, path } for each base name that is
+    // a valid id. Null when there is no writable steward folder. Shared with
+    // the scenario store, which keeps its files in a sibling folder.
+    function entriesIn(subdir) {
+        var d = S.kernel.files.stewardDir(subdir);
+        var p = d && d.dir ? d.dir.nativePath : null;
         if (!p) return null;
         var files = S.kernel.files.list(p, EXT);
         var out = [];
@@ -191,6 +193,11 @@
             if (validId(id)) out.push({ id: id, path: files[i].path });
         }
         return out;
+    }
+
+    // Template files in the folder; null without a writable steward folder.
+    function entries() {
+        return entriesIn(SUBDIR);
     }
 
     function readEntry(e) {
@@ -458,6 +465,8 @@
         normalize:           normalize,
         fromFile:            fromFile,
         toFile:              toFile,
+        entriesIn:           entriesIn,
+        validId:             validId,
         list:                list,
         ids:                 ids,
         get:                 get,

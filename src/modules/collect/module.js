@@ -5,6 +5,9 @@
  * S.core.pickups.targets(): on the home island the collectibles whose name
  * matches the pattern list, on an adventure zone also the quest objects an
  * open quest still waits to have clicked. Every other zone is left alone.
+ * On the island of a scenario run only the quest objects of running quests
+ * are clicked and no collectibles, because the scenario's quests count each
+ * pick-up and one taken early is lost to them.
  *
  * Each click runs as S.core.pickups.click(target) through
  * S.core.actions.attempt, so it counts only once the object is seen gone
@@ -124,12 +127,26 @@
         };
     }
 
+    // True while a scenario run's island is viewed. Asked of the adventures
+    // module at call time (S.modules.adventures.trips.scenarioViewed, read-only);
+    // without it no zone is a scenario island. Renaming it must update this.
+    function scenarioIsland() {
+        var a = S.modules.adventures;
+        var tr = a && a.trips;
+        return !!(tr && typeof tr.scenarioViewed === 'function' && tr.scenarioViewed());
+    }
+
     function plan(ctx) {
         var s = readSettings();
         var patterns = S.core.pickups.patterns(s.namePatterns || []);
         var adventure = !!(ctx && ctx.zone && ctx.zone.isAdventure);
+        // A scenario's quests count every pick-up, so there only objects a
+        // running quest asks for are clicked, and no collectibles.
+        var scenario = adventure && scenarioIsland();
         S.core.buildings.invalidate();
-        var list = S.core.pickups.targets({ patterns: patterns, quests: adventure });
+        var list = S.core.pickups.targets(scenario
+            ? { quests: true, running: true }
+            : { patterns: patterns, quests: adventure });
         if (list === null) return;
 
         var t = null;
@@ -147,7 +164,7 @@
         }
 
         if (!t) {
-            if (list.length === 0) noteUnmatched(patterns);
+            if (list.length === 0 && !scenario) noteUnmatched(patterns);
             return;
         }
 

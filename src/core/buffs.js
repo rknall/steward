@@ -4,7 +4,8 @@
  * Reads the star-menu buff stock (including adventure maps) and the buff
  * definitions, and builds the action defs that apply a buff (speed, camp,
  * population) or start an adventure map. A def is run with
- * S.core.actions.attempt. Every reader reports an unreadable host as null, and
+ * S.core.actions.attempt. Adventure items (a buff applied to a grid on the
+ * island) and the quest targets of a buff are here too. Every reader reports an unreadable host as null, and
  * a def treats null as not observed: an unreadable stock never counts as
  * "the stock dropped".
  */
@@ -257,6 +258,58 @@
         };
     }
 
+    // Quest target names of a buff definition (its target description is a
+    // comma list). Targets only widen the quest match, so any failure is [].
+    function targetsOf(name) {
+        var out = [];
+        try {
+            var text = game.def('global').map_BuffName_BuffDefinition[name].GetTargetDescription_string();
+            var parts = String(text).split(',');
+            for (var i = 0; i < parts.length; i++) {
+                var p = parts[i].replace(/^\s+|\s+$/g, '');
+                if (p) out.push(p);
+            }
+        } catch (e) { return []; }
+        return out;
+    }
+
+    // Adventure item: one buff of this name applied to a grid on the island, in
+    // the amount given. Verified by the stock dropping below the baseline.
+    // The game takes at most what the grid still needs, so the drop can be
+    // smaller than the amount sent; dropped() reports what the verifying check
+    // saw, which the caller uses to tell a full grid from a stock-capped send.
+    function adventureItem(name, grid, amount) {
+        var drop = null;
+        return {
+            label:     'item ' + name + ' x' + amount + ' -> ' + grid,
+            category:  'buffs',
+            timeoutMs: BUFF_TIMEOUT_MS,
+            precheck: function () {
+                if (!isNum(grid) || !(grid > 0)) return 'no target grid';
+                if (!isNum(amount) || amount !== Math.floor(amount) || !(amount > 0)) return 'invalid amount';
+                if (S.core.zone.isAdventure() !== true) return 'not on an adventure';
+                var n = stock(name, '');
+                if (!isNum(n)) return 'buff stock unreadable';
+                if (n < amount) return 'not enough in stock';
+                return null;
+            },
+            baseline: function () { return { stock: stock(name, '') }; },
+            send: function () { return send(name, '', grid, amount); },
+            check: function (base) {
+                var n = stock(name, '');
+                if (!!base && isNum(base.stock) && isNum(n) && n < base.stock) {
+                    drop = base.stock - n;
+                    return true;
+                }
+                return false;
+            },
+            describe: function (base) {
+                return 'stock ' + (base ? base.stock : '?') + ' -> ' + stock(name, '');
+            },
+            dropped: function () { return drop; }
+        };
+    }
+
     // Population buff stock: { total, largest } over the population entries,
     // or null when the menu cannot be read. largest is the biggest amount one
     // buff action can send.
@@ -368,6 +421,8 @@
         amount:        amount,
         speed:         speed,
         camp:          camp,
+        adventureItem: adventureItem,
+        targetsOf:     targetsOf,
         population:    population,
         populationStock: populationStock,
         map:          map,

@@ -185,6 +185,79 @@ t.test('an adventure zone clicks a quest object, one per plan', function () {
     t.assert.strictEqual(w.selected[0], w.made[0]);
 });
 
+// ---- scenario island ------------------------------------------------------------
+
+// quest(names) in the given quest mode.
+function modeQuest(names, mode) {
+    var q = quest(names);
+    q.mQuestMode = mode;
+    return q;
+}
+
+// Puts a scenario run (or, with o.template, a template run) on the run
+// state, with its island on o.zoneId (default the viewed zone).
+function scenarioRun(w, o) {
+    o = o || {};
+    var r = {
+        id: 'r1', status: o.status || w.S.RunStatus.Running,
+        zoneId: o.zoneId === undefined ? ZONE : o.zoneId
+    };
+    if (!o.template) r.scenarioId = 'test_scenario';
+    w.S.modules.adventures.state.current().run = r;
+    return r;
+}
+
+// An adventure with a striped egg collectible, a crate of an unread quest and
+// a barrel of a quest in mode 1.
+function scenarioIsland() {
+    var w = boot({
+        adventure: true,
+        quests: [modeQuest(['crate'], 2), modeQuest(['barrel'], 1)],
+        objects: [egg(1), crate(5), { name: 'barrel', grid: 6, selectable: true, attackable: true, playerId: ZONE }],
+        collectibles: ['BuildingStripedEggs']
+    });
+    settings(w, { adventureZones: true });
+    return w;
+}
+
+t.test('a scenario island clicks no collectible and no object of a quest that is not running', function () {
+    var w = scenarioIsland();
+    scenarioRun(w);
+    t.assert.strictEqual(w.S.modules.adventures.trips.scenarioViewed(), true);
+    w.mod.plan(ADVENTURE);
+    t.assert.strictEqual(queuedAttempts(w).length, 0);
+});
+
+t.test('a scenario island clicks a quest object once its quest is running (mode 3)', function () {
+    var w = scenarioIsland();
+    scenarioRun(w, { status: w.S.RunStatus.Paused });
+    w.H.host.game.quests.GetQuestPool().GetQuest_vector()[0].mQuestMode = 3;
+    w.mod.plan(ADVENTURE);
+    t.assert.strictEqual(queuedAttempts(w).length, 1);
+    AC.drive(w.H, { onStep: function () { w.made[1].mIsSelectable = false; } });
+    t.assert.strictEqual(w.selected.length, 1);
+    t.assert.strictEqual(w.selected[0], w.made[1]);
+});
+
+t.test('outside a scenario island collect behaves as before', function () {
+    // A template run, a scenario run on another zone, a finished scenario
+    // run and no run at all: the egg goes first as the first target.
+    var cases = [{ template: true }, { zoneId: ZONE + 1 }, { status: 'done' }, null];
+    for (var i = 0; i < cases.length; i++) {
+        var w = scenarioIsland();
+        if (cases[i]) {
+            var o = cases[i];
+            if (o.status === 'done') o.status = w.S.RunStatus.Done;
+            scenarioRun(w, o);
+        }
+        t.assert.strictEqual(w.S.modules.adventures.trips.scenarioViewed(), false, 'case ' + i);
+        w.mod.plan(ADVENTURE);
+        t.assert.strictEqual(queuedAttempts(w).length, 1, 'case ' + i);
+        AC.drive(w.H, { onStep: function () { remove(w, w.made[0]); } });
+        t.assert.strictEqual(w.selected[0], w.made[0], 'case ' + i);
+    }
+});
+
 t.test('an adventure with the setting off is not ready', function () {
     var w = boot({ adventure: true, quests: [quest(['crate'])], objects: [crate(5)] });
     settings(w, { adventureZones: false });

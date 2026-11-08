@@ -195,6 +195,38 @@ t.test('quests are not read when the caller does not ask for them', function () 
     t.assert.strictEqual(grids(targets(b, { patterns: ['crate'] })), '');
 });
 
+// A quest() in the given mode, named for the held report.
+function modeQuest(namesList, mode, qname) {
+    var q = quest(namesList);
+    q.mQuestMode = mode;
+    q.getQuestName_string = function () { return qname; };
+    return q;
+}
+
+t.test('targets running lists objects of mode-3 quests only and holds the others on the map', function () {
+    var b = boot({
+        quests: [modeQuest(['crate'], 2, 'Crates'), modeQuest(['barrel'], 1, 'Barrels'),
+            modeQuest(['chest'], 3, 'Chests'), modeQuest(['ghost'], 2, 'Ghosts')],
+        objects: [obj('crate', 1), obj('barrel', 2), obj('chest', 3), obj('crate', 4, { playerId: 0 })]
+    });
+    var held = [];
+    var l = targets(b, { quests: true, running: true, held: held });
+    t.assert.strictEqual(grids(l), 'quest:chest@3');
+    t.assert.strictEqual(grids(held), 'quest:crate@1,quest:barrel@2');
+    t.assert.strictEqual(held[0].quest + ':' + held[0].mode, 'Crates:2');
+    t.assert.strictEqual(held[1].quest + ':' + held[1].mode, 'Barrels:1');
+    // Without running the mode-1 quest still counts, the unread one does not.
+    t.assert.strictEqual(grids(targets(b, { quests: true })), 'quest:barrel@2,quest:chest@3');
+});
+
+t.test('targets running lists an object once its quest reaches mode 3', function () {
+    var q = modeQuest(['crate'], 2, 'Crates');
+    var b = boot({ quests: [q], objects: [obj('crate', 1)] });
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true })), '');
+    q.mQuestMode = 3;
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true })), 'quest:crate@1');
+});
+
 // ---- click ---------------------------------------------------------------------
 
 function bootQuest() {

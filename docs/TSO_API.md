@@ -295,6 +295,20 @@ b.productionBuff;              // single appliance, used by host scripts
 - Remaining time, as the in-game label computes it:
   `getDuration(GetApplicanceMode()) - (GetClientTime() - GetStartTime())`, milliseconds.
 
+## Scenario items
+
+```js
+game.def('BuffSystem::cBuff').GetProduceableBuffDefinitions(game.gi);
+// defs: GetName_string(), GetGroup_string(), GetCosts_vector(), GetProductionAmount()
+```
+
+- Queue by group: `'5'` -> queue 6, `'11'` -> queue 11, any other group -> queue 1
+  (provision house).
+- `GetProductionAmount()` is the yield of one production run.
+- Applying an item to an adventure grid is server action 61 with the grid and the amount.
+- Quest `endConditions` carry `action_string`, `item_string` and `triggerIdx`;
+  quest mode 2 is unread.
+
 ## Where to look in autoTSO for working examples
 
 | Concern                | autoTSO file              |

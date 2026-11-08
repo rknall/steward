@@ -315,6 +315,7 @@
                         ' name=' + field(t, 'name_string') + ' amount=' + field(t, 'amount') +
                         ' min=' + field(t, 'min') + ' item=' + field(t, 'item_string') +
                         ' typeString=' + field(t, 'type_string') +
+                        ' target=' + field(t, 'target_string') +
                         ' status=' + (st ? field(st, 'status') : '?') +
                         ' deltaStart=' + (st ? field(st, 'deltaStart') : '?') +
                         ' total=' + triggerTotal(q, idx));
@@ -328,9 +329,16 @@
             for (var m = 0; m < ends.length; m++) {
                 try {
                     var en = ends[m];
+                    // The end condition counts the same finished entry as its trigger.
+                    var eidx = en ? en.triggerIdx : undefined;
+                    var est = (typeof eidx === 'number') ? fin[eidx] : null;
                     S.kernel.log(cat, '    end pos=' + m + ' idx=' + field(en, 'triggerIdx') +
                         ' action=' + field(en, 'action_string') + ' item=' + field(en, 'item_string') +
-                        ' name=' + field(en, 'name_string') + ' amount=' + field(en, 'amount'));
+                        ' name=' + field(en, 'name_string') + ' amount=' + field(en, 'amount') +
+                        ' type=' + field(en, 'type') + ' min=' + field(en, 'min') +
+                        ' target=' + field(en, 'target_string') +
+                        ' status=' + (est ? field(est, 'status') : '?') +
+                        ' total=' + triggerTotal(q, eidx));
                 } catch (e3) { S.kernel.warn(cat, '    end ' + m + ' threw:', e3); }
             }
         } catch (e4) { S.kernel.warn(cat, 'end conditions threw:', e4); }

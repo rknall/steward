@@ -291,6 +291,40 @@ t.test('dumpQuests falls back to mQuestDefinition', function () {
     t.assert.strictEqual(matching(out, /trigger pos=0/).length, 1);
 });
 
+t.test('dumpQuests logs target, type, min, status and total on end conditions', function () {
+    var s = setup();
+    var quest = {
+        isFinished: function () { return false; },
+        getQuestName_string: function () { return 'Hut'; },
+        GetQuestDefinition: function () {
+            return {
+                specialType_string: '',
+                questTriggers_vector: [
+                    { triggerIdx: 0, type: 1, condition: 9, name_string: 'A', amount: 1, target_string: 'Hut' }
+                ],
+                endConditions_vector: [
+                    { triggerIdx: 0, action_string: 'buffappliedonadventure', item_string: 'Bridge',
+                      type: 1, min: 2, target_string: 'Broadsheet', amount: 3 },
+                    { triggerIdx: 5, action_string: 'onmap', item_string: '', amount: 1 }
+                ]
+            };
+        },
+        mQuestMode: 3,
+        mQuestTriggersFinished_vector: [{ status: 1, deltaStart: 0 }]
+    };
+    withQuests(s, [quest], function () { return 7; });
+    s.H.clearLogs();
+    s.army.dumpQuests();
+    var out = lines(s, 'diag:quest');
+    t.assert.strictEqual(matching(out, /trigger pos=0 idx=0 .* target=Hut .*status=1 deltaStart=0 total=7$/).length, 1);
+    t.assert.strictEqual(matching(out,
+        /end pos=0 idx=0 action=buffappliedonadventure item=Bridge .* type=1 min=2 target=Broadsheet status=1 total=7$/).length, 1);
+    t.assert.strictEqual(matching(out,
+        /end pos=1 idx=5 action=onmap .* status=\? total=7$/).length, 1);
+    t.assert.strictEqual(lines(s, 'diag:quest', 'error').length, 0);
+    t.assert.strictEqual(s.H.queued().length, 0);
+});
+
 function bldgSetup() {
     var fs = airfs.make();
     var H = harness.boot({ host: { air: fs.air } });
