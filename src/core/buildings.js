@@ -4,6 +4,9 @@
  * Returns raw game objects — modules read fields via the helpers below or
  * via GetBuildingName_string() / GetGrid() directly.
  *
+ * Buff eligibility: buffState reads every raw fact, buffBlock turns it into
+ * null (eligible) or the first reason a production buff must not be applied.
+ *
  * Cache: per scheduler tick, cleared at every tick start. Modules that mutate
  * the building set (place, destroy, upgrade) call invalidate() to force a
  * re-read in the same tick.
@@ -13,6 +16,22 @@
 
     var snapshot = null;     // cached array per tick
     var lastGapLog = {};     // last logged name-index gap per building name
+
+    // GetProductionState() value of a building that is working. 1 (resource
+    // missing), 2 (warehouse full) and 5 (stopped) must not take a buff.
+    var PRODUCING_STATE = 0;
+
+    // Optional host methods that say a building cannot take a buff right now.
+    // Feature-detected: buffState records whether each exists.
+    var BUFF_BLOCKERS = [
+        { method: 'IsUpgradeInProgress', reason: 'upgrading' },
+        { method: 'IsInConstructionMode', reason: 'under construction' },
+        { method: 'IsInDestruction', reason: 'being destroyed' }
+    ];
+
+    // Whether a blocker method the build does not have blocks the building.
+    // Off: production state 0 already excludes a building under construction.
+    var MISSING_BLOCKER_BLOCKS = false;
 
     function currentZone(zoneOverride) {
         if (zoneOverride) return zoneOverride;
@@ -364,20 +383,30 @@
         } catch (e) { return null; }
     }
 
+    // Milliseconds left on one buff appliance (duration minus elapsed time, as
+    // the client's own time-left label does), or null when it has run out or
+    // the host cannot answer.
+    function applianceRemainingMs(a, now) {
+        try {
+            if (!a || typeof a.GetBuffDefinition !== 'function') return null;
+            var def = a.GetBuffDefinition();
+            if (!def || typeof def.getDuration !== 'function' ||
+                typeof a.GetApplicanceMode !== 'function' ||
+                typeof a.GetStartTime !== 'function') return null;
+            var left = def.getDuration(a.GetApplicanceMode()) - (now - a.GetStartTime());
+            return (typeof left === 'number' && left > 0) ? left : null;
+        } catch (e) { return null; }
+    }
+
     // Milliseconds left on one buff appliance if it raises output, else null.
-    // Duration minus elapsed time, as the client's own time-left label does.
     function applianceOutputRemainingMs(a, now) {
         try {
             if (!a || typeof a.GetBuffDefinition !== 'function') return null;
             var def = a.GetBuffDefinition();
             if (!def || typeof def.getProductivityOutputPercent !== 'function') return null;
             if (!(def.getProductivityOutputPercent() > 100)) return null;
-            if (typeof def.getDuration !== 'function' ||
-                typeof a.GetApplicanceMode !== 'function' ||
-                typeof a.GetStartTime !== 'function') return null;
-            var left = def.getDuration(a.GetApplicanceMode()) - (now - a.GetStartTime());
-            return (typeof left === 'number' && left > 0) ? left : null;
         } catch (e) { return null; }
+        return applianceRemainingMs(a, now);
     }
 
     // Remaining milliseconds of the shortest active output buff on a building,
@@ -402,6 +431,92 @@
         return best;
     }
 
+    // Every raw read that decides whether a production buff may be applied.
+    // Unknown facts are null; presence flags tell a missing optional method
+    // from one that threw. Null for no building.
+    function buffState(b) {
+        if (!b) return null;
+        var st = { productionBuff: null, buffsVector: null, productionState: null, blockers: [] };
+        try { st.productionBuff = b.productionBuff ? true : false; }
+        catch (e) { st.productionBuff = null; }
+        try {
+            var v = b.mBuffs_vector;
+            st.buffsVector = (v && typeof v.length === 'number') ? v.length : null;
+        } catch (e2) { st.buffsVector = null; }
+        try {
+            if (typeof b.GetResourceCreation === 'function') {
+                var rc = b.GetResourceCreation();
+                if (rc && typeof rc.GetProductionState === 'function') {
+                    var ps = rc.GetProductionState();
+                    if (typeof ps === 'number') st.productionState = ps;
+                }
+            }
+        } catch (e3) { st.productionState = null; }
+        for (var i = 0; i < BUFF_BLOCKERS.length; i++) {
+            var m = BUFF_BLOCKERS[i].method;
+            var present = typeof b[m] === 'function';
+            var value = null;
+            if (present) {
+                try { value = !!b[m](); } catch (e4) { value = null; }
+            }
+            st.blockers.push({ method: m, present: present, value: value });
+        }
+        return st;
+    }
+
+    // Null when the building may take a production buff, else the first reason
+    // it may not.
+    function buffBlock(b) {
+        var st = buffState(b);
+        if (!st) return 'no building';
+        if (st.productionBuff === null) return 'buff state unreadable';
+        if (st.productionBuff) return 'already buffed';
+        if (st.productionState === null) return 'production state unreadable';
+        if (st.productionState !== PRODUCING_STATE) {
+            return 'not producing (state ' + st.productionState + ')';
+        }
+        for (var i = 0; i < st.blockers.length; i++) {
+            var bl = st.blockers[i];
+            if (bl.present) {
+                if (bl.value === null) return bl.method + ' unreadable';
+                if (bl.value) return BUFF_BLOCKERS[i].reason;
+            } else if (MISSING_BLOCKER_BLOCKS) {
+                return bl.method + ' missing';
+            }
+        }
+        return null;
+    }
+
+    // True/false when the building shows a running production buff, null when
+    // the host cannot answer.
+    function hasProductionBuff(b) {
+        var st = buffState(b);
+        return st ? st.productionBuff : null;
+    }
+
+    // { name, remainingMs } of the running production buff, null without one.
+    function productionBuffInfo(b) {
+        if (!b) return null;
+        var a = null;
+        try { a = b.productionBuff || null; } catch (e) { a = null; }
+        if (!a) return null;
+        var nm = null;
+        try {
+            var def = typeof a.GetBuffDefinition === 'function' ? a.GetBuffDefinition() : null;
+            if (def) {
+                var readers = ['GetName_string', 'GetBuffName_string'];
+                for (var i = 0; i < readers.length && nm === null; i++) {
+                    if (typeof def[readers[i]] === 'function') {
+                        var v = def[readers[i]]();
+                        if (typeof v === 'string') nm = v;
+                    }
+                }
+                if (nm === null && typeof def.name === 'string') nm = def.name;
+            }
+        } catch (e2) { /* name stays null */ }
+        return { name: nm, remainingMs: applianceRemainingMs(a, clientTime()) };
+    }
+
     S.core.buildings = {
         // listing
         list:               list,
@@ -423,6 +538,12 @@
         outputFactor:      outputFactor,
         baseOutputFactor:  baseOutputFactor,
         buffRemainingMs:   buffRemainingMs,
+        buffState:         buffState,
+        buffBlock:         buffBlock,
+        hasProductionBuff: hasProductionBuff,
+        productionBuffInfo: productionBuffInfo,
+        BUFF_BLOCKERS:     BUFF_BLOCKERS,
+        PRODUCING_STATE:   PRODUCING_STATE,
         isSelectable:      isSelectable,
 
         // state predicates

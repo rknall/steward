@@ -482,3 +482,237 @@ t.test('targetsOf is empty when the def or the method is missing', function () {
     var s2 = setup({ buffs: [], buffDefs: null });
     assert.deepStrictEqual(plain(s2.buffs.targetsOf('ItemA')), []);
 });
+
+// ---- building production buffs ------------------------------------------------
+
+var Z = require('../stubs/zone');
+
+// A buff definition: type is GetBuffType (omitted when undefined), targets the
+// target description, group the target group.
+function bdef(type, targets, group) {
+    var d = {
+        GetTargetDescription_string: function () { return targets || ''; },
+        GetTargetGroup_string:       function () { return group || ''; }
+    };
+    if (typeof type === 'number') d.GetBuffType = function () { return type; };
+    return d;
+}
+
+// The shared stub answers null for the target-group definition, so the group
+// lookup is wrapped here: group 'Mines' contains IronMine only.
+function withGroups(s) {
+    var game = s.H.host.game;
+    var prev = game.def;
+    game.def = function (name) {
+        if (name === 'BuffSystem.cBuffDefinition') {
+            return { targetGroups: { groupContains: function (g, n) { return g === 'Mines' && n === 'IronMine'; } } };
+        }
+        return prev.apply(this, arguments);
+    };
+}
+
+var BDEFS = {
+    ByName:     bdef(0, 'Bakery, IronMine'),
+    ByWorkyard: bdef(0, 'Workyard'),
+    ByGroup:    bdef(0, '', 'Mines'),
+    Elsewhere:  bdef(0, 'Bakery'),
+    Military:   bdef(1, 'IronMine'),
+    ZoneBuff:   bdef(8, 'IronMine'),
+    SkinBuff:   bdef(4, 'Workyard'),
+    NoType:     bdef(undefined, 'IronMine')
+};
+
+t.test('buildingBuffs: name, Workyard and group matches, type 0 only', function () {
+    var s = setup({ buffs: [{ type: 'ByName', amount: 2 }], buffDefs: BDEFS }, function (cat, key) {
+        var labels = { ByName: 'A', ByGroup: 'B', ByWorkyard: 'C' };
+        return cat === 'RES' && labels[key] ? labels[key] : key;
+    });
+    withGroups(s);
+    var list = s.buffs.buildingBuffs('IronMine', true);
+    assert.deepStrictEqual(names(list), ['ByName', 'ByGroup', 'ByWorkyard']);
+    assert.deepStrictEqual(plain(list.map(function (e) { return e.via; })), ['name', 'group', 'workyard']);
+    assert.strictEqual(list[0].label, 'A');
+    assert.strictEqual(list[0].amount, 2);
+    assert.strictEqual(list[1].group, 'Mines');
+    assert.deepStrictEqual(plain(list[0].targets), ['Bakery', 'IronMine']);
+    assert.strictEqual(s.buffs.buildingBuffMatch('ByGroup', 'IronMine', true), true);
+    assert.strictEqual(s.buffs.buildingBuffMatch('Elsewhere', 'IronMine', true), false);
+    assert.strictEqual(s.buffs.buildingBuffMatch('Military', 'IronMine', true), false);
+    // A mine outside the group only gets the Workyard buff.
+    assert.deepStrictEqual(names(s.buffs.buildingBuffs('CoalMine', true)), ['ByWorkyard']);
+});
+
+t.test('buildingBuffs: zone (8) and skin (4) are candidates but not offered', function () {
+    var s = setup({ buffs: [], buffDefs: BDEFS });
+    var cand = s.buffs.buildingBuffCandidates('IronMine', true);
+    var byName = {};
+    cand.forEach(function (e) { byName[e.name] = e; });
+    assert.strictEqual(byName.ZoneBuff.offered, false);
+    assert.strictEqual(byName.ZoneBuff.buffType, 8);
+    assert.strictEqual(byName.ZoneBuff.reason, 'buff type 8');
+    assert.strictEqual(byName.SkinBuff.offered, false);
+    assert.strictEqual(byName.SkinBuff.reason, 'buff type 4');
+    assert.strictEqual(byName.Military.reason, 'buff type 1');
+    assert.strictEqual(byName.NoType.offered, false);
+    assert.strictEqual(byName.NoType.buffType, null);
+    assert.strictEqual(byName.NoType.reason, 'buff type unreadable');
+    assert.strictEqual(byName.ByName.reason, '');
+    assert.strictEqual(byName.Elsewhere, undefined);
+    // The group lookup fails on the shared stub, so it never matches.
+    assert.strictEqual(byName.ByGroup, undefined);
+    assert.strictEqual(s.buffs.buffTypeOf('ZoneBuff'), 8);
+    assert.strictEqual(s.buffs.buffTypeOf('Missing'), null);
+    assert.deepStrictEqual(names(s.buffs.buildingBuffs('IronMine', true)), ['ByName', 'ByWorkyard']);
+});
+
+t.test('buildingBuffs: Workyard only when workyard is true', function () {
+    var s = setup({ buffs: [], buffDefs: BDEFS });
+    assert.deepStrictEqual(names(s.buffs.buildingBuffs('IronMine', false)), ['ByName']);
+    assert.deepStrictEqual(names(s.buffs.buildingBuffs('CoalMine', false)), []);
+    assert.deepStrictEqual(names(s.buffs.buildingBuffs('CoalMine', true)), ['ByWorkyard']);
+});
+
+t.test('buildingBuffs: undefined-definition inventory entries are skipped; out-of-stock listed with 0', function () {
+    var s = setup({
+        buffs: [{ type: 'NoDef', amount: 3 }, { type: 'Stocked', amount: 4 }],
+        buffDefs: { Stocked: bdef(0, 'Workyard'), Empty: bdef(0, 'Workyard') }
+    });
+    var list = s.buffs.buildingBuffs('IronMine', true);
+    assert.deepStrictEqual(names(list), ['Empty', 'Stocked']);
+    assert.strictEqual(list[0].amount, 0);
+    assert.strictEqual(list[1].amount, 4);
+    var s2 = setup({ buffs: [{ type: 'NoDef', amount: 3 }], buffDefs: null });
+    assert.deepStrictEqual(names(s2.buffs.buildingBuffCandidates('IronMine', true)), []);
+});
+
+// A home-island setup with one IronMine at grid 12 that may take a buff.
+function mineActing(stockAmount) {
+    var buff = { type: 'MineBuff', amount: stockAmount, uid: 'u1' };
+    var s = acting({ buffs: [buff], buffDefs: { MineBuff: bdef(0, 'Workyard'), OtherBuff: bdef(0, 'Bakery') } });
+    s.mine = Z.building({ name: 'IronMine', grid: 12, productionState: 0 });
+    s.env.buildings[12] = s.mine;
+    s.stockEntry = buff;
+    return s;
+}
+
+t.test('building def sends 61 to the building grid with the entry uid and verifies on productionBuff', function () {
+    var s = mineActing(2);
+    s.env.onSend = function () { s.mine.productionBuff = {}; };
+    var def = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    assert.strictEqual(def.label, 'building buff MineBuff -> IronMine 12');
+    assert.strictEqual(def.retries, 0);
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(res.sends, 1);
+    assert.strictEqual(s.sent.actions.length, 1);
+    assert.strictEqual(s.sent.actions[0].id, 61);
+    assert.strictEqual(s.sent.actions[0].p2, 12);
+    assert.strictEqual(s.sent.actions[0].p3, 0);
+    assert.strictEqual(s.sent.actions[0].data.toKeyString(), 'u1');
+    assert.strictEqual(def.describe(def.baseline()), 'stock 2 -> 2');
+});
+
+t.test('building def is not verified by a stock drop alone and never sends twice', function () {
+    var s = mineActing(2);
+    s.env.onSend = function () { s.stockEntry.amount -= 1; };
+    var res = run(s, s.buffs.building('MineBuff', 12, 'IronMine', true));
+    assert.strictEqual(res.status, s.S.ActionResult.Failed);
+    assert.strictEqual(res.unseen, true);
+    assert.strictEqual(res.sends, 1);
+    assert.strictEqual(s.sent.actions.length, 1);
+});
+
+t.test('building def refuses off home, unmatched buff, empty stock, changed building and a blocked building', function () {
+    var s = mineActing(2);
+    function reason(name, grid) {
+        return run(s, s.buffs.building(name || 'MineBuff', typeof grid === 'number' ? grid : 12, 'IronMine', true)).reason;
+    }
+    s.env.home = false;
+    assert.strictEqual(reason(), 'not on the home island');
+    s.env.home = true;
+    assert.strictEqual(reason('MineBuff', 0), 'no target grid');
+    assert.strictEqual(reason('OtherBuff'), 'buff does not target IronMine');
+    assert.strictEqual(run(s, s.buffs.building('MineBuff', 12, 'IronMine', false)).reason,
+        'buff does not target IronMine');
+    s.env.buildings[12] = Z.building({ name: 'CoalMine', grid: 12, productionState: 0 });
+    assert.strictEqual(reason(), 'building changed');
+    s.env.buildings[12] = null;
+    assert.strictEqual(reason(), 'building changed');
+    s.env.buildings[12] = Z.building({ name: 'IronMine', grid: 12, productionState: 0, productionBuff: {} });
+    assert.strictEqual(reason(), 'already buffed');
+    s.env.buildings[12] = Z.building({ name: 'IronMine', grid: 12, productionState: 0, upgrading: true });
+    assert.strictEqual(reason(), 'upgrading');
+    s.env.buildings[12] = Z.building({ name: 'IronMine', grid: 12, productionState: 2 });
+    assert.strictEqual(reason(), 'not producing (state 2)');
+    s.stockEntry.amount = 0;
+    assert.strictEqual(reason(), 'no buff in stock');
+    breakStock(s);
+    assert.strictEqual(reason(), 'buff stock unreadable');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+// Replaces the star menu with hand-made entries so single reads can fail.
+function rawMenu(s, items) {
+    s.H.host.game.gi.mCurrentPlayer.getAvailableBuffs_vector = function () { return items; };
+}
+
+function rawEntry(type, amount) {
+    return {
+        amount: amount,
+        GetType: function () { return type; },
+        GetResourceName_string: function () { return ''; },
+        GetUniqueId: function () { return { toKeyString: function () { return 'u'; } }; }
+    };
+}
+
+t.test('stock is unreadable while a matching entry amount is not a number', function () {
+    var s = setup({ buffs: [] });
+    rawMenu(s, [rawEntry('A', 3), rawEntry('A', undefined)]);
+    assert.strictEqual(s.buffs.stock('A', ''), null);
+    assert.strictEqual(s.buffs.amount('A'), 0);
+    assert.strictEqual(s.buffs.entry('A', '').amount, 3);
+});
+
+t.test('stock is unreadable while an entry type cannot be read', function () {
+    var s = setup({ buffs: [] });
+    var broken = rawEntry('A', 3);
+    broken.GetType = function () { throw new Error('boom'); };
+    rawMenu(s, [rawEntry('A', 3), broken]);
+    assert.strictEqual(s.buffs.stock('A', ''), null);
+});
+
+t.test('a bad entry of another type does not hide this stock', function () {
+    var s = setup({ buffs: [] });
+    rawMenu(s, [rawEntry('A', 3), rawEntry('B', 'x')]);
+    assert.strictEqual(s.buffs.stock('A', ''), 3);
+});
+
+t.test('building def reports the stock pair when it ran alone', function () {
+    var s = mineActing(5);
+    var def = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    var base = def.baseline();
+    s.stockEntry.amount = 4;
+    assert.strictEqual(def.describe(base), 'stock 5 -> 4');
+});
+
+t.test('two overlapping building applies report the current stock, not a pair', function () {
+    var s = mineActing(5);
+    var d1 = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    var d2 = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    var b1 = d1.baseline();
+    s.stockEntry.amount = 4;
+    var b2 = d2.baseline();
+    s.stockEntry.amount = 3;
+    var t1 = d1.describe(b1);
+    var t2 = d2.describe(b2);
+    assert.ok(t1.indexOf('stock 3 now (other applies of this buff overlapped)') >= 0);
+    assert.ok(t2.indexOf('now (other applies of this buff overlapped)') >= 0);
+    assert.ok(t1.indexOf('->') < 0 && t2.indexOf('->') < 0);
+});
+
+t.test('a refused building apply adds no stock text', function () {
+    var s = mineActing(0);
+    var def = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    assert.strictEqual(def.describe(undefined), '');
+    assert.strictEqual(run(s, def).reason, 'no buff in stock');
+});

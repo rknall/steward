@@ -3,6 +3,8 @@
 var t = require('../runner');
 var harness = require('../harness');
 var jq = require('../stubs/jq');
+var A = require('../stubs/army');
+var Z = require('../stubs/zone');
 
 t.test('plan no-ops when module is disabled', function () {
     var H = harness.boot();
@@ -344,7 +346,7 @@ t.test('mining registers on its own tab with a screen spec', function () {
     t.assert.strictEqual(mod.ui.section.action, undefined);
 });
 
-t.test('the deposit table lists the mine types and the quarry types apart', function () {
+t.test('the deposit table lists mine rows and the managed mason rows', function () {
     var H = harness.boot();
     mountQueue(H, 0, 4);
     var types = H.Steward.core.deposits.types();
@@ -354,14 +356,209 @@ t.test('the deposit table lists the mine types and the quarry types apart', func
     types.forEach(function (info) {
         var $r = rowFor($main, info.name);
         t.assert.ok($r, info.name);
-        var muted = $r.find('.steward-muted').length > 0;
-        t.assert.strictEqual(muted, !info.mineName, info.name);
-        // Mine rows carry three switches and a level box, quarry rows none.
+        // Every row picks a buff; mine rows also carry three switches and a
+        // level box, mason rows nothing else.
+        t.assert.strictEqual($r.find('select').length, 1, info.name);
         t.assert.strictEqual($r.find('input').length, info.mineName ? 4 : 0, info.name);
     });
-    t.assert.strictEqual($main.find('.steward-subhead').text(), 'NOT MANAGED BY STEWARD');
-    t.assert.ok(/^\d+ mines active · none paused$/.test($main.find('.steward-card-meta').text()),
+    t.assert.strictEqual($main.find('.steward-subhead span').eq(0).text(), 'MASONS');
+    t.assert.strictEqual($main.find('.steward-subhead-meta').text(),
+        'buff only · steward does not build masons');
+    t.assert.ok(/^\d+ mines active · none paused · \d+ buffed$/.test($main.find('.steward-card-meta').text()),
         $main.find('.steward-card-meta').text());
+});
+
+// --- Buff column -----------------------------------------------------------
+
+function buffDef(targets, type) {
+    return {
+        GetBuffType:                 function () { return type; },
+        GetTargetDescription_string: function () { return targets; },
+        GetTargetGroup_string:       function () { return ''; }
+    };
+}
+
+// A home island with buff definitions and stock for the Buff column. o:
+// buildings, settings (stored mining settings), stock (MineBuff, default 5).
+// MineBuff and EmptyBuff (none in stock) reach every workyard; ZoneBuff
+// (type 8) and BakeryBuff (another building) are never offered.
+function withBuffs(o) {
+    o = o || {};
+    var H = harness.boot();
+    A.install(H, {
+        buffs: [{ type: 'MineBuff', amount: typeof o.stock === 'number' ? o.stock : 5, uid: 'u1' },
+                { type: 'ZoneBuff', amount: 3, uid: 'u2' }],
+        buffDefs: {
+            MineBuff:   buffDef('Workyard', 0),
+            EmptyBuff:  buffDef('Workyard', 0),
+            ZoneBuff:   buffDef('Workyard', 8),
+            BakeryBuff: buffDef('Bakery', 0)
+        }
+    });
+    var z = H.zone.zone().buildQueue(0, 4);
+    var bl = o.buildings || [];
+    for (var i = 0; i < bl.length; i++) z.building(bl[i]);
+    H.installZone(z);
+    H.Steward.core.locale.res = function (name) { return name; };
+    H.settings.write('mining', o.settings || onlyMiningEnabled('IronOre', true));
+    return H;
+}
+
+function withBuff(map) {
+    var s = onlyMiningEnabled('IronOre', true);
+    for (var k in map) s.deposits[k].buff = map[k];
+    return s;
+}
+
+function optionLabels($r) {
+    var out = [];
+    var $o = $r.find('option');
+    for (var i = 0; i < $o.length; i++) out.push($o.eq(i).text());
+    return out;
+}
+
+function statusOf($r) {
+    return $r.find('select').parent().find('.steward-muted').eq(0);
+}
+
+function openBreaker(H) {
+    var b = H.Steward.modules.mining.buffBreaker;
+    for (var i = 0; i < b.MISSES; i++) b.miss();
+    t.assert.strictEqual(b.isOpen(), true);
+    return b;
+}
+
+t.test('choosing a buff writes deposits.<Type>.buff and keeps the row', function () {
+    var H = withBuffs();
+    var h = H.Steward.kernel.ui.helpers;
+    var $main = build(H, 'render');
+    rowFor($main, 'IronOre').find('select').val('MineBuff').trigger('change');
+    var row = h.get('mining', 'deposits.IronOre');
+    t.assert.strictEqual(row.buff, 'MineBuff');
+    t.assert.strictEqual(row.build, true);
+    t.assert.strictEqual(row.upgrade, false);
+    t.assert.strictEqual(row.targetLevel, 3);
+    t.assert.strictEqual(row.pause, false);
+    t.assert.strictEqual(row.refill, '');
+    // A mason row writes its own deposit the same way.
+    rowFor($main, 'Granite').find('select').val('MineBuff').trigger('change');
+    t.assert.strictEqual(h.get('mining', 'deposits.Granite.buff'), 'MineBuff');
+    t.assert.strictEqual(h.get('mining', 'deposits.Granite.enabled'), false);
+    // Back to None clears the choice.
+    rowFor($main, 'IronOre').find('select').val('').trigger('change');
+    t.assert.strictEqual(h.get('mining', 'deposits.IronOre.buff'), '');
+});
+
+t.test('the buff list offers None first and only offered buffs with stock', function () {
+    var H = withBuffs();
+    var $main = build(H, 'render');
+    ['IronOre', 'Granite'].forEach(function (name) {
+        var $r = rowFor($main, name);
+        t.assert.deepStrictEqual(optionLabels($r), ['None', 'EmptyBuff (0)', 'MineBuff (5)'], name);
+        t.assert.strictEqual($r.find('option').eq(0).attr('value'), '', name);
+        t.assert.strictEqual($r.find('select').val(), '', name);
+        t.assert.strictEqual(statusOf($r).text(), 'off', name);
+    });
+});
+
+t.test('a stored buff that is no longer offered stays selectable', function () {
+    var H = withBuffs({ settings: withBuff({ IronOre: 'OldBuff', Marble: 'BakeryBuff' }) });
+    var h = H.Steward.kernel.ui.helpers;
+    var $main = build(H, 'render');
+    [['IronOre', 'OldBuff'], ['Marble', 'BakeryBuff']].forEach(function (c) {
+        var $r = rowFor($main, c[0]);
+        var labels = optionLabels($r);
+        t.assert.strictEqual(labels[labels.length - 1], c[1] + ' (not offered)', c[0]);
+        t.assert.strictEqual($r.find('select').val(), c[1], c[0]);
+        t.assert.strictEqual(statusOf($r).find('.steward-badge').text(), 'not offered for this building', c[0]);
+        // Showing the row does not touch the stored choice.
+        t.assert.strictEqual(h.get('mining', 'deposits.' + c[0] + '.buff'), c[1], c[0]);
+    });
+});
+
+t.test('out of stock and breaker paused show their badges', function () {
+    var H = withBuffs({
+        settings: withBuff({ IronOre: 'EmptyBuff', Granite: 'MineBuff' }),
+        buildings: [
+            Z.building({ name: 'IronMine', grid: 3, productionState: 0 }),
+            Z.building({ name: 'GraniteMason', grid: 4, productionState: 0, productionBuff: {} }),
+            Z.building({ name: 'GraniteMason', grid: 5, productionState: 0 })
+        ]
+    });
+    var $main = build(H, 'render');
+    var $iron = statusOf(rowFor($main, 'IronOre'));
+    var $granite = statusOf(rowFor($main, 'Granite'));
+    t.assert.strictEqual($iron.find('.steward-badge').text(), 'out of stock');
+    t.assert.strictEqual($iron.text(), 'out of stock 0 of 1 buffed');
+    t.assert.strictEqual($granite.find('.steward-badge').length, 0);
+    t.assert.strictEqual($granite.text(), '5 in stock · 1 of 2 buffed');
+    t.assert.ok(/ · 1 buffed$/.test($main.find('.steward-card-meta').text()),
+        $main.find('.steward-card-meta').text());
+
+    openBreaker(H);
+    $main = build(H, 'render');
+    $iron = statusOf(rowFor($main, 'IronOre'));
+    $granite = statusOf(rowFor($main, 'Granite'));
+    // Out of stock still wins over paused.
+    t.assert.strictEqual($iron.find('.steward-badge').text(), 'out of stock');
+    t.assert.strictEqual($granite.find('.steward-badge').text(), 'paused');
+    t.assert.ok($granite.find('.steward-badge').hasClass('steward-b-paused'));
+    t.assert.strictEqual($granite.text(), 'paused 5 in stock · 1 of 2 buffed');
+});
+
+t.test('an unreadable stock says so', function () {
+    var H = withBuffs({ settings: withBuff({ IronOre: 'MineBuff' }) });
+    H.Steward.core.buffs.stock = function () { return null; };
+    var $r = rowFor(build(H, 'render'), 'IronOre');
+    t.assert.strictEqual(statusOf($r).text(), 'stock unreadable');
+});
+
+t.test('the breaker banner shows only while open', function () {
+    var H = withBuffs({ settings: withBuff({ IronOre: 'MineBuff' }) });
+    t.assert.strictEqual(build(H, 'render').find('.steward-banner').length, 0);
+    var b = openBreaker(H);
+    var $main = build(H, 'render');
+    var $banner = $main.find('.steward-banner');
+    t.assert.strictEqual($banner.length, 1);
+    t.assert.strictEqual($banner.text(), '⚠Buffing paused: 5 buff applies in a row were not seen on ' +
+        'their building. One probe every 5 min; reloading scripts resets it. Build, upgrade and ' +
+        'pause keep running.');
+    b.verify('test');
+    t.assert.strictEqual(build(H, 'render').find('.steward-banner').length, 0);
+});
+
+t.test('the settings column shows buffed buildings and the breaker state', function () {
+    var H = withBuffs({
+        buildings: [
+            Z.building({ name: 'IronMine', grid: 3, productionState: 0, productionBuff: {} }),
+            Z.building({ name: 'Mason', grid: 4, productionState: 0 })
+        ]
+    });
+    var $side = build(H, 'side');
+    var $stats = $side.find('.steward-stat');
+    t.assert.strictEqual($stats.length, 4);
+    t.assert.strictEqual($stats.eq(2).find('.steward-stat-k').text(), 'Buffed now');
+    t.assert.strictEqual($stats.eq(2).find('.steward-stat-v').text(), '1 of 2');
+    t.assert.strictEqual($stats.eq(3).find('.steward-badge').text(), 'closed');
+    t.assert.ok($stats.eq(3).find('.steward-badge').hasClass('steward-b-ok'));
+    t.assert.strictEqual($side.find('.steward-field-name').eq(0).text(), 'Build, upgrade and buff mines');
+    openBreaker(H);
+    $stats = build(H, 'side').find('.steward-stat');
+    t.assert.strictEqual($stats.eq(3).find('.steward-badge').text(), 'open');
+    t.assert.ok($stats.eq(3).find('.steward-badge').hasClass('steward-b-paused'));
+});
+
+t.test('tiles add the breaker line only while open', function () {
+    var H = withBuffs();
+    jq.install(H);
+    var h = H.Steward.kernel.ui.helpers;
+    t.assert.strictEqual(H.Steward.modules.mining.tiles(h)[0].lines.length, 2);
+    var b = openBreaker(H);
+    var lines = H.Steward.modules.mining.tiles(h)[0].lines;
+    t.assert.strictEqual(lines.length, 3);
+    t.assert.strictEqual(lines[2], 'Buffing paused (breaker)');
+    b.verify('test');
+    t.assert.strictEqual(H.Steward.modules.mining.tiles(h)[0].lines.length, 2);
 });
 
 t.test('deposit names go through the locale and keep the raw name as the tooltip', function () {
@@ -426,6 +623,7 @@ t.test('the settings column shows the queue and licence counts', function () {
     var H = harness.boot();
     mountQueue(H, 0, 4);
     var $side = build(H, 'side');
-    t.assert.strictEqual($side.find('.steward-stat').length, 2);
+    // Queue and licences, then buffed buildings and the buff breaker.
+    t.assert.strictEqual($side.find('.steward-stat').length, 4);
     t.assert.ok(/of 100$/.test($side.find('.steward-stat').eq(1).text()), $side.find('.steward-stat').eq(1).text());
 });

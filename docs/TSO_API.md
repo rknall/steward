@@ -295,6 +295,36 @@ b.productionBuff;              // single appliance, used by host scripts
 - Remaining time, as the in-game label computes it:
   `getDuration(GetApplicanceMode()) - (GetClientTime() - GetStartTime())`, milliseconds.
 
+### Applying a building buff
+
+Checked live on 2026-11-09 with the steward "Dump mine buffs" diagnostic
+(`minebuffs-<zone>-<epoch>.json`) unless a line says otherwise.
+
+- Offered buffs are definitions with `GetBuffType() === 0`, the single-building production
+  buffs. Confirmed live. Types 8 (zone) and 4 (skin) also appear as candidates and are not
+  offered, and so does type 9 (the permanent default skin). Type 1 (military) is excluded by
+  the same rule and was not seen live.
+- Targets come from `GetTargetDescription_string()`: a comma list of building names, or the
+  token `Workyard` (every non-epic workyard). Confirmed live: `Workyard` reaches all nine
+  deposit types, and named targets match by name. `GetTargetGroup_string()` is empty for these
+  buffs; when it is not, `BuffSystem.cBuffDefinition` `targetGroups.groupContains` decides.
+  Target groups: not seen live.
+- Eligibility of a building: `GetResourceCreation().GetProductionState()` is 0 when it is
+  working. Confirmed live: all working mines and masons read 0. Paused (5) and other values
+  not seen live, from an older client.
+- Upgrading, under construction and being destroyed are read from `IsUpgradeInProgress()`,
+  `IsInConstructionMode()` and `IsInDestruction()`. All three are present live on every
+  building, and all read false. A value of true was not seen. An absent method is skipped; a
+  throwing one blocks the building.
+- Depleted mines are separate building types (`MineDepletedDeposit*`), not seen live.
+- Apply is server action 61 with the building grid and the buff entry uid:
+  `sendAction(61, 0, <building grid>, 0, <entry uid>)`. Confirmed by verified applies. It is
+  sent once and never retried, because a second send could spend a second buff when the first
+  applied unseen.
+- Applied means `productionBuff` is non-null within 15 s. Confirmed by verified applies: each
+  one was seen inside the window after a single send. `mBuffs_vector` has length 1 on a buffed
+  building; it is recorded in the dump only. A stock drop alone is not treated as success.
+
 ## Scenario items
 
 ```js

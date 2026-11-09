@@ -45,7 +45,8 @@ Steward
 │   ├── adventures      ← adventure definitions, own adventures, close action
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
-│   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map
+│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs)
+│   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
 │   ├── production      ← troop and item queues, order pricing and order action
 │   ├── quests          ← quest pool and claim action
 │   └── resources       ← resource amount and free population reads

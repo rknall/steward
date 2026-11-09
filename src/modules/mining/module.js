@@ -1,12 +1,30 @@
 /*
  * Mining module.
  *
- * Manages the mine-building lifecycle on the home zone. v1 fills the
- * `tryBuild` phase only — places a mine on every deposit grid that
- * has no building, subject to build-queue slots, building licenses,
- * and per-mine affordability. The other phases (tryUpgrade, tryPause,
- * tryBuff, tryRefill) are stubs that return immediately; they land in
- * v2 once the core/buffs subsystem exists.
+ * Manages the mine and mason lifecycle on the home zone, one phase per
+ * step for every enabled deposit type, in this order:
+ *
+ *   build    places a mine on every deposit grid that has no building,
+ *            subject to build-queue slots, building licenses and
+ *            per-mine affordability.
+ *   upgrade  raises mines below the configured target level.
+ *   pause    stops producing mines whose deposit fell below the global
+ *            pause threshold.
+ *   buff     applies the configured production buff (deposits.<Type>.buff)
+ *            to every mine or mason that is producing, unbuffed and not
+ *            upgrading, through S.core.buffs and S.core.actions, so each
+ *            apply is verified on the building itself.
+ *   refill   still a stub.
+ *
+ * The buff phase owns its own S.core.breaker instance: applies that are
+ * sent but never seen on their building open it, which pauses buffing
+ * only (geologists and explorers keep the specialist send guard). A
+ * building whose apply was not seen is also held for a while, because
+ * the buff may have landed unseen and a second one would be wasted.
+ * Breaker and holds are memory only, so a script reload resets both.
+ * Buff values stored before the buff phase existed are cleared once at
+ * boot (the `buffVersion` marker), and the buff phase runs only once
+ * that marker is stored.
  *
  * The geologists module covers deposit-search dispatch. This module
  * runs independently on the same tick: geos find deposits → next tick,
@@ -21,6 +39,23 @@
 (function (S) {
 
     if (!S.modules.mining) S.modules.mining = {};
+
+    // Each buff apply holds the shared queue for up to its verify window,
+    // and the busy contract re-plans only once the queue drains, so a
+    // pass sends only a few and the next pass picks up the rest.
+    var BUFFS_PER_PLAN = 2;
+    // A building whose apply was not seen waits 30 min, so a buff that
+    // landed unseen is not paid for twice.
+    var BUFF_HOLD_MS = 1800000;
+    var holds = {};                 // grid -> hold until, on the breaker clock
+
+    var buffBreaker = S.core.breaker.create({
+        category:   'mining',
+        label:      'buff breaker',
+        missText:   'buff applies in a row were not seen on their building',
+        pausedText: 'mine and mason buffing is paused',
+        resumeText: 'buffing resumes'
+    });
 
     function readSettings() {
         var stored = S.kernel.settings.read('mining') || {};
@@ -38,6 +73,64 @@
         for (key in storedDeps)  depMerged[key] = storedDeps[key];
         merged.deposits = depMerged;
         return merged;
+    }
+
+    // Reads the raw store, not readSettings(): the merge would fill in the
+    // default marker and hide that the stored values predate the buff UI.
+    function buffSettingsCurrent() {
+        try {
+            var raw = S.kernel.settings.read('mining');
+            var defaults = S.modules.mining.defaultSettings || {};
+            return !!(raw && typeof raw === 'object' &&
+                      raw.buffVersion === defaults.buffVersion);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Before the buff phase, deposits.<Type>.buff was a placeholder that
+    // nothing read, so stored values are stale names the user never picked
+    // for buffing. Clear them once and store the marker; every other field
+    // stays as stored. A failed write leaves the marker missing, which keeps
+    // the buff phase off and retries the clear on the next boot.
+    function migrateBuffSettings() {
+        try {
+            var raw = S.kernel.settings.read('mining');
+            if (!raw || buffSettingsCurrent()) return;
+            var next = {};
+            var key;
+            for (key in raw) next[key] = raw[key];
+            var deps = {};
+            var rawDeps = raw.deposits || {};
+            var cleared = [];
+            for (key in rawDeps) {
+                var entry = rawDeps[key];
+                if (entry && typeof entry === 'object' &&
+                    typeof entry.buff === 'string' && entry.buff !== '') {
+                    var copy = {};
+                    for (var f in entry) copy[f] = entry[f];
+                    copy.buff = '';
+                    deps[key] = copy;
+                    cleared.push(key + '=' + entry.buff);
+                } else {
+                    deps[key] = entry;
+                }
+            }
+            next.deposits = deps;
+            next.buffVersion = S.modules.mining.defaultSettings.buffVersion;
+            var ok = S.kernel.settings.write('mining', next);
+            if (ok && cleared.length) {
+                S.kernel.log('mining', 'buff settings reset once: cleared',
+                             cleared.join(', '), '— pick buffs in the Mining tab');
+            } else if (ok) {
+                S.kernel.log('mining', 'buff settings marked current, nothing to clear');
+            } else {
+                S.kernel.warn('mining', 'buff settings reset could not be written;' +
+                              ' buffing stays off until it is');
+            }
+        } catch (e) {
+            S.kernel.error('mining', 'buff settings reset threw:', e);
+        }
     }
 
     function isReady(ctx) {
@@ -64,6 +157,9 @@
             licensesRemaining: licensesRemaining,
             queued:             0,
             assigned:           {},
+            buffs:              0,      // buff applies queued this pass
+            buffStock:          {},     // buff name -> stock left this pass
+            buffsCurrent:       buffSettingsCurrent(),
             actionDelay:       (typeof s.actionDelay === 'number') ? s.actionDelay : 1500
         };
     }
@@ -80,8 +176,7 @@
         }
     }
 
-    // Phase functions. tryBuild is live in v1; the rest are v2 stubs
-    // (filled once core/buffs lands). Tests inject stubs via
+    // Phase functions; tryRefill is still a stub. Tests inject stubs via
     // S.modules.mining._phases — see tests/modules/mining.test.js.
     function tryBuild(info, cfg, ctx) {
         if (!cfg.build) return;
@@ -227,7 +322,69 @@
                 delay);
         }
     }
-    function tryBuff(info, cfg, ctx)    { /* v2 — mine OR mason */ }
+    function gridOrder(a, b) {
+        return (S.core.buildings.grid(a) || 0) - (S.core.buildings.grid(b) || 0);
+    }
+
+    // Mine OR mason: each deposit type names exactly one of the two.
+    // Whether a building can take a buff (producing, unbuffed, not
+    // upgrading) is S.core.buildings' call; this phase only adds the
+    // per-pass limit, the grids other phases claimed, the holds and the
+    // breaker.
+    function tryBuff(info, cfg, ctx) {
+        // Stale buff names from before the buff UI must never buff.
+        if (ctx.buffsCurrent !== true) return;
+        if (typeof cfg.buff !== 'string' || !cfg.buff) return;
+        var bName = info.mineName || info.masonName;
+        if (!bName) return;
+        if (ctx.buffs >= BUFFS_PER_PLAN) return;
+        if (S.core.zone.isHome() !== true) return;
+        if (!S.core.buffs.buildingBuffMatch(cfg.buff, bName, true)) {
+            S.kernel.debug('mining', 'buff', cfg.buff, 'does not target', bName,
+                           '— skipping buff');
+            return;
+        }
+        // Stock is read once per buff per pass and counted down locally,
+        // because the applies queued so far have not left the stock yet.
+        var stock = Object.prototype.hasOwnProperty.call(ctx.buffStock, cfg.buff)
+            ? ctx.buffStock[cfg.buff]
+            : S.core.buffs.stock(cfg.buff, '');
+        if (!(stock > 0)) return;
+
+        var list;
+        try { list = S.core.buildings.byName(bName).slice(); }
+        catch (e) {
+            S.kernel.warn('mining', 'byName threw for', bName, ':', e);
+            return;
+        }
+        list.sort(gridOrder);
+
+        for (var i = 0; i < list.length; i++) {
+            var b = list[i];
+            var grid = S.core.buildings.grid(b);
+            if (grid === null || typeof grid === 'undefined') continue;
+            if (ctx.assigned[grid]) continue;                    // build/upgrade/pause claimed it
+            if (holds[grid] > buffBreaker.clock()) continue;     // last apply was not seen
+            if (S.core.buildings.buffBlock(b) !== null) continue;
+            if (buffBreaker.admit(1) === 0) {                    // open and no probe due
+                ctx.buffs = BUFFS_PER_PLAN;
+                return;
+            }
+
+            ctx.assigned[grid] = true;
+            ctx.queued++;
+            ctx.buffs++;
+            stock--;
+            ctx.buffStock[cfg.buff] = stock;
+
+            var delay = (ctx.queued === 1) ? 0 : ctx.actionDelay;
+            S.kernel.queue.add('mining.buffBuilding',
+                [grid, bName, cfg.buff, info.name],
+                delay);
+
+            if (ctx.buffs >= BUFFS_PER_PLAN || stock <= 0) return;
+        }
+    }
     function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
 
     function phase(name, info, cfg, ctx) {
@@ -256,18 +413,18 @@
             if (!cfg || !cfg.enabled) continue;
 
             // Phase order per deposit:
-            //   tryBuild → tryUpgrade → tryBuff → tryPause → tryRefill
-            // Buff comes after upgrade so its effect compounds with the
-            // newer level. Pause runs last among mine-only phases so the
-            // earlier active-state phases get their chance first.
+            //   tryBuild → tryUpgrade → tryPause → tryBuff → tryRefill
+            // Buff runs after build and upgrade so the grids they claimed
+            // are skipped. Pause runs before buff so a mine about to be
+            // paused claims its grid and is not buffed in the same pass;
+            // the next pass sees it stopped, which the buff eligibility
+            // check rejects.
             if (info.mineName) {
                 phase('tryBuild',   info, cfg, ctx);
                 phase('tryUpgrade', info, cfg, ctx);
+                phase('tryPause',   info, cfg, ctx);
             }
             phase('tryBuff', info, cfg, ctx);            // mine OR mason
-            if (info.mineName) {
-                phase('tryPause', info, cfg, ctx);
-            }
             phase('tryRefill', info, cfg, ctx);
         }
         if (ctx.queued > 0) {
@@ -279,6 +436,7 @@
         if (!S.kernel.settings.read('mining')) {
             S.kernel.settings.write('mining', S.modules.mining.defaultSettings);
         }
+        migrateBuffSettings();
 
         S.kernel.queue.action('mining.buildMine', function (params) {
             var mineId   = params[0];
@@ -370,10 +528,56 @@
                 S.kernel.error('mining', 'SendServerAction(107) threw for', mineName, ':', e);
             }
         });
+
+        S.kernel.queue.action('mining.buffBuilding', function (params) {
+            var grid     = params[0];
+            var bName    = params[1];
+            var buffName = params[2];
+
+            // Re-check: state may have drifted since plan() queued. The
+            // action def checks eligibility again right before it sends.
+            var bld = S.core.buildings.byGrid(grid);
+            if (!bld || S.core.buildings.name(bld) !== bName) {
+                S.kernel.log('mining', 'grid', grid, 'no longer hosts', bName,
+                             '— skipping buff');
+                return;
+            }
+
+            function onDone(r) {
+                var R = S.ActionResult;
+                if (r.status === R.Verified && r.sends > 0) {
+                    delete holds[grid];
+                    buffBreaker.verify(bName + ' grid ' + grid);
+                    S.kernel.log('mining', 'buffed', bName, 'on grid', grid, 'with', buffName);
+                } else if (r.status === R.Failed && r.unseen) {
+                    holds[grid] = buffBreaker.clock() + BUFF_HOLD_MS;
+                    buffBreaker.miss();
+                    S.kernel.warn('mining', buffName, 'on', bName, 'grid', grid,
+                                  'was not seen to apply — holding the grid');
+                } else if (r.status === R.Failed) {
+                    // The send itself failed: hold the grid, but only an
+                    // unseen apply counts towards the breaker.
+                    holds[grid] = buffBreaker.clock() + BUFF_HOLD_MS;
+                    S.kernel.warn('mining', buffName, 'on', bName, 'grid', grid,
+                                  'failed:', r.reason, '— holding the grid');
+                } else if (r.status === R.Refused) {
+                    S.kernel.debug('mining', buffName, 'on', bName, 'grid', grid,
+                                   'refused:', r.reason);
+                }
+            }
+
+            if (!S.core.actions.attempt(
+                    S.core.buffs.building(buffName, grid, bName, true), onDone)) {
+                S.kernel.error('mining', 'could not start buff', buffName, 'on', bName,
+                               'grid', grid);
+            }
+        });
     }
 
-    // Exposed for ui.js.
+    // Exposed for ui.js and the tests.
     S.modules.mining.readSettings = readSettings;
+    S.modules.mining.buffBreaker  = buffBreaker;
+    S.modules.mining.buffHolds    = function () { return holds; };
 
     S.kernel.register({
         id:       'mining',

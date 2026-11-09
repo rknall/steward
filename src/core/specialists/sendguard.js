@@ -10,8 +10,10 @@
  * Idle after VERIFY_MS on a complete read missed. A miss holds that uid with a
  * delay that doubles per miss up to HOLD_MAX_MS; only a verify clears the
  * count. BREAKER_MISSES misses in a row, counted in send order across every
- * owner, open one breaker that pauses dispatch, warns once and lets one probe
- * through every PROBE_COOLDOWN_MS. The first verified send closes it.
+ * owner, open the breaker that pauses dispatch, warns once and lets one probe
+ * through every PROBE_COOLDOWN_MS. The first verified send closes it. The
+ * breaker is one S.core.breaker instance, shared by every specialist module;
+ * this file keeps the pending entries, holds and the settle judgement.
  *
  * Verification is deferred to the module's plan instead of running through
  * S.core.actions.attempt: a batch of sends would each hold the shared queue
@@ -30,7 +32,8 @@
  * reload resets every pending entry, hold and the breaker.
  *
  * Bundle slot: core, under core/specialists/ after orders.js and, like every
- * file there, before specialists.js. Every reference to
+ * file there, before specialists.js; core/breaker.js loads earlier, so the
+ * breaker instance is created at load time. Every reference to
  * S.core.specialists.uniqueIdKey/status happens at call time.
  */
 
@@ -46,9 +49,10 @@
     var STALE_MS          = 900000;
     var HOLD_BASE_MS      = 300000;
     var HOLD_MAX_MS       = 3600000;
-    // One or two slow tasks never trip it; a desynced batch trips it at once.
-    var BREAKER_MISSES    = 5;
-    var PROBE_COOLDOWN_MS = 300000;
+    // The breaker's own defaults: one threshold for every sender, so a change
+    // there reaches the send guard too.
+    var BREAKER_MISSES    = S.core.breaker.MISSES;
+    var PROBE_COOLDOWN_MS = S.core.breaker.COOLDOWN_MS;
 
     var CATEGORY = 'specialists';
 
@@ -56,11 +60,21 @@
 
     var pending     = {};   // uid -> { owner, label, tag, sentAt }
     var holds       = {};   // uid -> { until, misses }
-    var run         = 0;    // unverified sends in a row, in send order
-    var open        = false;
-    var nextProbeAt = 0;
 
     var guard = {};
+
+    // Misses are fed in send order, so its run counts unverified sends in a
+    // row across every owner. Its clock follows guard.clock, which tests swap.
+    var breaker = S.core.breaker.create({
+        category:   CATEGORY,
+        label:      'send guard',
+        missText:   'sends in a row did not change their specialist',
+        pausedText: 'explorer and geologist dispatch is paused',
+        resumeText: 'dispatch resumes',
+        misses:     BREAKER_MISSES,
+        cooldownMs: PROBE_COOLDOWN_MS,
+        clock:      function () { return guard.clock(); }
+    });
 
     function now() {
         return guard.clock();
@@ -83,13 +97,9 @@
         var e = item.entry;
         delete pending[item.key];
         delete holds[item.key];
-        run = 0;
         S.kernel.log(e.owner, 'verified ' + e.label + ' (uid ' + item.key + ') after ' +
             seconds(t - e.sentAt) + ' s');
-        if (open) {
-            open = false;
-            S.kernel.log(CATEGORY, 'send guard closed: ' + e.label + ' verified, dispatch resumes');
-        }
+        breaker.verify(e.label);
     }
 
     function applyMiss(item, t) {
@@ -102,14 +112,7 @@
         holds[item.key] = h;
         S.kernel.log(e.owner, e.label + ' (uid ' + item.key + ') did not leave Idle after ' +
             seconds(t - e.sentAt) + ' s - held ' + Math.round(ms / 60000) + ' min');
-        run += 1;
-        if (!open && run >= BREAKER_MISSES) {
-            open = true;
-            nextProbeAt = t + PROBE_COOLDOWN_MS;
-            S.kernel.warn(CATEGORY, 'send guard open: ' + run + ' sends in a row did not change ' +
-                'their specialist; explorer and geologist dispatch is paused, one probe every ' +
-                Math.round(PROBE_COOLDOWN_MS / 60000) + ' min; reloading scripts resets it');
-        }
+        breaker.miss();
     }
 
     // list: the plan's own specialist read (may be null). complete: false
@@ -177,23 +180,14 @@
         return out;
     }
 
-    // How many of n sends may go out now. While the breaker is open the first
-    // caller after each cooldown gets one probe; the cooldown re-arms at once,
-    // so a probe that misses waits a full cooldown before the next.
+    // How many of n sends may go out now: one probe per cooldown while the
+    // breaker is open.
     function admit(n) {
-        if (!(n > 0)) return 0;
-        if (!open) return n;
-        var t = now();
-        if (t >= nextProbeAt) {
-            nextProbeAt = t + PROBE_COOLDOWN_MS;
-            S.kernel.debug(CATEGORY, 'send guard open: one probe send allowed');
-            return 1;
-        }
-        return 0;
+        return breaker.admit(n);
     }
 
     function isOpen() {
-        return open;
+        return breaker.isOpen();
     }
 
     function snapshot() {
@@ -207,7 +201,8 @@
         for (k in holds) {
             if (has.call(holds, k) && holds[k].until > t) nh++;
         }
-        return { open: open, run: run, pending: np, held: nh, nextProbeAt: nextProbeAt };
+        var b = breaker.snapshot();
+        return { open: b.open, run: b.run, pending: np, held: nh, nextProbeAt: b.nextProbeAt };
     }
 
     guard.clock             = function () { return Date.now(); };

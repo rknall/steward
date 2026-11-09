@@ -201,6 +201,82 @@ t.test('buffRemainingMs is null without a host clock or a buff', function () {
     t.assert.strictEqual(C.Steward.core.buildings.buffRemainingMs(null), null);
 });
 
+t.test('buffBlock: eligible mine with state 0 and no buff', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({ name: 'IronMine', productionState: 0, upgrading: false,
+        constructing: false, destroying: false });
+    t.assert.strictEqual(B.buffBlock(b), null);
+    t.assert.strictEqual(B.hasProductionBuff(b), false);
+    t.assert.strictEqual(B.buffBlock(null), 'no building');
+});
+
+t.test('buffBlock: already buffed / not producing / unreadable state', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var buffed = H.zone.building({ productionState: 0, productionBuff: H.zone.buff({}) });
+    t.assert.strictEqual(B.buffBlock(buffed), 'already buffed');
+    t.assert.strictEqual(B.hasProductionBuff(buffed), true);
+    t.assert.strictEqual(B.buffBlock(H.zone.building({ productionState: 2 })), 'not producing (state 2)');
+    t.assert.strictEqual(B.buffBlock(H.zone.building({})), 'production state unreadable');
+    var throwing = { GetResourceCreation: function () { throw new Error('boom'); } };
+    t.assert.strictEqual(B.buffBlock(throwing), 'production state unreadable');
+    var badBuff = {};
+    Object.defineProperty(badBuff, 'productionBuff', { get: function () { throw new Error('boom'); } });
+    t.assert.strictEqual(B.buffBlock(badBuff), 'buff state unreadable');
+    t.assert.strictEqual(B.hasProductionBuff(badBuff), null);
+});
+
+t.test('buffBlock: each present blocker blocks, an absent one is skipped', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.buffBlock(H.zone.building({ productionState: 0, upgrading: true })), 'upgrading');
+    t.assert.strictEqual(B.buffBlock(H.zone.building({ productionState: 0, constructing: true })),
+        'under construction');
+    t.assert.strictEqual(B.buffBlock(H.zone.building({ productionState: 0, destroying: true })),
+        'being destroyed');
+    // No blocker methods at all: eligible on state 0 alone.
+    t.assert.strictEqual(B.buffBlock(H.zone.building({ productionState: 0 })), null);
+});
+
+t.test('buffBlock: a throwing blocker blocks', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({ productionState: 0 });
+    b.IsInDestruction = function () { throw new Error('boom'); };
+    t.assert.strictEqual(B.buffBlock(b), 'IsInDestruction unreadable');
+});
+
+t.test('buffState reports presence and mBuffs_vector length', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({ productionState: 0, upgrading: false, buffs: [H.zone.buff({}), H.zone.buff({})] });
+    var st = B.buffState(b);
+    t.assert.strictEqual(st.buffsVector, 2);
+    t.assert.strictEqual(st.productionState, 0);
+    t.assert.strictEqual(st.productionBuff, false);
+    t.assert.strictEqual(st.blockers.length, B.BUFF_BLOCKERS.length);
+    t.assert.strictEqual(st.blockers[0].present, true);
+    t.assert.strictEqual(st.blockers[0].value, false);
+    t.assert.strictEqual(st.blockers[1].present, false);
+    t.assert.strictEqual(st.blockers[1].value, null);
+    t.assert.strictEqual(B.buffState(H.zone.building({})).buffsVector, null);
+    t.assert.strictEqual(B.buffState(null), null);
+});
+
+t.test('productionBuffInfo: name and remaining time, null without buff', function () {
+    var H = bootClock(100 * HOUR);
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({
+        productionBuff: H.zone.buff({ name: 'BuffMine', pct: 1000, duration: 5 * HOUR, start: 99 * HOUR })
+    });
+    var info = B.productionBuffInfo(b);
+    t.assert.strictEqual(info.name, 'BuffMine');
+    t.assert.strictEqual(info.remainingMs, 4 * HOUR);
+    t.assert.strictEqual(B.productionBuffInfo(H.zone.building({})), null);
+    t.assert.strictEqual(B.productionBuffInfo(null), null);
+});
+
 t.test('amountPerCycle reads amountRemoved from the economy definition', function () {
     var H = harness.boot();
     var B = H.Steward.core.buildings;

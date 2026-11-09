@@ -57,17 +57,28 @@ function building(opts) {
     }
     if (opts.buffs) b.mBuffs_vector = opts.buffs;
     if (opts.productionBuff) b.productionBuff = opts.productionBuff;
+    // Buff-eligibility reads follow the same rule: only an explicit opt adds
+    // the method, so a test can model a build that lacks one.
+    if (typeof opts.productionState === 'number') {
+        b.GetResourceCreation = function () {
+            return { GetProductionState: function () { return opts.productionState; } };
+        };
+    }
+    if (typeof opts.upgrading === 'boolean') b.IsUpgradeInProgress = function () { return opts.upgrading; };
+    if (typeof opts.constructing === 'boolean') b.IsInConstructionMode = function () { return opts.constructing; };
+    if (typeof opts.destroying === 'boolean') b.IsInDestruction = function () { return opts.destroying; };
     return b;
 }
 
 // Buff appliance: pct is the output percent of its definition, duration and
-// start are on the host game clock (ms).
+// start are on the host game clock (ms), name (optional) is the definition name.
 function buff(opts) {
     opts = opts || {};
     var def = {
         getProductivityOutputPercent: function () { return opts.pct; },
         getDuration:                  function () { return opts.duration; }
     };
+    if (typeof opts.name === 'string') def.GetName_string = function () { return opts.name; };
     return {
         GetBuffDefinition:  function () { return def; },
         GetStartTime:       function () { return opts.start; },

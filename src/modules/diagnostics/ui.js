@@ -570,7 +570,8 @@
             card('◎', 'This zone', [
                 tool('Inspect zone', '', inspectCurrentZone),
                 tool('Dump quests', 'triggers and end conditions', function () { army().dumpQuests(); }),
-                tool('Dump buildings', 'JSON file in steward/dumps', function () { army().dumpBuildings(); })
+                tool('Dump buildings', 'JSON file in steward/dumps', function () { army().dumpBuildings(); }),
+                tool('Dump mine buffs', 'JSON file in steward/dumps', function () { S.modules.diagnostics.mineBuffs.dump(); })
             ]),
             card('⚔', 'Army', [
                 tool('Dump generals', 'task, squads', function () { army().dumpGenerals(); }),

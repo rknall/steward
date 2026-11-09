@@ -454,6 +454,29 @@
         };
     }
 
+    // File name of a dump: <prefix>-<zone>-<epoch ms>.json, the zone id
+    // reduced to characters that are safe in a path.
+    function dumpFileName(prefix, zoneId) {
+        var safeId = (zoneId === null || zoneId === undefined) ? 'unknown'
+            : String(zoneId).replace(/[^A-Za-z0-9_\-]/g, '_');
+        return prefix + '-' + safeId + '-' + new Date().getTime() + '.json';
+    }
+
+    // Writes text into steward/dumps. stewardDir is looked up here, not
+    // cached, so a reload that swaps the files helper is honoured. path is
+    // null when there is no folder; ok says whether the write succeeded.
+    // Logs nothing, so each caller words its own lines.
+    function writeDump(fileName, text) {
+        var path = null;
+        try {
+            var d = S.kernel.files.stewardDir('dumps');
+            if (d && d.dir) path = d.dir.resolvePath(fileName).nativePath;
+        } catch (e) { path = null; }
+        if (!path) return { path: null, ok: false, message: 'no writable dumps folder' };
+        var r = S.kernel.files.writeText(path, text);
+        return { path: path, ok: !!(r && r.ok), message: r && r.message };
+    }
+
     // Writes every building of the viewed zone as sorted, pretty-printed JSON
     // with no timestamp inside, so two dumps taken around a click diff
     // directly. The scheduler may be paused, so the per-tick snapshot is
@@ -494,29 +517,15 @@
         try { text = JSON.stringify(doc, null, 2); }
         catch (e2) { text = null; }
 
-        // stewardDir is looked up here, not cached, so a reload that swaps
-        // the files helper is honoured.
-        var path = null;
-        if (text !== null) {
-            try {
-                var d = S.kernel.files.stewardDir('dumps');
-                var safeId = (zoneId === null || zoneId === undefined) ? 'unknown'
-                    : String(zoneId).replace(/[^A-Za-z0-9_\-]/g, '_');
-                if (d && d.dir) {
-                    path = d.dir.resolvePath('buildings-' + safeId + '-' + new Date().getTime() + '.json').nativePath;
-                }
-            } catch (e3) { path = null; }
-        }
-
+        var w = (text !== null) ? writeDump(dumpFileName('buildings', zoneId), text) : null;
         var written = false;
-        if (path) {
-            var r = S.kernel.files.writeText(path, text);
-            if (r && r.ok) {
+        if (w && w.path) {
+            if (w.ok) {
                 written = true;
-                S.kernel.log(cat, 'buildings: ' + records.length + ' written to ' + path);
-                notify('Buildings dumped to ' + path + '.');
+                S.kernel.log(cat, 'buildings: ' + records.length + ' written to ' + w.path);
+                notify('Buildings dumped to ' + w.path + '.');
             } else {
-                S.kernel.warn(cat, 'write failed: ' + (r && r.message));
+                S.kernel.warn(cat, 'write failed: ' + w.message);
             }
         } else {
             S.kernel.warn(cat, 'buildings: no writable dumps folder, logging ' + records.length + ' records');
@@ -583,15 +592,6 @@
         } catch (e2) { S.kernel.error(cat, 'adventure definitions dump threw:', e2); }
     }
 
-    function buffType(map, name) {
-        if (!map) return null;
-        try {
-            var def = map[name];
-            if (def && typeof def.GetBuffType === 'function') return def.GetBuffType();
-        } catch (e) { /* unreadable */ }
-        return null;
-    }
-
     function dumpBuffDefinitions(cat) {
         var b = S.core.buffs;
         var map = null;
@@ -608,7 +608,7 @@
         S.kernel.log(cat, 'speed buffs defined (' + b.SPEED_BUFF_PREFIX + '*): ' + speed.length);
         var speedTypes = [];
         for (var i = 0; i < speed.length; i++) {
-            var bt = buffType(map, speed[i]);
+            var bt = b.buffTypeOf(speed[i]);
             if (bt !== null && speedTypes.indexOf(bt) === -1) speedTypes.push(bt);
             var amt = '?';
             try { amt = b.amount(speed[i]); } catch (e3) { amt = '[threw]'; }
@@ -624,7 +624,7 @@
             for (var j = 0; j < inv.length; j++) {
                 var name = inv[j].type;
                 if (b.isSpeedBuff(name)) continue;
-                var it = buffType(map, name);
+                var it = b.buffTypeOf(name);
                 if (it === null || speedTypes.indexOf(it) === -1) continue;
                 shared++;
                 S.kernel.log(cat, '  same type, other name: ' + name + ' GetBuffType=' + fmt(it) +
@@ -730,6 +730,8 @@
         dumpQuests:      dumpQuests,
         dumpAdventures:  dumpAdventures,
         dumpBuildings:   dumpBuildings,
+        writeDump:       writeDump,
+        dumpFileName:    dumpFileName,
         dumpDefinitions: dumpDefinitions,
         toggleSampler:   toggleSampler,
         samplerRunning:  samplerRunning,

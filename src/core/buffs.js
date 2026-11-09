@@ -3,7 +3,7 @@
  *
  * Reads the star-menu buff stock (including adventure maps) and the buff
  * definitions, and builds the action defs that apply a buff (speed, camp,
- * population) or start an adventure map. A def is run with
+ * population, building production buffs) or start an adventure map. A def is run with
  * S.core.actions.attempt. Adventure items (a buff applied to a grid on the
  * island) and the quest targets of a buff are here too. Every reader reports an unreadable host as null, and
  * a def treats null as not observed: an unreadable stock never counts as
@@ -30,12 +30,26 @@
     var POPULATION_TYPE = 'AddResource';
 
     var BUFF_TIMEOUT_MS = 15000;
+
+    // GetBuffType() of a buff that boosts the production of one building.
+    // Zone (8), skin (4) and military (1) buffs also name buildings as their
+    // target but are not production buffs, so only this type is offered.
+    var PRODUCTION_BUFF_TYPE = 0;
+
+    // Target-description token that stands for every non-epic workyard, which
+    // covers every mine and mason.
+    var WORKYARD_TARGET = 'Workyard';
+
+    // Host definition that resolves a buff's target group to building names.
+    var TARGET_GROUPS_DEF = 'BuffSystem.cBuffDefinition';
     var MAP_TIMEOUT_MS = 30000;
 
     // Raw star-menu entries { type, resource, amount, uid } where uid is the
     // host's unique-id object, which the buff action needs as it is. null means
     // the player or the menu could not be read, so callers can tell "no buffs"
-    // from "unreadable".
+    // from "unreadable". An item whose type or amount read failed carries
+    // bad = true (typeBad when it was the type), so an entry caught mid-update
+    // is not taken for an empty stock.
     function readEntries() {
         try {
             if (typeof game === 'undefined' || !game.gi || !game.gi.mCurrentPlayer ||
@@ -48,10 +62,17 @@
             var n = vec.length || 0;
             for (var i = 0; i < n; i++) {
                 var b = vec[i];
-                var item = { type: '', resource: '', amount: 0, uid: null };
-                try { item.type = b.GetType(); } catch (e1) { /* leave default */ }
+                var item = { type: '', resource: '', amount: 0, uid: null, bad: false, typeBad: false };
+                try {
+                    var ty = b.GetType();
+                    if (typeof ty === 'string') item.type = ty; else item.typeBad = true;
+                } catch (e1) { item.typeBad = true; }
                 try { item.resource = b.GetResourceName_string(); } catch (e2) { /* leave default */ }
-                try { item.amount = b.amount; } catch (e3) { /* leave default */ }
+                try {
+                    var am = b.amount;
+                    if (typeof am === 'number' && isFinite(am)) item.amount = am; else item.bad = true;
+                } catch (e3) { item.bad = true; }
+                if (item.typeBad) item.bad = true;
                 try { item.uid = b.GetUniqueId(); } catch (e4) { /* leave default */ }
                 out.push(item);
             }
@@ -88,6 +109,9 @@
         var res = resource || '';
         var sum = 0;
         for (var i = 0; i < raw.length; i++) {
+            // An entry that could not be read fully may be this stock; report
+            // unreadable rather than a sum that silently misses it.
+            if (raw[i].bad && (raw[i].typeBad || raw[i].type === type)) return null;
             if (raw[i].type === type && (raw[i].resource || '') === res) sum += (raw[i].amount || 0);
         }
         return sum;
@@ -114,7 +138,7 @@
         if (!raw) return null;
         var res = resource || '';
         for (var i = 0; i < raw.length; i++) {
-            if (raw[i].type === type && (raw[i].resource || '') === res &&
+            if (!raw[i].bad && raw[i].type === type && (raw[i].resource || '') === res &&
                 raw[i].amount > 0 && raw[i].amount >= amount) return raw[i];
         }
         return null;
@@ -258,12 +282,21 @@
         };
     }
 
+    // Host definition of a buff name, or null when it is missing or the
+    // definition map cannot be read.
+    function defOf(name) {
+        try {
+            var map = game.def('global').map_BuffName_BuffDefinition;
+            return (map && map[name]) || null;
+        } catch (e) { return null; }
+    }
+
     // Quest target names of a buff definition (its target description is a
     // comma list). Targets only widen the quest match, so any failure is [].
     function targetsOf(name) {
         var out = [];
         try {
-            var text = game.def('global').map_BuffName_BuffDefinition[name].GetTargetDescription_string();
+            var text = defOf(name).GetTargetDescription_string();
             var parts = String(text).split(',');
             for (var i = 0; i < parts.length; i++) {
                 var p = parts[i].replace(/^\s+|\s+$/g, '');
@@ -271,6 +304,165 @@
             }
         } catch (e) { return []; }
         return out;
+    }
+
+    // Target group of a buff definition, trimmed; '' when it has none or it
+    // cannot be read.
+    function groupOf(name) {
+        try {
+            var g = defOf(name).GetTargetGroup_string();
+            return typeof g === 'string' ? g.replace(/^\s+|\s+$/g, '') : '';
+        } catch (e) { return ''; }
+    }
+
+    // Whether the host puts this building in the target group. Any failure is
+    // no match, so an unreadable group never widens what a buff may target.
+    function groupContains(group, buildingName) {
+        if (!group) return false;
+        try {
+            return !!game.def(TARGET_GROUPS_DEF).targetGroups.groupContains(group, buildingName);
+        } catch (e) { return false; }
+    }
+
+    // GetBuffType() of a buff definition as a number; null when the
+    // definition or the method is missing or throws. The only reader of it.
+    function buffTypeOf(name) {
+        try {
+            var d = defOf(name);
+            if (!d || typeof d.GetBuffType !== 'function') return null;
+            var v = d.GetBuffType();
+            return isNum(v) ? v : null;
+        } catch (e) { return null; }
+    }
+
+    // Every buff whose definition targets this building: by name, through the
+    // Workyard token (only when the building is a workyard) or through its
+    // target group. Each entry says whether it is offered and, if not, why.
+    // Inventory types without a definition are skipped, since their targets
+    // cannot be checked.
+    function buildingBuffCandidates(buildingName, workyard) {
+        var names = definedNames('');
+        var inv = inventory();
+        var i;
+        for (i = 0; i < inv.length; i++) {
+            if (inv[i].type && names.indexOf(inv[i].type) === -1) names.push(inv[i].type);
+        }
+        var out = [];
+        for (i = 0; i < names.length; i++) {
+            var nm = names[i];
+            if (!defOf(nm)) continue;
+            var targets = targetsOf(nm);
+            var group = groupOf(nm);
+            var via = null;
+            if (targets.indexOf(buildingName) !== -1) via = 'name';
+            else if (workyard && targets.indexOf(WORKYARD_TARGET) !== -1) via = 'workyard';
+            else if (groupContains(group, buildingName)) via = 'group';
+            if (!via) continue;
+            var type = buffTypeOf(nm);
+            var offered = type === PRODUCTION_BUFF_TYPE;
+            out.push({
+                name:     nm,
+                label:    S.core.locale.res(nm),
+                amount:   amount(nm),
+                buffType: type,
+                targets:  targets,
+                group:    group,
+                via:      via,
+                offered:  offered,
+                reason:   offered ? '' : (type === null ? 'buff type unreadable' : 'buff type ' + type)
+            });
+        }
+        out.sort(function (a, b) {
+            var la = String(a.label);
+            var lb = String(b.label);
+            if (la !== lb) return la < lb ? -1 : 1;
+            if (a.name === b.name) return 0;
+            return a.name < b.name ? -1 : 1;
+        });
+        return out;
+    }
+
+    // The candidates that may be applied to this building.
+    function buildingBuffs(buildingName, workyard) {
+        var all = buildingBuffCandidates(buildingName, workyard);
+        var out = [];
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].offered) out.push(all[i]);
+        }
+        return out;
+    }
+
+    // Whether this buff is offered for this building.
+    function buildingBuffMatch(name, buildingName, workyard) {
+        var list = buildingBuffs(buildingName, workyard);
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name === name) return true;
+        }
+        return false;
+    }
+
+    // Applies of one buff name that are in flight (open) and how many have
+    // started (seq). Applies of the same buff interleave their steps, so a
+    // baseline read after another apply's send and a describe read after its
+    // spend would print a before/after pair that is not this apply's change.
+    // Such a pair is printed only for an apply that had the stock to itself;
+    // the others print the current stock. An attempt dropped without finishing
+    // (queue reset without a script reload) leaves open raised, so later lines
+    // use the overlap text until reload. Text only; no decision reads this.
+    var buildingRuns = {};
+
+    function runsOf(name) {
+        if (!buildingRuns[name]) buildingRuns[name] = { open: 0, seq: 0 };
+        return buildingRuns[name];
+    }
+
+    function fmtStock(n) {
+        return typeof n === 'number' ? String(n) : 'unreadable';
+    }
+
+    // Production buff on one building of the home island, sent to that
+    // building's grid. Verified only by the building showing a running
+    // production buff: a stock drop alone does not say the buff landed on this
+    // building. No retry, since a second send could spend a second buff when
+    // the first one applied without being seen.
+    function building(name, grid, buildingName, workyard) {
+        return {
+            label:     'building buff ' + name + ' -> ' + buildingName + ' ' + grid,
+            category:  'buffs',
+            timeoutMs: BUFF_TIMEOUT_MS,
+            retries:   0,
+            precheck: function () {
+                if (S.core.zone.isHome() !== true) return 'not on the home island';
+                if (!isNum(grid) || !(grid > 0)) return 'no target grid';
+                if (!buildingBuffMatch(name, buildingName, workyard)) return 'buff does not target ' + buildingName;
+                var n = stock(name, '');
+                if (!isNum(n)) return 'buff stock unreadable';
+                if (!(n > 0)) return 'no buff in stock';
+                S.core.buildings.invalidate();
+                var b = S.core.buildings.byGrid(grid);
+                if (S.core.buildings.name(b) !== buildingName) return 'building changed';
+                return S.core.buildings.buffBlock(b);
+            },
+            baseline: function () {
+                var r = runsOf(name);
+                var base = { stock: stock(name, ''), overlap: r.open > 0, seq: ++r.seq };
+                r.open++;
+                return base;
+            },
+            send: function () { return send(name, '', grid, 0); },
+            check: function () {
+                return S.core.buildings.hasProductionBuff(S.core.buildings.byGrid(grid)) === true;
+            },
+            describe: function (base) {
+                if (!base || typeof base.seq !== 'number') return '';
+                var r = runsOf(name);
+                r.open = Math.max(0, r.open - 1);
+                var now = stock(name, '');
+                var alone = !base.overlap && r.seq === base.seq;
+                if (alone) return 'stock ' + fmtStock(base.stock) + ' -> ' + fmtStock(now);
+                return 'stock ' + fmtStock(now) + ' now (other applies of this buff overlapped)';
+            }
+        };
     }
 
     // Adventure item: one buff of this name applied to a grid on the island, in
@@ -423,6 +615,13 @@
         camp:          camp,
         adventureItem: adventureItem,
         targetsOf:     targetsOf,
+        buffTypeOf:    buffTypeOf,
+        buildingBuffCandidates: buildingBuffCandidates,
+        buildingBuffs: buildingBuffs,
+        buildingBuffMatch: buildingBuffMatch,
+        building:      building,
+        PRODUCTION_BUFF_TYPE: PRODUCTION_BUFF_TYPE,
+        WORKYARD_TARGET: WORKYARD_TARGET,
         population:    population,
         populationStock: populationStock,
         map:          map,

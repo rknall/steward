@@ -7,6 +7,7 @@
  *     enabled:        false,
  *     actionDelay:    1500,
  *     pauseThreshold: 50,
+ *     buffVersion:    1,
  *     deposits: {
  *       <Name>: { enabled, build?, upgrade?, targetLevel?, pause?, buff, refill }
  *     }
@@ -22,9 +23,17 @@
  * enabled / buff / refill — the build/upgrade/pause phases are
  * unreachable for them.
  *
- * `buff` and `refill` are strings; '' means off. The shape leaves room
- * for selecting which buff item or refill item to apply once those
- * phases land in v2 (depends on a future core/buffs subsystem).
+ * `buff` and `refill` are strings; '' means off, the default for all
+ * nine types. `buff` is the buff definition name the buff phase applies
+ * to the type's mine or mason. `refill` is reserved for the refill
+ * phase, which is still a stub.
+ *
+ * `buffVersion` marks that `deposits.<Type>.buff` holds a name picked in
+ * the buff UI. Stored settings without it (or with a lower value) predate
+ * the buff phase: their buff values are cleared once at boot and the
+ * marker is written. A fresh install writes these defaults, so it carries
+ * the marker and is never cleared. module.js reads the current value from
+ * here.
  *
  * Defaults mirror autoTSO's Deposits.data (user_auto.js:1086-1095):
  * options[1] true (build) and options[3] 3 (target level) for the six
@@ -39,6 +48,7 @@
         enabled:        false,
         actionDelay:    1500,
         pauseThreshold: 50,
+        buffVersion:    1,
         deposits: {
             Stone:       { enabled: true, buff: '', refill: '' },
             BronzeOre:   { enabled: true, build: true, upgrade: false, targetLevel: 3,

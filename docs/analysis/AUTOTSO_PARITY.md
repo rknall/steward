@@ -110,7 +110,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | List buffs / lootables / building buffs | — | ✗ |
 | `getBuffAmount(name)` | — | ✗ |
 | `getBuffTargets(name, amount)` | — | ✗ |
-| `applyBuff(type, grid, amount, responder)` (server packet 61) | — | ✗ |
+| `applyBuff(type, grid, amount, responder)` (server packet 61) | `core/buffs.building` (single-building production buffs, verified on `productionBuff`) | ✓ |
 | `openLootables` (mystery boxes) | — | ✗ |
 | `getProduceableBuffs`, `getDefinition`, `fullName` | — | ✗ |
 | `lootables()` (filter `Loottable_*` buffs) | — | ✗ |
@@ -152,7 +152,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | `collectibles.{check, collect, lootables, buildings, manage}` | `modules/collect` (refined: pure-collectible focus, event-aware patterns) | ✓ |
 | `deposits.{removeDepleted, manage}` (geo dispatch + mine build/upgrade) | — | ✗ |
 | `production.getBook` (Bookbinder / skill book special handling) | — | ✗ |
-| Buff application during production | — depends on aBuffs | ✗ |
+| Buff application during production | `modules/mining` `tryBuff` + `core/buffs.building` (mines and masons, per deposit type) | ✓ |
 
 ### aMail — Mail Automation
 | autoTSO | Steward | Status |

@@ -16,7 +16,8 @@
 | `Steward.core.adventures`  | Adventure definitions, grouped for the template maker, and the player's own open adventures. |
 | `Steward.core.army`        | Free troop pool, squads, composition checks, supply plan. |
 | `Steward.core.battles`     | Battle-file loader and validator against the army.    |
-| `Steward.core.buffs`       | Star-menu buff stock (including adventure maps) and buff definitions. |
+| `Steward.core.buffs`       | Star-menu buff stock (including adventure maps), buff definitions and building production buffs. |
+| `Steward.core.breaker`     | Run counter and probe cooldown; named instances for the send guard and mining buffs. |
 | `Steward.core.actions`     | Runs write actions: send, verify by observation, retry once. |
 | `Steward.core.quests`      | Quest pool reads, click trigger names and the claim action. |
 | `Steward.core.pickups`     | Clickable quest objects and collectibles of the viewed zone, and the click action. |
@@ -177,6 +178,12 @@ The composed operation — "send geologists to find iron until we have 3 deposit
 - `admit(n)` before queueing: it returns how many sends may go out. When several sends in a row changed nothing, the breaker opens and `admit` lets only one probe through per cooldown.
 
 State is shared across modules, lives in memory only and is reset by a script reload.
+
+The breaker part of the guard is `Steward.core.breaker`: a factory that makes named instances
+with their own run counter, open state and probe cooldown. The send guard holds one instance
+for explorers and geologists. Mining buffs hold a separate instance, so a failing buff never
+pauses specialist dispatch, and a specialist failure never pauses buffing. Each instance logs
+its open and close transitions once.
 
 ## Rule 7: wrap risky calls
 
