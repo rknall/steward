@@ -51,7 +51,7 @@ Steward
 │   ├── quests          ← quest pool and claim action
 │   └── resources       ← resource amount and free population reads
 ├── modules
-│   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors
+│   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors
 │   └── <id>            ← exposed only if the module chooses to publish state
 └── (shared enums)
     ├── Priority
