@@ -31,7 +31,8 @@
  * Which buildings take part is data (core/events/data.js depositInfo). The
  * deposit is named like the event resource, and workTime comes from the
  * economy definition, so no placed field is needed to know the production
- * time. When the real fields cannot be read (friend island, host hiccup)
+ * time. Upgraded variants listed in depositInfo are read from the island but
+ * never templated. When the real fields cannot be read (friend island, host hiccup)
  * rows() returns editable template rows instead of failing.
  */
 
@@ -82,6 +83,13 @@
         var ev = S.core.events.data && S.core.events.data.events &&
                  S.core.events.data.events[code];
         return (ev && ev.depositInfo) || null;
+    }
+
+    // Host names a placed field can carry: the base buildings plus upgraded
+    // variants. Templates use only the base buildings, since a variant is the
+    // same field after an upgrade and would double the template rows.
+    function fieldNames(info) {
+        return info.buildings.concat(info.variants || []);
     }
 
     // The first live event that declares refillable buildings, or null.
@@ -160,8 +168,9 @@
         var dm = depositMap(resource);
         var readNow = new Date().getTime();
         var out = [];
-        for (var b = 0; b < info.buildings.length; b++) {
-            var name = info.buildings[b];
+        var names = fieldNames(info);
+        for (var b = 0; b < names.length; b++) {
+            var name = names[b];
             var placed = [];
             try { placed = S.core.buildings.byName(name) || []; }
             catch (e) { placed = []; }

@@ -60,6 +60,10 @@ t.test('HW depositInfo is data-driven and has no depositsPerRefill', function ()
     var H = harness.boot({ sections: ['kernel', 'core'] });
     var info = H.Steward.core.events.data.events.HW.depositInfo;
     t.assert.strictEqual(info.buildings.length, 3);
+    t.assert.strictEqual(info.variants.length, 3);
+    for (var v = 0; v < info.variants.length; v++) {
+        t.assert.strictEqual(info.buildings.indexOf(info.variants[v]), -1);
+    }
     t.assert.strictEqual(info.fieldsPerType, 3);
     t.assert.strictEqual(typeof info.depositsPerRefill, 'undefined');
 });

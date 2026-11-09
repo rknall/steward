@@ -32,6 +32,9 @@
     // - depositInfo: workyard buildings whose deposit (named like the event
     //   `resource`) the refill calculator reads per placed field
     //   (autoTSO/user_auto.js:4494-4522 computes the same totals).
+    //   `variants` = other host names for upgraded fields of the same event
+    //   (for example the emergency pumpkin fields). They are read like
+    //   `buildings` when the real fields are listed, but get no template rows.
     //   `fieldsPerType` = template rows per building when the real fields
     //   cannot be read (default 1). Production time comes from the host
     //   economy definition, not from data.
@@ -76,6 +79,7 @@
             resource:       'HalloweenResource',
             depositInfo: {
                 buildings: ['pumpkinfield_01', 'pumpkinfield_02', 'pumpkinfield_03'],
+                variants: ['emergencypumpkinfield_01', 'emergencypumpkinfield_02', 'emergencypumpkinfield_03'],
                 fieldsPerType: 3
             }
         }

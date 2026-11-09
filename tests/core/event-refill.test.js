@@ -221,6 +221,110 @@ t.test('off the home island rows are the 3x3 template', function () {
     t.assert.strictEqual(res.rows[8].workTime, 2400);
 });
 
+t.test('off the home island template rows hold no variant name', function () {
+    var H = bootRefill();
+    H.installZone(H.zone.zone());
+    H.host.game.gi.isOnHomzone = function () { return false; };
+    var variants = H.Steward.core.events.data.events.HW.depositInfo.variants;
+
+    var res = H.Steward.core.events.refill.rows('HW');
+    t.assert.strictEqual(res.rows.length, 9);
+    for (var r = 0; r < res.rows.length; r++) {
+        t.assert.strictEqual(variants.indexOf(res.rows[r].building), -1);
+    }
+});
+
+// Wraps the economy stub so the variant name also has a workTime.
+function withVariantWorkTime(H, name, workTime) {
+    var base = H.host.game.def;
+    H.host.game.def = function (n) {
+        if (n === 'ServerState::gEconomics') {
+            return {
+                GetResourcesCreationDefinitionForBuilding: function (b) {
+                    return b === name ? { workTime: workTime }
+                        : base(n).GetResourcesCreationDefinitionForBuilding(b);
+                }
+            };
+        }
+        return base(n);
+    };
+}
+
+function placeFields(H, z, spec) {
+    var deps = [];
+    for (var i = 0; i < spec.length; i++) {
+        z.building(H.zone.building({ name: spec[i].name, grid: spec[i].grid }));
+        deps.push(H.zone.deposit({ name: 'HalloweenResource', grid: spec[i].grid, amount: spec[i].amount }));
+    }
+    z.deposits('HalloweenResource', deps);
+}
+
+t.test('home zone with emergencypumpkinfield_03 fields gives game rows for them', function () {
+    var H = bootRefill();
+    withVariantWorkTime(H, 'emergencypumpkinfield_03', 1200);
+    var z = H.zone.zone();
+    placeFields(H, z, [
+        { name: 'emergencypumpkinfield_03', grid: 7225, amount: 11 },
+        { name: 'emergencypumpkinfield_03', grid: 6871, amount: 22 },
+        { name: 'emergencypumpkinfield_03', grid: 7048, amount: 33 }
+    ]);
+    H.installZone(z);
+
+    var res = H.Steward.core.events.refill.rows('HW');
+    t.assert.strictEqual(res.source, 'game');
+    t.assert.strictEqual(res.rows.length, 3);
+    var keys = ['g6871', 'g7048', 'g7225'];
+    var deposits = [22, 33, 11];
+    for (var r = 0; r < 3; r++) {
+        t.assert.strictEqual(res.rows[r].building, 'emergencypumpkinfield_03');
+        t.assert.strictEqual(res.rows[r].source, 'game');
+        t.assert.strictEqual(res.rows[r].key, keys[r]);
+        t.assert.strictEqual(res.rows[r].deposit, deposits[r]);
+        t.assert.strictEqual(res.rows[r].workTime, 1200);
+    }
+});
+
+t.test('mixed island like the live one gives 9 game rows in list order', function () {
+    var H = bootRefill();
+    withVariantWorkTime(H, 'emergencypumpkinfield_03', 1200);
+    var z = H.zone.zone();
+    var names = ['pumpkinfield_01', 'pumpkinfield_02', 'emergencypumpkinfield_03'];
+    var spec = [];
+    for (var b = 0; b < names.length; b++) {
+        for (var i = 0; i < 3; i++) {
+            spec.push({ name: names[b], grid: 100 * (b + 1) + i, amount: 5 + i });
+        }
+    }
+    placeFields(H, z, spec);
+    H.installZone(z);
+
+    var res = H.Steward.core.events.refill.rows('HW');
+    t.assert.strictEqual(res.source, 'game');
+    t.assert.strictEqual(res.rows.length, 9);
+    var seen = {};
+    for (var r = 0; r < 9; r++) {
+        t.assert.strictEqual(res.rows[r].building, names[Math.floor(r / 3)]);
+        t.assert.strictEqual(seen[res.rows[r].key], undefined);
+        seen[res.rows[r].key] = true;
+    }
+});
+
+t.test('variant without an economy definition is a row with null production', function () {
+    var H = bootRefill();
+    var z = H.zone.zone();
+    placeFields(H, z, [{ name: 'emergencypumpkinfield_03', grid: 7225, amount: 11 }]);
+    H.installZone(z);
+
+    var res = H.Steward.core.events.refill.rows('HW');
+    t.assert.strictEqual(res.rows.length, 1);
+    t.assert.strictEqual(res.rows[0].workTime, null);
+
+    var out = H.Steward.core.events.refill.compute(res.rows, LIVE.T, 6, 1);
+    t.assert.strictEqual(out.rows[0].units, null);
+    t.assert.strictEqual(out.totalUnits, 0);
+    t.assert.strictEqual(out.totalRate12h, 0);
+});
+
 t.test('home island without any field falls back to the template', function () {
     var H = bootRefill();
     H.installZone(H.zone.zone());
