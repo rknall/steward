@@ -48,6 +48,7 @@
         rotatePending:  false,    // a rotation started and has not moved the file aside
         logDir:         null,
         logFile:        null,
+        consoling:      false,    // recursion guard: a console sink must not re-enter emitToConsole
         consoleSink:    null
     };
 
@@ -80,6 +81,8 @@
     }
 
     function emitToConsole(level, line) {
+        if (state.consoling) return;
+        state.consoling = true;
         try {
             if (!state.consoleSink) {
                 if (typeof air !== 'undefined' && air.Introspector && air.Introspector.Console) {
@@ -95,6 +98,7 @@
             else if (level === LEVEL.Warn && state.consoleSink.warn) state.consoleSink.warn(line);
             else if (state.consoleSink.log) state.consoleSink.log(line);
         } catch (e) { /* never propagate */ }
+        finally { state.consoling = false; }
     }
 
     // Path resolution and the location fallback live in kernel/17_files.js
@@ -303,7 +307,10 @@
         emitToFile(line);
     }
 
-    function debug() { emit(LEVEL.Debug, arguments); }
+    // Not named debug: that would shadow the host's global debug() console, the
+    // fallback sink in emitToConsole, and the sink would feed every line back
+    // into the logger.
+    function logDebug() { emit(LEVEL.Debug, arguments); }
     function log()   { emit(LEVEL.Log,   arguments); }
     function warn()  { emit(LEVEL.Warn,  arguments); }
     function error() { emit(LEVEL.Error, arguments); }
@@ -312,7 +319,7 @@
         return shouldEmit(category);
     };
 
-    debug.isEnabled = function (category) {
+    logDebug.isEnabled = function (category) {
         return state.debugEnabled && shouldEmit(category);
     };
 
@@ -365,7 +372,7 @@
         };
     };
 
-    S.kernel.debug = debug;
+    S.kernel.debug = logDebug;
     S.kernel.log   = log;
     S.kernel.warn  = warn;
     S.kernel.error = error;
