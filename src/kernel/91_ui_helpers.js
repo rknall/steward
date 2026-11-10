@@ -637,11 +637,10 @@
         if (!$holder || !$holder.length) return false;
         if ($holder.data('stewardRedrawOnce')) return false;
         $holder.data('stewardRedrawOnce', true);
-        setTimeout(function () {
+        setTimeout(guarded('redrawOnce', function () {
             if ($holder.parent().length === 0) return;
-            try { fn(); }
-            catch (err) { S.kernel.error('ui', 'redrawOnce threw:', err); }
-        }, ms);
+            fn();
+        }), ms);
         return true;
     }
 
@@ -674,7 +673,7 @@
         statusBadge: statusBadge,
         fit:       fit,
         redrawOnce: redrawOnce,
-        set:      set,
+        set:       set,
         get:       get,
         settings:  settings,
         update:    update,

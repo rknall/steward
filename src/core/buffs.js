@@ -110,6 +110,14 @@
         return entryAtLeast(type, resource, 0);
     }
 
+    // Whether an entry read for the given type makes the result unknown: it
+    // could not be read fully, and either its type is unknown or it is this
+    // type. Readers return null then, rather than a value that silently
+    // misses it.
+    function unreadableAs(e, type) {
+        return e.bad && (e.typeBad || e.type === type);
+    }
+
     // Stock of exactly this type and resource ('' = not bound to a resource):
     // a number, or null when the menu cannot be read. The map stock of an
     // adventure is stock(ADVENTURE_MAP_TYPE, name).
@@ -119,9 +127,7 @@
         var res = resource || '';
         var sum = 0;
         for (var i = 0; i < raw.length; i++) {
-            // An entry that could not be read fully may be this stock; report
-            // unreadable rather than a sum that silently misses it.
-            if (raw[i].bad && (raw[i].typeBad || raw[i].type === type)) return null;
+            if (unreadableAs(raw[i], type)) return null;
             if (raw[i].type === type && (raw[i].resource || '') === res) sum += (raw[i].amount || 0);
         }
         return sum;
@@ -187,8 +193,7 @@
         if (!raw) return null;
         var out = {};
         for (var i = 0; i < raw.length; i++) {
-            // The same unreadable rule as stock() for the map type.
-            if (raw[i].bad && (raw[i].typeBad || raw[i].type === ADVENTURE_MAP_TYPE)) return null;
+            if (unreadableAs(raw[i], ADVENTURE_MAP_TYPE)) return null;
             if (raw[i].type !== ADVENTURE_MAP_TYPE || !raw[i].resource) continue;
             var name = raw[i].resource;
             out[name] = (out[name] || 0) + (raw[i].amount || 0);
@@ -571,9 +576,7 @@
         var total = 0;
         var largest = 0;
         for (var i = 0; i < raw.length; i++) {
-            // The same unreadable rule as stock(): an entry that may be a
-            // population buff and could not be read makes the total unknown.
-            if (raw[i].bad && (raw[i].typeBad || raw[i].type === POPULATION_TYPE)) return null;
+            if (unreadableAs(raw[i], POPULATION_TYPE)) return null;
             if (raw[i].type !== POPULATION_TYPE || (raw[i].resource || '') !== res) continue;
             var a = raw[i].amount || 0;
             total += a;
