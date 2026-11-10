@@ -307,8 +307,7 @@ t.test('series: x2 from home runs every step once, in order, with no pause; map 
     assert.ok(!all.some(function (x) { return x.from === 'Next'; }), 'no transition leaves Next');
     var order = ['Muster', 'Validate', 'Snapshot', 'Supply', 'Load', 'StartMap', 'Depart', 'Jump', 'Arrive',
         'Pickups', 'StarAll', 'wave Horseshoe', 'wave Gate', 'wave Confirm', 'PackStar', 'Pack', 'Clear', 'LastQuest',
-        'Close', 'Recall',
-        'JumpHome', 'ArriveHome', 'Account', 'Population'];
+        'Close', 'JumpHome', 'ArriveHome', 'Account', 'Population'];
     runs.forEach(function (list, n) {
         var seen = {};
         for (var j = 0; j < list.length; j++) {
@@ -334,8 +333,8 @@ t.test('series: x2 from home runs every step once, in order, with no pause; map 
     assert.ok(maps[1].t >= closed1 + w.S.modules.adventures.home.GAP_MS,
         'map 2 at ' + maps[1].t + ', run 1 closed at ' + closed1);
     assert.strictEqual(w.closes.length, 2);
-    assert.strictEqual(sendsOf(w, '1.1').length, 4, 'there and back twice');
-    assert.strictEqual(sendsOf(w, '1.2').length, 4);
+    assert.strictEqual(sendsOf(w, '1.1').length, 2, 'out twice; closing the map brings him back');
+    assert.strictEqual(sendsOf(w, '1.2').length, 2);
 });
 
 // ---- 2. Muster ------------------------------------------------------------------
@@ -1781,11 +1780,11 @@ t.test('LastQuest: a null quest list on the island holds with no limit; no claim
     assert.strictEqual(claimsOf(w, 'q9').length, 1);
 });
 
-// ---- 14. Close, Recall, JumpHome, ArriveHome ----------------------------------------
+// ---- 14. Close, JumpHome, ArriveHome ------------------------------------------------
 
 var CLAIMED = { lastQuest: { sentAt: 1, seen: true, sentOnce: true } };
 
-t.test('Close: after the settle window the adventure is closed and verified gone; generals go home', function () {
+t.test('Close: after the settle window the adventure is closed and verified gone; the map returns the generals, nothing is sent home', function () {
     var w = homeWorld();
     onIsland(w);
     var r = series(w, { step: w.S.RunStep.Close, zoneId: ZONE, run: { marks: plain(CLAIMED) } });
@@ -1796,11 +1795,11 @@ t.test('Close: after the settle window the adventure is closed and verified gone
     assert.strictEqual(w.closes[0].zoneId, ZONE);
     assert.ok(w.closes[0].t - since >= w.S.modules.adventures.loader.MARK_SETTLE_MS, 'closed after the settle window');
     assert.strictEqual(typeof w.st.current().request.closedAt, 'number');
-    assert.deepStrictEqual(w.zoneSends.map(function (s) { return s.key + '>' + s.zoneId; }).sort(),
-        ['1.1>' + HOME, '1.2>' + HOME]);
+    assert.deepStrictEqual(w.zoneSends, []);
     assert.ok(w.visits.some(function (v) { return v.id === HOME; }), 'the run jumped home');
     var names = transitions(w).map(function (x) { return x.from + '->' + x.to; });
-    assert.deepStrictEqual(names, ['Close->Recall', 'Recall->JumpHome', 'JumpHome->ArriveHome', 'ArriveHome->Account']);
+    assert.deepStrictEqual(names, ['Close->JumpHome', 'JumpHome->ArriveHome', 'ArriveHome->Account']);
+    assert.ok(logged(w, /Close -> JumpHome \(adventure closed\)$/), 'the log names the edge');
 });
 
 t.test('Close: an unseen lastQuest mark pauses CloseFailed without removeAdventure (B2)', function () {
@@ -1823,53 +1822,8 @@ t.test('Close: an adventure the client removes itself within MARK_SETTLE_MS is s
     assertStep(w, 'Close');
     w.adventures = [];
     tick(w);
-    assertStep(w, 'Recall');
+    assertStep(w, 'JumpHome');
     assert.strictEqual(w.closes.length, 0);
-});
-
-t.test('Recall: a busy general never pauses; the others leave; JumpHome once he is gone', function () {
-    var w = homeWorld();
-    onIsland(w);
-    w.g2.state.task = { type: w.code.attack };
-    series(w, { step: w.S.RunStep.Recall, zoneId: ZONE });
-    tick(w);
-    play(w);
-    assert.strictEqual(sendsOf(w, '1.1').length, 1);
-    assert.strictEqual(sendsOf(w, '1.2').length, 0);
-    w.t += 3600000;
-    tick(w);
-    play(w);
-    assertStep(w, 'Recall');
-    assert.ok(logged(w, /Bert \(1\.2\) busy on the adventure/), 'the wait is logged');
-    w.g2.state.task = null;
-    drive(w, { until: at('JumpHome') });
-    assertStep(w, 'JumpHome');
-    assert.strictEqual(sendsOf(w, '1.1').length, 1);
-    assert.strictEqual(sendsOf(w, '1.2').length, 1);
-});
-
-t.test('Recall: a recovering general is not sent and not waited on; he returns with the map', function () {
-    var w = homeWorld();
-    onIsland(w);
-    w.g2.state.task = { type: w.code.recover };
-    series(w, { step: w.S.RunStep.Recall, zoneId: ZONE });
-    drive(w, { until: at('JumpHome') });
-    assertStep(w, 'JumpHome');
-    assert.strictEqual(sendsOf(w, '1.1').length, 1);
-    assert.strictEqual(sendsOf(w, '1.2').length, 0);
-    assert.ok(logged(w, /1 recovering return with the map/), 'the log names him');
-});
-
-t.test('Recall: three generals ready one at a time never pause', function () {
-    var w = homeWorld();
-    var g3 = gen('1.3', 'Cora', 30);
-    onIsland(w, [w.g1, w.g2, g3]);
-    series(w, { step: w.S.RunStep.Recall, zoneId: ZONE, keys: THREE });
-    oneAtATime(w, g3);
-    assertStep(w, 'JumpHome');
-    Object.keys(THREE).forEach(function (k) {
-        assert.strictEqual(sendsOf(w, k).length, 1, k);
-    });
 });
 
 // ---- 15. Accounting -----------------------------------------------------------------

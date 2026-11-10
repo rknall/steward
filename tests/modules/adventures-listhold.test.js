@@ -208,43 +208,6 @@ t.test('Arrive: a ghost tick holds, the clean read goes to Pickups', function ()
     assertStep(w, 'Pickups');
 });
 
-t.test('Recall: a ghost tick does not skip to JumpHome, the clean read sends both', function () {
-    var w = homeWorld();
-    onIsland(w, [w.g1, w.g2]);
-    startRun(w, [WAVE], { step: w.S.RunStep.Recall });
-    w.ghost(w.g1);
-    w.ghost(w.g2);
-    holds(w);
-    tick(w);
-    play(w);
-    assert.deepStrictEqual(w.zoneSends.map(function (s) { return s.key; }).sort(), ['1.1', '1.2']);
-});
-
-t.test('Recall: one ghost does not count as gone, nobody is sent over that read', function () {
-    var w = homeWorld();
-    onIsland(w, [w.g1, w.g2]);
-    startRun(w, [WAVE], { step: w.S.RunStep.Recall });
-    w.ghost(w.g2);
-    holds(w);
-});
-
-t.test('Recall: a null list holds, nobody is left behind and nobody is sent', function () {
-    var w = homeWorld();
-    onIsland(w, [w.g1, w.g2]);
-    startRun(w, [WAVE], { step: w.S.RunStep.Recall });
-    var vector = w.gi.mCurrentPlayerZone.GetSpecialists_vector;
-    w.gi.mCurrentPlayerZone.GetSpecialists_vector = function () { return null; };
-    holds(w);
-    W.ticksFor(w, 120000);
-    assertStep(w, 'Recall');
-    assert.strictEqual(sends(w), 0);
-    assert.ok(/not readable/.test(w.st.current().busy.text), 'the wait names the read');
-    w.gi.mCurrentPlayerZone.GetSpecialists_vector = vector;
-    tick(w);
-    play(w);
-    assert.deepStrictEqual(w.zoneSends.map(function (s) { return s.key; }).sort(), ['1.1', '1.2']);
-});
-
 t.test('Position: a ghost on a Star line does not read as starred', function () {
     var g3 = AC.general({ uid: '1.3', name: 'Cora', grid: 30 });
     var w = islandWorld([g3]);

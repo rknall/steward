@@ -246,7 +246,7 @@ t.test('run menu of a scenario run: scenario rows, skipped general rows, one Wav
         assert.strictEqual(byLabel[l], 'todo', l);
     });
     ['Check generals and files', 'Load generals', 'Send generals', 'Wait for all generals', 'Pick up items',
-        'Send all to the star', 'Horseshoe', 'Send generals home'].forEach(function (l) {
+        'Send all to the star', 'Horseshoe'].forEach(function (l) {
         assert.strictEqual(byLabel[l], 'skip', l);
     });
     // The waves row: one skipped row named after its group, no Wave n rows.

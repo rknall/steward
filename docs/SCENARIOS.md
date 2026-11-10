@@ -75,9 +75,8 @@ Apply items, Quests and pick-ups, then more trips (jump home, produce, back) or
 Clear, last quest, Close, Return home, Next map.
 
 Skipped for a scenario run: check and load generals, send generals, wait for
-generals, pick up items, send all to the star, horseshoe, waves, pack, recall,
-retrain. The step list is the one run table; the run menu greys rows that do
-not apply.
+generals, pick up items, send all to the star, horseshoe, waves, pack, retrain.
+The step list is the one run table; the run menu greys rows that do not apply.
 
 ## In-game checks
 

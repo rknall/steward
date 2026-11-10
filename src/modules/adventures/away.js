@@ -3,8 +3,10 @@
  *
  * Jump -> Arrive -> Pickups -> StarAll -> Horseshoe hand the run to the
  * wave executor at Gate of wave 1; after the last wave the executor hands it
- * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> Recall ->
- * JumpHome, and the home steps take over at ArriveHome. A holder of free
+ * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> JumpHome, and
+ * the home steps take over at ArriveHome. Closing the map returns the generals
+ * home by itself, so no step sends them; ArriveHome waits until each is listed
+ * home and idle. A holder of free
  * troops is placed on a map grid before its raise, because the client has no
  * garrison for a general at the star; Clear goes back to PackStar while free
  * troops are left to pack. plan() does one step per call. The scheduler only calls it while no adventures queue entry is
@@ -12,7 +14,7 @@
  * callback having fired.
  *
  * A scenario run has no generals, so its run kind skips Depart, Arrive,
- * Pickups, StarAll, the waves, PackStar, Pack and Recall. It passes Jump ->
+ * Pickups, StarAll, the waves, PackStar and Pack. It passes Jump ->
  * Apply -> Trip and then joins the template chain: at JumpHome while trips
  * are left, at Clear after its last trip. Apply and Trip live with the other
  * scenario steps; Jump and Close still hand over to their table successors,
@@ -23,8 +25,8 @@
  * for its effect, then pause, never send it again on its own); the last
  * action round (a failure pauses, a last round without the effect waits
  * for it, then pauses); and only then a new round. Each order that must not
- * go out twice (claiming the last quest, closing the adventure, each recall,
- * the horseshoe) goes through a persisted marker written before the packet.
+ * go out twice (claiming the last quest, closing the adventure, the
+ * horseshoe) goes through a persisted marker written before the packet.
  *
  * A zone change has no event, so a jump polls for the zone to load, with no
  * limit: it visits once more after JUMP_MS and then every JUMP_RETRY_MS. Only
@@ -86,12 +88,6 @@
 
     function warn(text) {
         S.kernel.warn(CATEGORY, st().label() + ': ' + text);
-    }
-
-    // The key part of a marker name like 'recall:<key>'.
-    function keyOfMark(name) {
-        var i = name.indexOf(':');
-        return i >= 0 ? name.slice(i + 1) : name;
     }
 
     // Whether the own adventure list (read, not null) no longer holds the
@@ -738,7 +734,7 @@
             if (q) q.closedAt = now();
             st().save();
             log('adventure closed');
-            st().go(S.RunStep.Recall, 'adventure closed');
+            st().go(S.RunStep.JumpHome, 'adventure closed');
             return;
         }
         var rec = ld().marked(r, 'lastQuest');
@@ -765,94 +761,6 @@
         }
         var round = ld().startRound(r, S.RunStep.Close, []);
         ld().attempt(round, 'close', ld().wrapSend(r, 'close', S.core.adventures.close(r.adventure)));
-    }
-
-    // Sends home every loadout general still on the island, each as he gets
-    // ready, with no limit on a busy one. Once the island is no longer viewed
-    // (closing it may move the view) the generals are taken to return on their
-    // own, which is assumed, not proven. A zone id that cannot be read says
-    // nothing about the view, so it holds. A general the list lacks is gone at
-    // once when his return went out. With no mark he may only be a skipped
-    // entry, so he gets the grace, and after it he counts as gone with no pause.
-    // A general recovering after a lost battle takes no order, so he is not
-    // sent or waited on; he returns home with the map.
-    function recall(r, inv) {
-        var id = S.core.zone.id();
-        if (typeof id !== 'number') {
-            ld().waitRead(r, 'zone id');
-            return;
-        }
-        if (id !== r.zoneId) {
-            log('adventure no longer viewed; generals return on their own');
-            st().go(S.RunStep.JumpHome, 'island left');
-            return;
-        }
-        var homeId = S.core.zone.homeId();
-        if (typeof homeId !== 'number') {
-            ld().waitRead(r, 'home zone id');
-            return;
-        }
-        var keys = ld().keysOf(r);
-        var need = [];
-        var open = [];
-        var busy = null;
-        var absent = null;
-        var resting = 0;
-        for (var i = 0; i < keys.length; i++) {
-            var name = 'recall:' + keys[i];
-            var g = ld().gen(inv, keys[i]);
-            var rec = ld().marked(r, name);
-            if (!g) {
-                if (rec && (rec.seen || rec.sentOnce)) continue;
-                // Runs for every such key on every pass, or its grace stops.
-                if (!ld().missingLong(r, keys[i]) && absent === null) absent = keys[i];
-                continue;
-            }
-            if (rec && rec.seen) continue;
-            // A recall that went out and shows as travel is seen, even when
-            // its round's result was lost.
-            if (rec && rec.sentOnce && ld().leaving(g, keys[i])) {
-                ld().markSeen(r, name);
-                continue;
-            }
-            if (!ld().ready(g) && ld().recovering(keys[i])) {
-                resting++;
-                continue;
-            }
-            open.push(name);
-            if (ld().ready(g)) need.push(keys[i]);
-            else if (busy === null) busy = keys[i];
-        }
-        if (busy !== null) ld().waitBusy(r, busy, ld().who(inv, busy) + ' busy on the adventure');
-        else if (absent !== null) ld().waitBusy(r, absent, ld().who(inv, absent) + ' not listed');
-        if (!need.length) {
-            if (busy === null && absent === null) {
-                st().go(S.RunStep.JumpHome, 'generals sent home' +
-                    (resting > 0 ? ', ' + resting + ' recovering return with the map' : ''));
-            }
-            return;
-        }
-        for (i = 0; i < need.length; i++) {
-            var s = ld().staleMark(r, 'recall:' + need[i], 'return of ' + ld().who(inv, need[i]));
-            if (s === 'wait') return;
-            if (s === 'stale') {
-                st().pause(S.RunPause.NotObserved, 'return of ' + ld().who(inv, need[i]) + ' sent but not seen; check the ' +
-                    'general, then Resume', { general: need[i] });
-                return;
-            }
-        }
-        ld().dropShown(r, S.RunStep.Recall, open);
-        var next = ld().settleRound(r, S.RunStep.Recall, function (f) {
-            var k = keyOfMark(f.key);
-            st().pause(S.RunPause.DepartFailed, 'send ' + k + ' home failed: ' + f.reason, { general: k });
-        }, 'return home');
-        if (next !== 'new') return;
-        var round = ld().startRound(r, S.RunStep.Recall, []);
-        for (i = 0; i < need.length; i++) {
-            name = 'recall:' + need[i];
-            ld().attempt(round, name, ld().wrapSend(r, name, S.core.specialists.orders.sendToZone(need[i], homeId)),
-                ld().seenOnVerified(name));
-        }
     }
 
     // ---- Scenario steps -----------------------------------------------------
@@ -888,7 +796,6 @@
             [R.Pack,      pack,      true],
             [R.LastQuest, lastQuest, false],
             [R.Close,     close,     false],
-            [R.Recall,    recall,    true],
             [R.JumpHome,  jumpHome,  false]
         ];
         for (var i = 0; i < rows.length; i++) {

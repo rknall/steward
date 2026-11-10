@@ -221,7 +221,8 @@ function homeStock(o, popName) {
 //   - a star keeps the general listed at grid 0 and moves its army into the
 //     free pool;
 //   - o.mapOpen lists the adventure from the start; a map buff (o.maps in
-//     stock) opens it; the manager's removeAdventure closes it;
+//     stock) opens it; the manager's removeAdventure closes it and returns the
+//     island's generals home;
 //   - production queues 0 and 8 fill from order messages; w.produce() moves
 //     them into the home free pool;
 //   - free population is w.pop (o.pop, default 100); a population buff
@@ -557,6 +558,10 @@ function world(o) {
                     w.closes.push({ zoneId: zoneId, t: w.t });
                     if (!w.auto.close) return;
                     w.adventures = w.adventures.filter(function (a) { return a.zoneID !== zoneId; });
+                    // Closing the map returns every general still on it.
+                    if (w.lists && w.lists[zoneId]) {
+                        w.lists[zoneId].slice().forEach(function (spec) { moveTo(w, spec, HOME); });
+                    }
                 }
             };
         }
@@ -576,6 +581,17 @@ function world(o) {
     patchCore(w);
 
     return w;
+}
+
+// Moves a general to another zone's list and puts him on the travel task, the
+// way both a send and a closing map do.
+function moveTo(w, spec, zoneId) {
+    var from = w.lists[w.zoneOf(spec)];
+    if (from) from.splice(from.indexOf(spec), 1);
+    if (!w.lists[zoneId]) w.lists[zoneId] = [];
+    w.lists[zoneId].push(spec);
+    spec.state.task = { type: w.code.travel, remaining: w.travelMs };
+    spec.state.travelling = true;
 }
 
 // The second zone, travel, map, population and production of the home world.
@@ -658,12 +674,7 @@ function installHome(w, o, gi, units) {
                         var key = keyOf(spec);
                         w.zoneSends.push({ key: key, zoneId: zoneId, t: w.t });
                         if (!w.auto.travel) return;
-                        var from = w.lists[w.zoneOf(spec)];
-                        if (from) from.splice(from.indexOf(spec), 1);
-                        if (!w.lists[zoneId]) w.lists[zoneId] = [];
-                        w.lists[zoneId].push(spec);
-                        spec.state.task = { type: w.code.travel, remaining: w.travelMs };
-                        spec.state.travelling = true;
+                        moveTo(w, spec, zoneId);
                     }
                 }
             };

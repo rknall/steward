@@ -232,8 +232,8 @@ t.test('go(): a scenario run skips the general rows, without why only the skip i
     assert.strictEqual(r.step, w.S.RunStep.Apply);
     w.st.go(w.S.RunStep.Pickups);
     assert.strictEqual(r.step, w.S.RunStep.Trip, 'Pickups and StarAll skipped');
-    w.st.go(w.S.RunStep.Recall, 'map closed');
-    assert.strictEqual(r.step, w.S.RunStep.JumpHome);
+    w.st.go(w.S.RunStep.PackStar, 'waves done');
+    assert.strictEqual(r.step, w.S.RunStep.Clear, 'PackStar and Pack skipped');
     w.st.go(w.S.RunStep.Account, 'generals home');
     assert.strictEqual(r.step, w.S.RunStep.Next);
     assert.ok(logged(w, /-> Next \(generals home; skipped Account, Population, Retrain\)$/), logLines(w).join('\n'));
@@ -255,10 +255,11 @@ t.test('stepRows: neighbours fold only on equal group, label and option', functi
     assert.strictEqual(labels[0], 'Wait between maps');
     assert.strictEqual(labels[1], 'Produce items');
     assert.strictEqual(labels[2], 'Check generals and files');
-    var send = labels.indexOf('Send generals home');
-    assert.ok(send > 0, 'Recall has its own row');
-    assert.strictEqual(labels[send + 1], 'Return home');
-    var ret = rows[send + 1];
+    var close = labels.indexOf('Claim last quest and close');
+    assert.ok(close > 0, 'Close has its own row');
+    assert.ok(labels.indexOf('Send generals home') < 0, 'closing the map returns the generals');
+    assert.strictEqual(labels[close + 1], 'Return home');
+    var ret = rows[close + 1];
     assert.strictEqual(ret.last - ret.first, 1, 'JumpHome and ArriveHome fold');
     var load = rows[labels.indexOf('Load generals')];
     assert.strictEqual(load.last - load.first, 5, 'the six load steps fold');
@@ -355,7 +356,7 @@ t.test('chain: a 3-trip run from home passes every scenario step and no general 
     ];
     assert.deepStrictEqual(names, want, names.join(' '));
     var general = ['Validate', 'Deploy', 'Snapshot', 'Supply', 'Unload', 'Load', 'Verify', 'Depart', 'Arrive',
-        'Pickups', 'StarAll', 'Horseshoe', 'PackStar', 'Pack', 'Recall', 'Account', 'Population', 'Retrain'];
+        'Pickups', 'StarAll', 'Horseshoe', 'PackStar', 'Pack', 'Account', 'Population', 'Retrain'];
     transitions(w).forEach(function (x) {
         assert.ok(!x.wave, 'no wave step: ' + x.text);
         assert.ok(general.indexOf(x.to) < 0, 'no general step entered: ' + x.text);

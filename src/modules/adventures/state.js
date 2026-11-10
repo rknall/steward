@@ -161,7 +161,6 @@
         ['Clear',      'RunClear',      ADVENTURE, 'End of map', 'Wait for last quest',        '',            true],
         ['LastQuest',  'RunLastQuest',  ANY,       'End of map', 'Claim last quest and close', ''],
         ['Close',      'RunClose',      ANY,       'End of map', 'Claim last quest and close', ''],
-        ['Recall',     'RunRecall',     ANY,       'Back home',  'Send generals home',         OPT_GENERALS],
         ['JumpHome',   'RunJumpHome',   ANY,       'Back home',  'Return home',                ''],
         ['ArriveHome', 'RunArriveHome', HOME,      'Back home',  'Return home',                '',            true],
         ['Account',    'RunAccount',    HOME,      'Back home',  'Count lost troops',          OPT_RETRAIN],
@@ -173,6 +172,12 @@
     (function () {
         for (var i = 0; i < RUN_STEPS.length; i++) S.RunStep[RUN_STEPS[i][0]] = RUN_STEPS[i][1];
     }());
+
+    // Series step values an older run file may hold that the table no longer
+    // has, each with the S.RunStep key a loaded run takes instead. Recall sent
+    // the generals home after Close; closing the map returns them itself, so a
+    // run saved there goes on at JumpHome.
+    var RETIRED_STEPS = { RunRecall: 'JumpHome' };
 
     S.RunStatus.Running = 'RunRunning';
     S.RunStatus.Paused  = 'RunPaused';
@@ -272,6 +277,12 @@
 
     function isStep(v) {
         return isWaveStep(v) || isValue(S.RunStep, v);
+    }
+
+    // The live step for a stored step value: a retired value maps to its
+    // successor, anything else is returned as it is.
+    function liveStep(v) {
+        return typeof v === 'string' && has(RETIRED_STEPS, v) ? S.RunStep[RETIRED_STEPS[v]] : v;
     }
 
     // The table index of a series step, or -1 for anything else.
@@ -810,10 +821,11 @@
 
     function normPause(p) {
         if (!isPlainObject(p)) return null;
+        var step = liveStep(p.step);
         return {
             reason:  isValue(S.RunPause, p.reason) ? p.reason : S.RunPause.NotObserved,
             message: str(p.message),
-            step:    isStep(p.step) ? p.step : null,
+            step:    isStep(step) ? step : null,
             wave:    num(p.wave),
             general: scalar(p.general),
             target:  scalar(p.target),
@@ -911,6 +923,10 @@
         r.pause      = normPause(v.pause);
         for (k in facts) {
             if (has(facts, k)) r[k] = facts[k];
+        }
+        if (liveStep(r.step) !== r.step) {
+            repaired.push('retired step ' + r.step + ' -> ' + RETIRED_STEPS[r.step]);
+            r.step = liveStep(r.step);
         }
         if (!isStep(r.step)) {
             repaired.push('unknown step ' + String(r.step) + ' -> Gate');

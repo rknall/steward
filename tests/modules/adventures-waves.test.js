@@ -98,6 +98,35 @@ t.test('state: an unknown step loads as Gate', function () {
     assert.strictEqual(w2.st.run().status, w2.S.RunStatus.Running);
 });
 
+t.test('state: a run saved at the retired Recall step loads at JumpHome', function () {
+    var w = attackWorld();
+    var r = startRun(w, ['C:/b/w1.txt']);
+    r.step = 'RunRecall';
+    w.st.save();
+    var w2 = world({ fs: w.fs });
+    w2.st.load();
+    assert.strictEqual(w2.st.run().step, w2.S.RunStep.JumpHome);
+    assert.strictEqual(w2.st.run().status, w2.S.RunStatus.Running);
+    assert.ok(w2.H.logs().some(function (l) { return /retired step RunRecall -> JumpHome/.test(l.args.join(' ')); }));
+    assert.strictEqual(JSON.parse(w2.fs.disk[RUN_FILE]).run.step, 'RunJumpHome');
+});
+
+t.test('state: a run paused at the retired Recall step keeps its pause and resumes at JumpHome', function () {
+    var w = attackWorld();
+    var r = startRun(w, ['C:/b/w1.txt']);
+    w.st.pause(w.S.RunPause.DepartFailed, 'send 1.1 home failed');
+    r.step = 'RunRecall';
+    r.pause.step = 'RunRecall';
+    w.st.save();
+    var w2 = world({ fs: w.fs });
+    w2.st.load();
+    var r2 = w2.st.run();
+    assert.strictEqual(r2.status, w2.S.RunStatus.Paused);
+    assert.strictEqual(r2.pause.reason, w2.S.RunPause.DepartFailed);
+    assert.strictEqual(r2.pause.step, w2.S.RunStep.JumpHome);
+    assert.strictEqual(r2.step, w2.S.RunStep.JumpHome);
+});
+
 t.test('state: status text for Running, Paused and Done', function () {
     var w = attackWorld();
     startRun(w, ['C:/b/w1.txt', 'C:/b/w2.txt'], { step: w.S.WaveStep.Supply });
