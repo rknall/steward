@@ -112,6 +112,7 @@ Host calls behind the core write actions (each is wrapped by `Steward.core.packe
 | `mMouseCursor.CheckIfGarrisonIsPlacableInGame(grid, true)` in cursor edit mode 86; `mPathFinder.CalculatePath` | `orders.placeCode` (the raw code), `orders.isPlaceable` (code 0 is placeable), `orders.hasPath` (prechecks). On an adventure a general with no garrison (at the star) is placeable only on a free landing field of the player's own landing zone; a general with a garrison goes through the normal rules. |
 | `general.GetTask().GetOriginalType()` (4, 5, 6 recovering, 7, 12), `.GetNewGarrisonGridIdx()` | `orders.rawTaskType`, `.taskKind`, `.newGrid` (verification) |
 | `general.GetTask().GetRemainingTime()` (unit assumed to be ms, not yet confirmed in steward logs; the raw value is logged) | `specialists.orders.remaining` (returns a number or null) |
+| `new air.Sound(new air.URLRequest('images/drop.mp3')).play()`; if `air.Sound` is missing or throws, `game.def('Sound::cSoundManager').getInstance().playEffect('QuestComplete')` (a missing file reports through `IOErrorEvent.IO_ERROR`, not a throw; not yet confirmed in steward logs) | `sound.alert` |
 
 ### Class lookup
 

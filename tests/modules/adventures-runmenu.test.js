@@ -635,3 +635,51 @@ t.test('both menus take the four run commands from one table', function () {
         assert.ok(itemByLabel(w, c.label), c.label);
     });
 });
+
+// ---- Template steps and the StarAll row ------------------------------------
+
+var STEP_PATHS = [WAVES[0], { step: 'home', generals: ['g1'] }, { step: 'pause', message: 'Heal up' }, WAVES[1]];
+
+t.test('step rows sit between the waves and only files take a Wave number', function () {
+    var w = setup({ waves: 2, step: 'wave Attack', run: { paths: STEP_PATHS, loadoutNames: { g1: 'Alpha' } } });
+    var labels = flat(w).map(function (r) { return r.label; });
+    var first = labels.indexOf('Wave 1');
+    assert.ok(first > -1);
+    assert.strictEqual(labels[first + 1].indexOf('Wave'), -1, 'the step row is not a wave');
+    assert.strictEqual(labels.indexOf('Wave 2') - first, 3, 'two step rows between the files');
+    assert.strictEqual(labels.indexOf('Wave 3'), -1, 'steps are not numbered');
+    var home = flat(w)[first + 1];
+    assert.strictEqual(home.file, 'Alpha', 'the file part names the general');
+    assert.strictEqual(flat(w)[first + 2].file, 'Heal up', 'a pause shows its message');
+});
+
+t.test('a planned pause row says its sound played', function () {
+    var w = setup({ waves: 2, step: 'wave Attack', waveIndex: 2, run: { paths: STEP_PATHS } });
+    w.st.pause(w.S.RunPause.Planned, 'Heal up');
+    var labels = flat(w).map(function (r) { return r.label; });
+    var pause = flat(w)[labels.indexOf('Wave 1') + 2];
+    assert.strictEqual(pause.detail, 'sound played');
+    assert.strictEqual(pause.mark, 'paused');
+});
+
+t.test('the StarAll row reads not used when the template switch is off, and is a plain row when on', function () {
+    var w = setup({ waves: 2 });
+    var on = row(w, 'Send all to the star');
+    assert.notStrictEqual(on.detail, 'not used');
+    w = setup({ waves: 2, run: { starAll: false } });
+    var off = row(w, 'Send all to the star');
+    assert.strictEqual(off.mark, 'skip');
+    assert.strictEqual(off.detail, 'not used');
+});
+
+t.test('a Pause x min row counts its minutes from the state clock and names no file', function () {
+    var w = setup({ waves: 2, step: 'wave Attack', waveIndex: 1,
+        run: { paths: [WAVES[0], { step: 'wait', minutes: 5 }, WAVES[1]] } });
+    w.st.run().marks = { 'wait:1': { sentAt: w.st.now() - 120000 } };
+    var list = flat(w);
+    var at = -1;
+    list.forEach(function (r, i) { if (r.label === 'Wave 1') at = i; });
+    var wait = list[at + 1];
+    assert.strictEqual(wait.detail, '3 min left');
+    assert.strictEqual(wait.file, '');
+});

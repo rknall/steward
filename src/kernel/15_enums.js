@@ -46,6 +46,7 @@
     if (!S.RunStatus)           S.RunStatus           = {};    // filled by modules/adventures/state.js
     if (!S.RunPause)            S.RunPause            = {};    // filled by modules/adventures/state.js
     if (!S.RunStep)             S.RunStep             = {};    // filled by modules/adventures/state.js
+    if (!S.TemplateStep)        S.TemplateStep        = {};    // filled by modules/adventures/steps.js
 
     // Failure kinds of the kernel file API (kernel/17_files.js).
     S.FileError = {

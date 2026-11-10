@@ -59,6 +59,16 @@
  * with everyone idle and nothing left to unload. The load at home keeps its
  * pause: nothing there brings troops back by itself.
  *
+ * The step contract and its one driver live here too. A step that sends
+ * orders between waves, or StarAll, is one contract object ({ done, blocked,
+ * orders, fail, next }, optional skip and reads); runStep() runs its hooks in
+ * the one canonical order (skip -> done -> blocked -> stale marks -> settle
+ * -> new round), so no step writes that order again. orderEach() builds
+ * those hooks for the common "each general once" shape and sends nothing
+ * itself. A Send home step marks each general HOME_PREFIX + key; fieldKeys()
+ * leaves a general with a seen mark out of the island steps, while the home
+ * steps keep keysOf() and wait for him to arrive.
+ *
  * Bundle slot: module file; top level only assigns
  * S.modules.adventures.loader; state and every core are read at call time.
  */
@@ -86,6 +96,11 @@
 
     // Refusal reason of a round's attempt whose zone is no longer viewed.
     var ZONE_CHANGED = 'viewed zone changed';
+
+    // Mark prefix of a Send home step, one mark per general. Its seen mark is
+    // the only record that a general left the map early, so fieldKeys()
+    // derives the island's generals from it instead of keeping a list.
+    var HOME_PREFIX = 'home:';
 
     function has(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj, key);
@@ -279,13 +294,29 @@
         return t - rec.since >= MISSING_GRACE_MS;
     }
 
-    // Every pass treats the generals in the same order.
+    // Every pass treats the generals in the same order. Every loadout general,
+    // also one a Send home step sent away: the home steps use this, since
+    // they must wait for him to arrive and stand idle at home.
     function keysOf(r) {
         var keys = [];
         var lk = r.loadoutKeys || {};
         for (var k in lk) if (has(lk, k)) keys.push(k);
         keys.sort();
         return keys;
+    }
+
+    // keysOf() without the generals that a Send home step saw leave: the
+    // island steps use this, as such a general is no longer theirs. Only a
+    // seen mark counts; a send that went out but was never seen keeps him,
+    // because nothing shows yet that he left.
+    function fieldKeys(r) {
+        var keys = keysOf(r);
+        var out = [];
+        for (var i = 0; i < keys.length; i++) {
+            var rec = marked(r, HOME_PREFIX + keys[i]);
+            if (!rec || !rec.seen) out.push(keys[i]);
+        }
+        return out;
     }
 
     function who(inv, key) {
@@ -316,9 +347,10 @@
     }
 
     // The first loadout key whose general is walking to a grid, or null. A
-    // key that cannot be looked up does not count as walking.
+    // key that cannot be looked up does not count as walking. A general sent
+    // home walks to no grid of this map, so he is left out.
     function movingKey(r) {
-        var keys = keysOf(r);
+        var keys = fieldKeys(r);
         for (var i = 0; i < keys.length; i++) {
             var spec = S.core.specialists.lookup(keys[i]).spec;
             if (spec && S.core.specialists.orders.taskKind(spec) === S.GeneralTask.Move) return keys[i];
@@ -559,6 +591,18 @@
 
     // ---- Battle files -------------------------------------------------------
 
+    // Number of the wave at entry waveIndex. The list mixes battle files and
+    // steps, and only the files count as waves, so the pause text names the
+    // same wave as the status line. The steps registry is read late since it
+    // may be absent in a reduced harness; the entry number is the fallback.
+    function waveNo(r, waveIndex) {
+        var sp = S.modules.adventures.steps;
+        if (sp && typeof sp.waveNumber === 'function' && r && r.paths && r.paths.length) {
+            return sp.waveNumber(r.paths, waveIndex);
+        }
+        return waveIndex + 1;
+    }
+
     // Parsed lines of one battle file of the run, cached until another file
     // or wave is read. The loadout keys come from the run (persisted at
     // start), never from a reload of the loadout file, so a file edited
@@ -570,7 +614,7 @@
         if (c && c.runId === r.id && c.path === path && c.waveIndex === waveIndex && c.lines) {
             return { ok: true, lines: c.lines };
         }
-        var label = waveIndex >= 0 ? 'wave ' + (waveIndex + 1) : tag;
+        var label = waveIndex >= 0 ? 'wave ' + waveNo(r, waveIndex) : tag;
         if (typeof path !== 'string' || !path) return { ok: false, message: label + ' has no file' };
         var ld = S.core.battles.load(path);
         if (!ld.ok) {
@@ -590,13 +634,15 @@
 
     // Grids of the attack and buff targets of the waves before end (all waves
     // without it), deduped, with a label. A file that no longer loads adds
-    // nothing.
+    // nothing, and a template step entry (an object, not a path) has no
+    // targets.
     function campsOf(r, end) {
         var out = [];
         var seenGrid = {};
         var L = S.BattleLine;
         var stop = typeof end === 'number' ? Math.min(end, r.paths.length) : r.paths.length;
         for (var i = 0; i < stop; i++) {
+            if (typeof r.paths[i] !== 'string') continue;
             var f = S.core.battles.load(r.paths[i]);
             if (!f || !f.ok) continue;
             for (var j = 0; j < f.lines.length; j++) {
@@ -934,6 +980,226 @@
         return 'wait';
     }
 
+    // ---- Step driver --------------------------------------------------------
+
+    // The pause a failed round of def raises: the general is the order whose
+    // round key failed (a marked order's key is its mark name), and the text
+    // is fail.text(f, key) when given, else '<what> of <who> failed: ...'.
+    function pauseWith(fail, os, inv) {
+        return function (f) {
+            var key = f.key;
+            for (var i = 0; i < os.length; i++) {
+                if ((os[i].mark || os[i].key) === f.key) {
+                    key = os[i].key;
+                    break;
+                }
+            }
+            var text = typeof fail.text === 'function' ? fail.text(f, key) :
+                fail.what + ' of ' + who(inv, key) + ' failed: ' + f.reason;
+            st().pause(fail.reason, text, { general: key });
+        };
+    }
+
+    // Carries out one blocked result of a step. Each one is a kind of wait
+    // that already exists:
+    //   { key, text }               a busy general: waitBusy;
+    //   { key, text, absent: true } a general not listed: waitBusy until
+    //                               missingLong, then a GeneralMissing pause;
+    //   { read: what }              a read that failed: waitRead;
+    //   { hold: text, mark: name }  a planned wait: its start goes on the
+    //                               mark once and is logged once, then nothing.
+    //                               It feeds neither waitBusy nor waitRead, as
+    //                               both feed the zone-trip stuck clock and a
+    //                               planned wait is no stuck read;
+    //   { pause: reason, text, mark: name } a planned pause: the mark is seen
+    //                               before the pause, and pause() saves once,
+    //                               so a reload finds both or neither.
+    function apply(r, b) {
+        var rec;
+        if (b.pause) {
+            rec = mark(r, b.mark);
+            rec.seen = true;
+            rec.sentOnce = true;
+            rec.sentAt = now();
+            st().pause(b.pause, b.text);
+            return;
+        }
+        if (typeof b.hold === 'string') {
+            rec = marked(r, b.mark);
+            if (rec && typeof rec.sentAt === 'number') return;
+            rec = mark(r, b.mark);
+            rec.sentAt = now();
+            rec.sentOnce = true;
+            st().save();
+            S.kernel.log(CATEGORY, st().label() + ': ' + b.hold);
+            return;
+        }
+        if (typeof b.read === 'string') {
+            waitRead(r, b.read);
+            return;
+        }
+        if (b.absent) {
+            if (missingLong(r, b.key)) {
+                st().pause(S.RunPause.GeneralMissing, b.text, { general: b.key });
+                return;
+            }
+        }
+        waitBusy(r, b.key, b.text);
+    }
+
+    // The one driver of the step contract: every template step entry and
+    // StarAll run their pass through here, so the order of the hooks is
+    // written once. def holds the hooks:
+    //   skip(r, item, inv)    optional; a text skips the step: logged, then next;
+    //   done(r, item, inv)    true -> next; null -> waitRead(def.reads or
+    //                         'generals'); false -> go on;
+    //   blocked(r, item, inv) optional; null, or a blocked result (see apply);
+    //   orders(r, item, inv)  optional; [{ key, mark, def }], mark '' or absent
+    //                         for an order that may go out again;
+    //   fail                  { reason, what, text(f, key)? }, needed with orders;
+    //   next(r, item)         moves the run on.
+    // A marked order sent but not seen waits ORDER_WAIT_MS and then pauses
+    // NotObserved; it never goes out twice. The rest is the shared round:
+    // dropShown and settleRound, then one new round of every order.
+    function runStep(r, step, def, item, inv) {
+        if (typeof def.skip === 'function') {
+            var t = def.skip(r, item, inv);
+            if (t !== null && t !== undefined) {
+                S.kernel.log(CATEGORY, st().label() + ': ' + (def.label || step) + ' skipped: ' + t);
+                def.next(r, item);
+                return;
+            }
+        }
+        var d = def.done(r, item, inv);
+        if (d === true) {
+            def.next(r, item);
+            return;
+        }
+        if (d === null) {
+            waitRead(r, def.reads || 'generals');
+            return;
+        }
+        var b = typeof def.blocked === 'function' ? def.blocked(r, item, inv) : null;
+        if (b) {
+            apply(r, b);
+            return;
+        }
+        var os = typeof def.orders === 'function' ? def.orders(r, item, inv) : [];
+        if (!os || !os.length) return;
+        var i;
+        for (i = 0; i < os.length; i++) {
+            if (!os[i].mark) continue;
+            var s = staleMark(r, os[i].mark, def.fail.what + ' of ' + who(inv, os[i].key));
+            if (s === 'wait') return;
+            if (s === 'stale') {
+                st().pause(S.RunPause.NotObserved, def.fail.what + ' of ' + who(inv, os[i].key) +
+                    ' sent but not seen; check the general, then Resume', { general: os[i].key });
+                return;
+            }
+        }
+        var names = [];
+        for (i = 0; i < os.length; i++) names.push(os[i].mark || os[i].key);
+        dropShown(r, step, names);
+        if (settleRound(r, step, pauseWith(def.fail, os, inv), def.fail.what) !== 'new') return;
+        var round = startRound(r, step, []);
+        for (i = 0; i < os.length; i++) {
+            var o = os[i];
+            attempt(round, o.mark || o.key, o.mark ? wrapSend(r, o.mark, o.def) : o.def,
+                o.mark ? seenOnVerified(o.mark) : undefined);
+        }
+    }
+
+    // Builds the hooks of a step that gives each general of a list one order
+    // (Unload, Send home, StarAll), to hand to runStep. It sends nothing
+    // itself, so the canonical order stays in runStep alone. opts:
+    //   keys(r, item)          the generals, in pass order;
+    //   isDone(g, key, rec)    a listed general needs nothing more;
+    //   absentDone             a general a good read lacks counts as done;
+    //   mark                   mark prefix of each order, '' for none;
+    //   sendBusy               a busy general is sent anyway;
+    //   need(r, item, inv)     optional; a blocked result ahead of every send;
+    //   def(key, r, item)      the action def of one order;
+    //   fail, next             as in runStep.
+    // Ready generals are sent while busy ones keep waiting; the step waits on
+    // the first busy or absent general only once nobody is left to send.
+    function orderEach(opts) {
+        // Few generals, so each hook classifies again; that keeps the hooks
+        // free of state shared between them.
+        function classify(r, item, inv) {
+            var keys = opts.keys(r, item);
+            var c = { done: 0, total: keys.length, unread: false, send: [], busy: [], absent: [] };
+            var dirty = false;
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                var g = gen(inv, key);
+                var rec = opts.mark ? marked(r, opts.mark + key) : null;
+                if (!g) {
+                    // A marked order that went out explains why he left the list.
+                    if (rec && (rec.seen || rec.sentOnce)) {
+                        if (!rec.seen) {
+                            rec.seen = true;
+                            dirty = true;
+                        }
+                        c.done++;
+                    } else if (!inv || !inv.ok) {
+                        c.unread = true;
+                    } else if (opts.absentDone) {
+                        c.done++;
+                    } else {
+                        c.absent.push(key);
+                    }
+                    continue;
+                }
+                if (rec && rec.seen) {
+                    c.done++;
+                } else if (opts.isDone(g, key, rec)) {
+                    if (rec) {
+                        rec.seen = true;
+                        dirty = true;
+                    }
+                    c.done++;
+                } else if (!ready(g) && !opts.sendBusy) {
+                    c.busy.push(key);
+                } else {
+                    c.send.push(key);
+                }
+            }
+            if (dirty) st().save();
+            return c;
+        }
+        return {
+            reads: 'generals',
+            done: function (r, item, inv) {
+                var c = classify(r, item, inv);
+                if (c.done === c.total) return true;
+                if (c.unread && !c.send.length) return null;
+                return false;
+            },
+            blocked: function (r, item, inv) {
+                var b = typeof opts.need === 'function' ? opts.need(r, item, inv) : null;
+                if (b) return b;
+                var c = classify(r, item, inv);
+                if (c.send.length) return null;
+                if (c.busy.length) return { key: c.busy[0], text: who(inv, c.busy[0]) + ' busy' };
+                if (c.absent.length) {
+                    return { key: c.absent[0], text: who(inv, c.absent[0]) + ' is not on the island', absent: true };
+                }
+                return null;
+            },
+            orders: function (r, item, inv) {
+                var c = classify(r, item, inv);
+                var os = [];
+                for (var i = 0; i < c.send.length; i++) {
+                    os.push({ key: c.send[i], mark: opts.mark ? opts.mark + c.send[i] : '',
+                        def: opts.def(c.send[i], r, item) });
+                }
+                return os;
+            },
+            fail: opts.fail,
+            next: opts.next
+        };
+    }
+
     S.modules.adventures.loader = {
         MAX_ROUNDS:        MAX_ROUNDS,
         MAX_UNLOAD_CYCLES: MAX_UNLOAD_CYCLES,
@@ -944,6 +1210,7 @@
         ORDER_WAIT_MS:     ORDER_WAIT_MS,
         BUSY_LOG_MS:       BUSY_LOG_MS,
         ZONE_CHANGED:      ZONE_CHANGED,
+        HOME_PREFIX:       HOME_PREFIX,
         now:               now,
         gen:               gen,
         ready:             ready,
@@ -958,6 +1225,7 @@
         quietClock:        quietClock,
         missingLong:       missingLong,
         keysOf:            keysOf,
+        fieldKeys:         fieldKeys,
         who:               who,
         seenOnVerified:    seenOnVerified,
         leaving:           leaving,
@@ -991,7 +1259,9 @@
         markSeen:          markSeen,
         dropMark:          dropMark,
         wrapSend:          wrapSend,
-        staleMark:         staleMark
+        staleMark:         staleMark,
+        runStep:           runStep,
+        orderEach:         orderEach
     };
 
 }(Steward));

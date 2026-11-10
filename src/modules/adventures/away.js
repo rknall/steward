@@ -6,7 +6,11 @@
  * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> JumpHome, and
  * the home steps take over at ArriveHome. Closing the map returns the generals
  * home by itself, so no step sends them; ArriveHome waits until each is listed
- * home and idle. A holder of free
+ * home and idle. StarAll is a template switch (default on) and runs on the
+ * shared step driver, loader.runStep, like the template steps between the
+ * waves. A general a Send home step sent off the map is left out of the
+ * island steps (Arrive, StarAll, PackStar, Pack, Clear) through
+ * loader.fieldKeys; ArriveHome still waits for him. A holder of free
  * troops is placed on a map grid before its raise, because the client has no
  * garrison for a general at the star; Clear goes back to PackStar while free
  * troops are left to pack. plan() does one step per call. The scheduler only calls it while no adventures queue entry is
@@ -205,7 +209,7 @@
     // no limit can be built on it, and a general not listed yet is on his way
     // or has to be looked at by the user, who sees the named wait.
     function arrive(r, inv) {
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var missing = null;
         var busy = null;
         for (var i = 0; i < keys.length; i++) {
@@ -274,50 +278,59 @@
         return typeof g.grid === 'number' && g.grid <= 0 && g.armyOk === true && S.core.army.total(g.army) === 0;
     }
 
-    // A round of star orders for keys; a refusal or failure pauses StarFailed.
-    function starRound(r, step, keys) {
-        var next = ld().settleRound(r, step, function (f) {
-            st().pause(S.RunPause.StarFailed, 'star ' + f.key + ' failed: ' + f.reason, { general: f.key });
-        }, 'star');
-        if (next !== 'new') return;
-        var round = ld().startRound(r, step, []);
-        for (var i = 0; i < keys.length; i++) ld().attempt(round, keys[i], S.core.specialists.orders.star(keys[i]));
+    // The step contract of StarAll for the shared step driver. Built per call
+    // because loader is read at call time. A general that left the list
+    // counts as starred only on a positive read of the list and every army
+    // (absentDone); a busy general is still sent (sendBusy), as the star
+    // order takes him from anywhere on the map. A refusal or failure pauses
+    // StarFailed with the general's key in the text.
+    function starDef() {
+        return ld().orderEach({
+            keys: function (r) { return ld().fieldKeys(r); },
+            isDone: atStar,
+            absentDone: true,
+            sendBusy: true,
+            def: function (key) { return S.core.specialists.orders.star(key); },
+            fail: {
+                reason: S.RunPause.StarFailed,
+                what: 'star',
+                text: function (f, key) { return 'star ' + key + ' failed: ' + f.reason; }
+            },
+            next: function () { st().go(S.RunStep.Horseshoe, 'every general at the star'); }
+        });
     }
 
     // Every general goes to the star empty before the waves, so each wave
-    // loads it from a known state. A general that left the list counts as
-    // starred only on a positive read of the list and every army.
+    // loads it from a known state. The template can switch this off; the
+    // generals then walk from wherever they arrived to their wave grids.
     function starAll(r, inv) {
-        var keys = ld().keysOf(r);
-        var todo = [];
-        var unread = false;
-        for (var i = 0; i < keys.length; i++) {
-            var g = ld().gen(inv, keys[i]);
-            if (g) {
-                if (!atStar(g)) todo.push(keys[i]);
-            } else if (!inv.ok) {
-                unread = true;
-            }
-        }
-        if (!todo.length && !unread) {
-            st().go(S.RunStep.Horseshoe, 'every general at the star');
+        if (r.starAll === false) {
+            st().go(S.RunStep.Horseshoe, 'send all to the star not used');
             return;
         }
-        if (!todo.length) {
-            ld().waitRead(r, 'generals');
-            return;
-        }
-        starRound(r, S.RunStep.StarAll, todo);
+        ld().runStep(r, S.RunStep.StarAll, starDef(), null, inv);
     }
 
     // ---- Horseshoe ----------------------------------------------------------
+
+    // The wave the run reaches next: template steps share the list with the
+    // battle files, so the number counts the files before waveIndex, plus
+    // the first file at or after it. A list of files only gives
+    // waveIndex + 1.
+    function firstWaveFrom(r) {
+        var sp = S.modules.adventures.steps;
+        if (sp && typeof sp.waveNumber === 'function' && r.paths && r.waveIndex > 0) {
+            return sp.waveNumber(r.paths, r.waveIndex - 1) + 1;
+        }
+        return r.waveIndex > 0 ? r.waveIndex + 1 : 1;
+    }
 
     // Optional: a missing horseshoe or a refused one only warns, and a run
     // without one logs that and moves on. It is sent at most once per run; a
     // marker that went out (sentOnce survives a Resume) or was seen moves on
     // without a second send.
     function horseshoe(r) {
-        var gate = 'to wave ' + (r.waveIndex + 1);
+        var gate = 'to wave ' + firstWaveFrom(r);
         var round = ld().currentRound(r, S.RunStep.Horseshoe);
         if (round && ld().complete(round)) {
             var res = ld().resultOf(round, 'speed');
@@ -372,7 +385,7 @@
     // capacity. Sharing it keeps the three steps from disagreeing on what is
     // left to pack, so the Pack -> Clear -> PackStar cycle ends.
     function packPlan(r, inv) {
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var carriers = [];
         var generals = [];
         for (var i = 0; i < keys.length; i++) {
@@ -422,7 +435,7 @@
         var list = S.core.quests.list();
         var last = list ? lastQuestOf(list) : null;
         var questDone = !!(last && last.finished);
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var firstKey = null;
         var resting = [];
         for (var i = 0; i < keys.length; i++) {

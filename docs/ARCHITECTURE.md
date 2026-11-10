@@ -49,9 +49,10 @@ Steward
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
 │   ├── production      ← troop and item queues, order pricing and order action
 │   ├── quests          ← quest pool and claim action
-│   └── resources       ← resource amount and free population reads
+│   ├── resources       ← resource amount and free population reads
+│   └── sound           ← pause alert sound
 ├── modules
-│   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors
+│   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
 │   └── <id>            ← exposed only if the module chooses to publish state
 └── (shared enums)
     ├── Priority
@@ -67,6 +68,7 @@ Steward
     ├── ActionResult
     ├── GeneralTask     ← declared in the kernel, filled by core/specialists/orders.js
     ├── SpeedBuffChoice
+    ├── TemplateStep    ← filled by modules/adventures/steps.js
     ├── FileError
     ├── FileLocation
     └── LogLevel

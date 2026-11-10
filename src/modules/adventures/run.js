@@ -59,6 +59,11 @@
         return S.modules.adventures.state;
     }
 
+    // The template step registry, read at call time: it loads after this file.
+    function steps() {
+        return S.modules.adventures.steps;
+    }
+
     function current() {
         return store().current().request;
     }
@@ -211,16 +216,25 @@
             paths:       rec.waves,
             loadoutPath: rec.loadout,
             loadoutKeys: chk.loadoutKeys,
+            loadoutNames: chk.loadoutNames,
             waveIndex:   waveIndex,
             step:        step,
-            speedBuff:   S.modules.adventures.templates.speedBuffChoice(rec)
+            speedBuff:   S.modules.adventures.templates.speedBuffChoice(rec),
+            // A template without the field sends everyone to the star.
+            starAll:     rec.starAll !== false
         });
     }
 
     // The template's map is open and viewed: ask the start wave, check the
     // files against the island, then store a run at Gate of that wave.
+    // The user counts waves, the battle files only; the run counts list
+    // entries, template steps included. Wave 1 starts at the first entry, so
+    // steps before it run as in a start from home. Wave k > 1 starts at its
+    // own file: the steps before it belong to the part of the map already
+    // played, and a Send home there would wait for a general an earlier
+    // session already sent home.
     function startWaves(rec, count, zoneId) {
-        var waves = rec.waves ? rec.waves.length : 0;
+        var waves = steps().waveCount(rec.waves || []);
         var answer = ask('Start at which wave of "' + rec.label + '"? 1..' + waves, '1');
         var w = waveFrom(answer, waves);
         if (!w.ok) {
@@ -233,7 +247,7 @@
         var warnings = chk.warnings;
         if (!chk.ok) return checkFailed(rec, listOf(chk.problems));
 
-        var run = runFromTemplate(rec, chk, zoneId, w.wave - 1);
+        var run = runFromTemplate(rec, chk, zoneId, steps().startIndex(rec.waves || [], w.wave));
         store().begin(makeRequest(rec, count), run);
         wakeRun();
         S.kernel.log('adventures', 'run started:', rec.label, 'x' + count, 'at wave', w.wave, 'of', waves,

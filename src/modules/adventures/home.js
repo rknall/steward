@@ -962,9 +962,13 @@
             paths:       r.paths,
             loadoutPath: r.loadoutPath,
             loadoutKeys: r.loadoutKeys,
+            loadoutNames: r.loadoutNames,
             waveIndex:   0,
             step:        S.RunStep.Muster,
             speedBuff:   r.speedBuff,
+            // A series keeps the start's switch, so a template edit mid-series
+            // does not change the remaining runs.
+            starAll:     r.starAll,
             transit:     carried,
             transitBase: base,
             homeGrids:   r.homeGrids,

@@ -150,12 +150,36 @@
         return { label: row.label, file: '', mark: mark, detail: detail };
     }
 
+    function stepsPart() {
+        return S.modules.adventures.steps || null;
+    }
+
+    // A template step sits between the waves: its label says which wave it
+    // follows, its file part is the step's subject (the generals or the pause
+    // message) as its row names it. The detail reads the run clock itself.
+    function itemRow(rs, r, i, mark) {
+        var sp = stepsPart();
+        var detail = sp.detail(r, i) || '';
+        if (isCurrent(mark)) detail = busyText(r) || detail;
+        return {
+            label:  sp.rowLabel(r.paths, i),
+            file:   sp.subject(r.paths[i], r.loadoutNames || {}),
+            mark:   mark,
+            detail: detail
+        };
+    }
+
     function waveRows(rs, r, row, pos) {
         var out = [];
+        var sp = stepsPart();
         for (var i = 0; i < r.paths.length; i++) {
             var mark = waveMark(r, row, pos, i);
+            if (sp && sp.isItem(r.paths[i])) {
+                out.push(itemRow(rs, r, i, mark));
+                continue;
+            }
             out.push({
-                label:  'Wave ' + (i + 1),
+                label:  'Wave ' + (sp ? sp.waveNumber(r.paths, i) : i + 1),
                 file:   templates().fileName(r.paths[i]),
                 mark:   mark,
                 detail: isCurrent(mark) ? innerText(rs, r) : ''
