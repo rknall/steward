@@ -39,6 +39,10 @@ Sections:
 6. **Suggested commit message**: short, topic-prefixed (`mining: ...`), ending
    with `Assisted-by: Claude`.
 
+Optional: when a visual explanation helps the user test or judge the change, write
+an explainer set `analysis/agents/<task>/design/<task>-explainer.html` from the
+review shell and report `review-set <path>` in `## Next` before `done`.
+
 Do not edit code. Do not commit.
 
 ## Output

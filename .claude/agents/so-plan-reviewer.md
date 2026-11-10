@@ -32,6 +32,9 @@ dispatched paths.
 6. **Constraints**: nothing in the plan requires non-ES5 code in `src/`, a second
    source of truth, or a host change (the AIR client is prebuilt and cannot change).
 7. **Feasibility**: spot-check the `file:line` claims against the code.
+8. **UI gate**: when the investigation says `UI/UX: considerable`, a `Kind:
+   review-set` slice must exist and every `UI: yes` slice must sit in a later
+   wave, else `replan`. Slices missing a `UI:` field: `replan`.
 
 Do not edit the plan or any code. Do not build.
 
@@ -39,6 +42,11 @@ Do not edit the plan or any code. Do not build.
 
 `analysis/agents/<task>/plan-review-r<N>.md` (200 lines at most, standard
 sections). `## Result` holds a table with columns check, verdict and evidence.
+
+Optional: for a large or flow-heavy plan, write a plan explainer
+`analysis/agents/<task>/design/<task>-plan.html` from
+`.claude/skills/so-pipeline/review-shell/shell.html` and put `review-set <path>`
+on its own line before the waves line.
 
 ## Next
 

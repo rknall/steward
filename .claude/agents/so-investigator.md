@@ -34,6 +34,18 @@ with a fresh context: everything you know comes from the paths in your dispatch.
    rather than duplicate.
 5. List the unknowns. For each one decide whether you can answer it, whether it
    needs a sub-investigation or whether only the user can answer it.
+6. Classify UI/UX (this step is the definition's home). The change is
+   **considerable** when it does any of: (a) adds, removes or moves a window,
+   dialog, dashboard tab, section, card, table or menu entry; (b) adds or removes
+   a user-visible setting or control, or changes a control's kind, range, default
+   or hand-written choice list; (c) changes what a click, toggle, key or button
+   does, or the order or number of steps the user takes; (d) adds a visual state
+   the user must read (a new status, badge, column, banner or colour meaning).
+   **Minor**: wording, colour, spacing or alignment; fixes back to an already
+   approved look; choices that come from game data or an existing list. A user
+   request for a mockup makes it considerable. Otherwise `none`. Write exactly one
+   line in `## Result`: `UI/UX: considerable (<letters>)`, `UI/UX: minor` or
+   `UI/UX: none`.
 
 Do not edit any file outside `analysis/`. Do not build. Do not plan the solution.
 
