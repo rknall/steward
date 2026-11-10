@@ -76,7 +76,12 @@ then repeats maps like a template series.
   running, mode N" for what waits only on its quest; the run's unread-quest
   reader keeps reading unread quests so they start. Trip and Clear count such
   objects as left, so the run picks them up before it goes home, until
-  TRIP_MAX_MS on Trip. Outside scenario runs collect and template runs
+  TRIP_MAX_MS on Trip. Trip settles READ_LAG_MS from its entry and
+  QUEST_SETTLE_MS (20 s) from the last quest the run read or claimed on the
+  island, waits while a running quest's open buildingdestroyed pick-up is not on
+  the map yet (its objects show some seconds after the read), and leaves only
+  once all of that has read clear for READ_LAG_MS, within the same TRIP_MAX_MS.
+  Outside scenario runs collect and template runs
   keep the looser gate (any started, active quest that is not unread).
 - Stock-out (fallback, since trips are produced in full): when an item runs out with grids still open, the run takes a
   return trip home (production is home-only), orders the rest and comes back to

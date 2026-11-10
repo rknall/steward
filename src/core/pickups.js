@@ -10,7 +10,9 @@
  * 'collectible' so the click verifies them as a collectible. Collectibles are the objects the host flags
  * as collectible whose name matches one of the given patterns. On request
  * the quest objects are limited to running quests, and the ones that wait
- * for their quest to run are reported apart. Which kinds to
+ * for their quest to run are reported apart. With opts.awaited, a running
+ * quest's open buildingdestroyed name that has no object on the map yet is
+ * reported apart too, so a caller can wait for it to appear. Which kinds to
  * ask for, which patterns to use and when to click stay with the caller; this
  * file decides nothing.
  *
@@ -104,7 +106,11 @@
     // opts.running true takes quest objects of running quests only (the
     // strict gate of S.core.quests.clickNames), and opts.held (an array), when
     // given, gets the same target shape plus { quest, mode } for each quest
-    // object on the map that waits only for its quest to run.
+    // object on the map that waits only for its quest to run. With
+    // opts.running, opts.awaited (an array) gets { name, kind: 'collectible',
+    // zoneId } for each open buildingdestroyed name of a running quest that
+    // has no object on the map yet; it is never filled without opts.running,
+    // so the loose gate is not widened. The cache is not invalidated here.
     function targets(opts) {
         opts = opts || {};
         var bld = S.core.buildings;
@@ -115,11 +121,17 @@
         var held = opts.held ? {} : null;
         var destroy = null;
         var heldDestroy = opts.held ? {} : null;
+        var open = null;
+        var onMap = {};
         if (opts.quests === true && S.core.zone.isAdventure()) {
             names = S.core.quests.clickNames(opts.running === true ? { running: true, held: held } : null);
             if (names === null) return null;
             destroy = S.core.quests.destroyNames(opts.running === true ? { running: true, held: heldDestroy } : null);
             if (destroy === null) return null;
+            if (opts.running === true && opts.awaited) {
+                open = S.core.quests.openDestroyNames({ running: true });
+                if (open === null) return null;
+            }
         }
         var pats = (opts.patterns && opts.patterns.length) ? opts.patterns : null;
         var src = bld.list();
@@ -128,6 +140,7 @@
             var b = src[i];
             var n = bld.name(b);
             if (!n) continue;
+            onMap[n] = true;
             var g = bld.grid(b);
             if (g === null || g === undefined) continue;
             var kind = null;
@@ -141,6 +154,13 @@
             } else if (heldDestroy && hasOwn(heldDestroy, n) && bld.isCollectible(b)) {
                 opts.held.push({ grid: g, name: n, kind: 'collectible', zoneId: zoneId,
                     quest: heldDestroy[n].quest, mode: heldDestroy[n].mode });
+            }
+        }
+        if (open) {
+            for (var name in open) {
+                if (hasOwn(open, name) && !hasOwn(onMap, name)) {
+                    opts.awaited.push({ name: name, kind: 'collectible', zoneId: zoneId });
+                }
             }
         }
         return out;

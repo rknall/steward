@@ -450,6 +450,153 @@ t.test('Trip: a collectible a running quest counts holds the trip; JumpHome once
     assertStep(w, 'JumpHome');
 });
 
+// ---- trip end: settle, awaited pick-ups ------------------------------------------
+
+var COLLECT_ON = { enabled: true, namePatterns: [], adventureZones: true };
+var HAMMER = 'buffad_collectible_UsedHammer';
+
+// The run at the Trip step of trip 0 on the island, collect picking up there.
+function atTrip() {
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12], met: true,
+        stayOpen: true }, { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 5);
+    w.H.settings.write('collect', COLLECT_ON);
+    onIsland(w, record(w, ONE), 0);
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    return w;
+}
+
+function onePass(w) {
+    W.ticksFor(w, PASS_MS);
+    play(w);
+}
+
+// A look soon after the last one, inside READ_LAG_MS of it.
+function shortPass(w) {
+    W.ticksFor(w, 3000);
+    play(w);
+}
+
+// Passes until the step is `name` or ms ran out; returns whether it was reached.
+function passesUntil(w, name, ms) {
+    var end = w.t + ms;
+    while (w.t < end) {
+        if (stepName(w) === name) return true;
+        onePass(w);
+    }
+    return stepName(w) === name;
+}
+
+function settleMs(w) {
+    return w.S.modules.adventures.trips.QUEST_SETTLE_MS;
+}
+
+function readLag(w) {
+    return w.S.modules.adventures.loader.READ_LAG_MS;
+}
+
+// Passes until `have()` holds; returns the verified quest stamp of that pass.
+function passUntilStamped(w, have, ms) {
+    var end = w.t + ms;
+    while (w.t < end && !have()) onePass(w);
+    assert.ok(have(), 'the event happened');
+    var q = w.st.current().questAt;
+    assert.ok(q && typeof q.at === 'number', 'a verified stamp');
+    return q.at;
+}
+
+t.test('Trip: a quest read during Trip restarts the settle; no leave within QUEST_SETTLE_MS of the read', function () {
+    var w = atTrip();
+    w.quests.push({ key: 'qn', name: 'Next', item: BRIDGE, grids: [11], unread: true, stayOpen: true });
+    var tr = passUntilStamped(w, function () { return w.reads.length > 0; }, 60000);
+    var limit = tr + settleMs(w);
+    while (w.t < limit) {
+        assertStep(w, 'Trip');
+        onePass(w);
+        if (w.t < limit) assertStep(w, 'Trip');
+    }
+    assert.ok(passesUntil(w, 'JumpHome', 4 * PASS_MS), 'left after the settle: ' + stepName(w));
+    assert.ok(w.t >= limit, 'not before the settle ran out');
+});
+
+t.test('Trip: a running quest\'s pick-up not on the map yet holds the trip', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    assert.ok(!logged(w, /leaving with/), logLines(w).join('\n'));
+    assert.ok(logged(w, /not on the map yet|waiting for it to appear/), logLines(w).join('\n'));
+    // It shows on the map: still held, now as an object.
+    w.awaited = [];
+    w.pickups = [{ grid: 31, name: HAMMER, kind: 'collectible', named: true, zoneId: ZONE }];
+    onePass(w);
+    assertStep(w, 'Trip');
+    // Collect picked it up: the map must read clear once more before leaving.
+    w.pickups = [];
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(passesUntil(w, 'JumpHome', 60000), 'then it leaves: ' + stepName(w));
+});
+
+t.test('Trip: leaves once the awaited condition is met', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 20000);
+    assertStep(w, 'Trip');
+    w.awaited = [];
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(passesUntil(w, 'JumpHome', readLag(w) + 3 * PASS_MS), 'left: ' + stepName(w));
+});
+
+t.test('Trip: an awaited pick-up that never appears leaves after TRIP_MAX_MS, no pause', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, w.S.modules.adventures.trips.TRIP_MAX_MS + 30000);
+    assert.ok(logged(w, /leaving with: .*not on the map yet/), logLines(w).join('\n'));
+    assert.notStrictEqual(stepName(w), 'Trip');
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running);
+});
+
+t.test('Trip: a quest claimed during Trip restarts the settle; a late next quest is read before JumpHome', function () {
+    var w = atTrip();
+    w.quests.push({ key: 'qf', name: 'Done', item: BRIDGE, grids: [11], finished: true });
+    var tc = passUntilStamped(w, function () { return w.claims.length > 0; }, 60000);
+    var late = false;
+    var limit = tc + settleMs(w);
+    var lateAt = null;
+    while (w.t < limit + 3 * PASS_MS && stepName(w) === 'Trip') {
+        if (!late && w.t >= tc + 5000) {
+            w.quests.push({ key: 'qn', name: 'Next', item: BRIDGE, grids: [11], unread: true, stayOpen: true });
+            late = true;
+        }
+        onePass(w);
+        if (w.t < limit) assertStep(w, 'Trip');
+        if (lateAt === null && w.reads.length > 0) lateAt = w.st.current().questAt.at;
+    }
+    assert.ok(late, 'the late quest appeared');
+    assert.ok(w.reads.length > 0, 'the late quest was read before the step left Trip');
+    assert.ok(lateAt !== null && lateAt > tc);
+    assert.ok(passesUntil(w, 'JumpHome', settleMs(w) + 4 * PASS_MS), 'left: ' + stepName(w));
+    assert.ok(w.t >= lateAt + settleMs(w), 'the settle counts from the late read');
+});
+
+t.test('Trip: after the last object is picked the map must stay clear for READ_LAG_MS', function () {
+    var w = atTrip();
+    w.pickups = [{ grid: 31, name: HAMMER, kind: 'collectible', named: true, zoneId: ZONE }];
+    onePass(w);
+    assertStep(w, 'Trip');
+    w.pickups = [];
+    var seen = w.st.current().tripSeenAt;
+    assert.strictEqual(typeof seen, 'number', 'the last look that saw the object is stamped');
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(/making sure no quest or object is left/.test(w.st.current().busy.text), w.st.current().busy.text);
+    assert.ok(passesUntil(w, 'JumpHome', readLag(w) + 4 * PASS_MS), 'left: ' + stepName(w));
+    assert.ok(w.t >= seen + readLag(w), 'not before READ_LAG_MS after the last look that saw it');
+});
+
 // ---- amounts and stock --------------------------------------------------------------
 
 t.test('Apply: a send offers min(amount, stock); a full-bound send taken whole is done', function () {
