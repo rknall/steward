@@ -62,12 +62,17 @@
         return parts.join('\n');
     }
 
+    // A map count of null means the star menu could not be read.
+    function countText(n) {
+        return n === null ? '?' : String(n);
+    }
+
     // A function, so each entry captures its own rec (ES5 has no block scope).
     function templateItem(rec) {
         return {
             label: function (pass) {
                 var run = S.modules.adventures.run;
-                return rec.label + ' ×' + (run ? run.available(rec.adventure, pass) : 0);
+                return rec.label + ' ×' + countText(run ? run.available(rec.adventure, pass) : 0);
             },
             onSelect: function () {
                 var run = S.modules.adventures.run;
@@ -82,7 +87,7 @@
         return {
             label: function (pass) {
                 var run = S.modules.adventures.run;
-                return rec.label + ' ×' + (run ? run.available(rec.adventure, pass) : 0);
+                return rec.label + ' ×' + countText(run ? run.available(rec.adventure, pass) : 0);
             },
             onSelect: function () {
                 var run = S.modules.adventures.run;

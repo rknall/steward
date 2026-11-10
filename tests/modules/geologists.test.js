@@ -569,3 +569,36 @@ t.test('busyOnDeposit is exported and counts only busy geologists on the given i
     t.assert.strictEqual(g.busyOnDeposit(list, 5), 1);
     t.assert.strictEqual(g.busyOnDeposit(list, 0), 0, 'idle geologist is not counted');
 });
+
+// ---- deferred portrait redraw ------------------------------------------------
+
+t.test('a portrait the host had not decoded is redrawn once after PORTRAIT_RETRY_MS', function () {
+    var timers = [];
+    var H = harness.boot({
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    mountList(H, [H.specs.geologist({ name: 'geo', uid: 'g1', iconID: 'icon_dec' })]);
+    var decoded = false;
+    H.ctx.getImageTag = function () { return decoded ? '<img src="x">' : '<span ph></span>'; };
+    timers.length = 0;
+    var $el = build(H, 'render');
+    t.assert.ok(rowsOf($el).eq(0).find('td').eq(0).html().indexOf('<span ph></span>') === 0);
+    t.assert.strictEqual(timers.length, 1);
+    t.assert.strictEqual(timers[0].ms, H.Steward.kernel.TIMEOUTS.PORTRAIT_RETRY_MS);
+    decoded = true;
+    timers[0].fn();
+    t.assert.ok(rowsOf($el).eq(0).find('td').eq(0).html().indexOf('<img') === 0);
+    t.assert.strictEqual(timers.length, 1, 'no further redraw once the portrait is real');
+});
+
+t.test('a render whose portraits are all real schedules no redraw', function () {
+    var timers = [];
+    var H = harness.boot({
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    mountList(H, [H.specs.geologist({ name: 'geo', uid: 'g1', iconID: 'icon_ok' })]);
+    H.ctx.getImageTag = function () { return '<img src="x">'; };
+    timers.length = 0;
+    build(H, 'render');
+    t.assert.strictEqual(timers.length, 0);
+});

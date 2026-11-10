@@ -543,3 +543,51 @@ t.test('a short window makes the screen compact and the panel height follows the
     assert.strictEqual(ui.screen.compact(), false);
     assert.strictEqual(ui.screen.panelHeight('dashboard'), null);
 });
+
+// ---- redrawOnce -------------------------------------------------------------
+
+function timerSetup() {
+    var timers = [];
+    var H = harness.boot({
+        sections: ['kernel'],
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    var $ = jq.install(H);
+    timers.length = 0;   // drop the boot timer; only the helper's timers count
+    return { H: H, $: $, h: H.Steward.kernel.ui.helpers, timers: timers };
+}
+
+t.test('redrawOnce schedules one call per holder', function () {
+    var s = timerSetup();
+    var $root = s.$('<div></div>');
+    var $holder = s.$('<div></div>');
+    $root.append($holder);
+    var calls = 0;
+    function draw() { calls++; }
+    assert.strictEqual(s.h.redrawOnce($holder, draw, 1000), true);
+    assert.strictEqual(s.h.redrawOnce($holder, draw, 1000), false);
+    assert.strictEqual(s.timers.length, 1);
+    assert.strictEqual(s.timers[0].ms, 1000);
+    assert.strictEqual(calls, 0);
+    s.timers[0].fn();
+    assert.strictEqual(calls, 1);
+});
+
+t.test('redrawOnce skips a detached holder', function () {
+    var s = timerSetup();
+    var $root = s.$('<div></div>');
+    var $holder = s.$('<div></div>');
+    $root.append($holder);
+    var calls = 0;
+    s.h.redrawOnce($holder, function () { calls++; }, 1000);
+    $holder.remove();
+    s.timers[0].fn();
+    assert.strictEqual(calls, 0);
+});
+
+t.test('redrawOnce returns false without a holder', function () {
+    var s = timerSetup();
+    assert.strictEqual(s.h.redrawOnce(null, function () {}, 1000), false);
+    assert.strictEqual(s.h.redrawOnce(s.$('.nothing-here'), function () {}, 1000), false);
+    assert.strictEqual(s.timers.length, 0);
+});

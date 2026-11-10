@@ -110,11 +110,11 @@ t.test('amount still ignores resource-bound entries of the map type', function (
     assert.strictEqual(s.buffs.amount('Adventure'), 0);
 });
 
-t.test('amount is 0 when the star menu cannot be read', function () {
+t.test('amount is null when the star menu cannot be read', function () {
     var s = setup({ buffs: [{ type: 'GeneralSpeedBuff_A', amount: 4 }] });
     assert.strictEqual(s.buffs.amount('GeneralSpeedBuff_A'), 4);
     s.H.host.game.gi.mCurrentPlayer.getAvailableBuffs_vector = function () { throw new Error('boom'); };
-    assert.strictEqual(s.buffs.amount('GeneralSpeedBuff_A'), 0);
+    assert.strictEqual(s.buffs.amount('GeneralSpeedBuff_A'), null);
 });
 
 // ---- reading the stock for actions ---------------------------------------------
@@ -669,7 +669,7 @@ t.test('stock is unreadable while a matching entry amount is not a number', func
     var s = setup({ buffs: [] });
     rawMenu(s, [rawEntry('A', 3), rawEntry('A', undefined)]);
     assert.strictEqual(s.buffs.stock('A', ''), null);
-    assert.strictEqual(s.buffs.amount('A'), 0);
+    assert.strictEqual(s.buffs.amount('A'), null);
     assert.strictEqual(s.buffs.entry('A', '').amount, 3);
 });
 
@@ -715,4 +715,250 @@ t.test('a refused building apply adds no stock text', function () {
     var def = s.buffs.building('MineBuff', 12, 'IronMine', true);
     assert.strictEqual(def.describe(undefined), '');
     assert.strictEqual(run(s, def).reason, 'no buff in stock');
+});
+
+// ---- read passes ----------------------------------------------------------------
+
+// BDEFS with counters on the target description, the star menu and the group
+// lookup, so a test can count host reads.
+function countedWorld() {
+    var counts = { targetDesc: 0, menu: 0, group: {} };
+    var defs = {};
+    Object.keys(BDEFS).forEach(function (k) {
+        var d = BDEFS[k];
+        var c = {};
+        Object.keys(d).forEach(function (m) { c[m] = d[m]; });
+        c.GetTargetDescription_string = function () { counts.targetDesc++; return d.GetTargetDescription_string(); };
+        defs[k] = c;
+    });
+    var s = setup({ buffs: [{ type: 'ByName', amount: 2 }, { type: 'NoDef', amount: 1 }], buffDefs: defs });
+    var player = s.H.host.game.gi.mCurrentPlayer;
+    var menu = player.getAvailableBuffs_vector;
+    player.getAvailableBuffs_vector = function () { counts.menu++; return menu.apply(this, arguments); };
+    var game = s.H.host.game;
+    var prev = game.def;
+    game.def = function (name) {
+        if (name === 'BuffSystem.cBuffDefinition') {
+            return { targetGroups: { groupContains: function (g, n) {
+                var key = g + '|' + n;
+                counts.group[key] = (counts.group[key] || 0) + 1;
+                return g === 'Mines' && n === 'IronMine';
+            } } };
+        }
+        return prev.apply(this, arguments);
+    };
+    s.counts = counts;
+    s.defCount = Object.keys(defs).length;
+    return s;
+}
+
+var PASS_BUILDINGS = [['IronMine', true], ['CoalMine', true], ['Bakery', false]];
+
+t.test('buildingBuffCandidates inside a pass equals the result outside one', function () {
+    var s = countedWorld();
+    var outside = PASS_BUILDINGS.map(function (b) { return plain(s.buffs.buildingBuffCandidates(b[0], b[1])); });
+    var inside = s.S.kernel.hostRead.pass(function () {
+        return PASS_BUILDINGS.map(function (b) { return plain(s.buffs.buildingBuffCandidates(b[0], b[1])); });
+    });
+    assert.deepStrictEqual(inside, outside);
+    assert.ok(outside[0].length > 0);
+});
+
+t.test('in one pass, candidates for three buildings read each definition and the star menu once', function () {
+    var s = countedWorld();
+    s.S.kernel.hostRead.pass(function () {
+        PASS_BUILDINGS.forEach(function (b) { s.buffs.buildingBuffCandidates(b[0], b[1]); });
+        s.buffs.buildingBuffCandidates('IronMine', true);
+    });
+    assert.ok(s.counts.targetDesc <= s.defCount, 'targetDesc ' + s.counts.targetDesc);
+    assert.strictEqual(s.counts.menu, 1);
+    Object.keys(s.counts.group).forEach(function (k) {
+        assert.strictEqual(s.counts.group[k], 1, k);
+    });
+    assert.ok(Object.keys(s.counts.group).length > 0);
+});
+
+t.test('outside a pass every candidate call reads the definitions again', function () {
+    var s = countedWorld();
+    s.buffs.buildingBuffCandidates('IronMine', true);
+    var first = s.counts.targetDesc;
+    s.buffs.buildingBuffCandidates('IronMine', true);
+    assert.strictEqual(first, s.defCount);
+    assert.strictEqual(s.counts.targetDesc, 2 * first);
+    assert.ok(s.counts.menu >= 2);
+    assert.ok(s.counts.group['Mines|IronMine'] >= 2);
+});
+
+t.test('a candidate cannot change the shared target table of a pass', function () {
+    var s = countedWorld();
+    s.S.kernel.hostRead.pass(function () {
+        function byName(list) {
+            return list.filter(function (e) { return e.name === 'ByName'; })[0];
+        }
+        byName(s.buffs.buildingBuffCandidates('IronMine', true)).targets.push('Other');
+        var again = byName(s.buffs.buildingBuffCandidates('IronMine', true));
+        assert.deepStrictEqual(plain(again.targets), ['Bakery', 'IronMine']);
+    });
+});
+
+// ---- the star-menu member is read once per read ----------------------------------
+
+t.test('stock reads the available-buffs member once, and a missing member is unreadable', function () {
+    var s = setup({ buffs: INV });
+    var player = s.H.host.game.gi.mCurrentPlayer;
+    var reads = 0;
+    var menu = player.getAvailableBuffs_vector;
+    Object.defineProperty(player, 'getAvailableBuffs_vector', {
+        configurable: true,
+        get: function () { reads++; return menu; }
+    });
+    assert.strictEqual(s.buffs.stock('GeneralSpeedBuff_A', ''), 5);
+    assert.strictEqual(reads, 1);
+    delete player.getAvailableBuffs_vector;
+    assert.strictEqual(s.buffs.stock('GeneralSpeedBuff_A', ''), null);
+});
+
+// ---- one consistent read per call and unknown counts -----------------------------
+
+// A hand-made entry bound to a resource, for map and population entries.
+function rawBound(type, resource, amount) {
+    var e = rawEntry(type, amount);
+    e.GetResourceName_string = function () { return resource; };
+    return e;
+}
+
+// Wraps the star menu so every read is counted.
+function countMenu(s) {
+    var player = s.H.host.game.gi.mCurrentPlayer;
+    var menu = player.getAvailableBuffs_vector;
+    var c = { n: 0 };
+    player.getAvailableBuffs_vector = function () { c.n++; return menu.apply(this, arguments); };
+    return c;
+}
+
+t.test('a flip during buildingBuffCandidates gives one consistent read', function () {
+    var s = setup({ buffs: [], buffDefs: { A: bdef(0, 'Workyard'), B: bdef(0, 'Workyard') } });
+    var reads = 0;
+    var flipped = false;
+    var a = rawEntry('A', 3);
+    a.GetType = function () { return flipped ? undefined : 'A'; };
+    var items = [a, rawEntry('B', 2)];
+    // Entry 0's type is unreadable on every second read of the menu.
+    s.H.host.game.gi.mCurrentPlayer.getAvailableBuffs_vector = function () {
+        reads++;
+        flipped = reads % 2 === 0;
+        return items;
+    };
+    var sawNull = false;
+    var sawNumber = false;
+    for (var k = 0; k < 6; k++) {
+        var list = s.buffs.buildingBuffCandidates('IronMine', true);
+        assert.strictEqual(list.length, 2);
+        var nulls = list.filter(function (e) { return e.amount === null; }).length;
+        var nums = list.filter(function (e) { return typeof e.amount === 'number'; }).length;
+        assert.ok(nulls === list.length || nums === list.length, 'call ' + k + ' mixed');
+        if (nulls) sawNull = true;
+        if (nums) sawNumber = true;
+    }
+    assert.ok(sawNull && sawNumber);
+});
+
+t.test('buildingBuffCandidates reads the star menu once per call outside a pass', function () {
+    var s = countedWorld();
+    s.buffs.buildingBuffCandidates('IronMine', true);
+    assert.strictEqual(s.counts.menu, 1);
+    s.buffs.buildingBuffCandidates('CoalMine', true);
+    assert.strictEqual(s.counts.menu, 2);
+    assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
+});
+
+t.test('speedBuffs reads the star menu once per call outside a pass', function () {
+    var s = setup({ buffs: INV, buffDefs: { GeneralSpeedBuff_A: {}, GeneralSpeedBuff_B: {} } });
+    var c = countMenu(s);
+    var list = s.buffs.speedBuffs();
+    assert.strictEqual(list.length, 2);
+    assert.strictEqual(c.n, 1);
+    s.buffs.speedBuffs();
+    assert.strictEqual(c.n, 2);
+    assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
+});
+
+t.test('speedBuffs amounts are null while the stock is unreadable', function () {
+    var s = setup({ buffs: [], buffDefs: { GeneralSpeedBuff_A: {} } });
+    rawMenu(s, [rawEntry('GeneralSpeedBuff_A', undefined)]);
+    assert.strictEqual(s.buffs.speedBuffs()[0].amount, null);
+});
+
+t.test('mapCounts is null on an unreadable menu, a bad map entry or an unreadable type', function () {
+    var s = setup({ buffs: [{ type: 'Adventure', resource: 'AdvA', amount: 2 }] });
+    breakStock(s);
+    assert.strictEqual(s.buffs.mapCounts(), null);
+    rawMenu(s, [rawBound('Adventure', 'AdvA', 2), rawBound('Adventure', 'AdvB', undefined)]);
+    assert.strictEqual(s.buffs.mapCounts(), null);
+    var broken = rawEntry('X', 1);
+    broken.GetType = function () { throw new Error('boom'); };
+    rawMenu(s, [rawBound('Adventure', 'AdvA', 2), broken]);
+    assert.strictEqual(s.buffs.mapCounts(), null);
+});
+
+t.test('mapCounts keeps the counts beside a bad entry of another type', function () {
+    var s = setup({ buffs: [] });
+    rawMenu(s, [rawBound('Adventure', 'AdvA', 2), rawEntry('B', 'x')]);
+    assert.deepStrictEqual(plain(s.buffs.mapCounts()), { AdvA: 2 });
+});
+
+t.test('inventory items carry the bad flag', function () {
+    var s = setup({ buffs: [] });
+    rawMenu(s, [rawEntry('A', 3), rawEntry('B', 'x')]);
+    var inv = s.buffs.inventory();
+    assert.strictEqual(inv[0].bad, false);
+    assert.strictEqual(inv[1].bad, true);
+});
+
+t.test('populationStock is null while a population entry is bad', function () {
+    var s = setup({ buffs: [] });
+    var res = s.S.core.resources.POPULATION;
+    rawMenu(s, [rawBound('AddResource', res, 20), rawBound('AddResource', res, undefined)]);
+    assert.strictEqual(s.buffs.populationStock(), null);
+    rawMenu(s, [rawBound('AddResource', res, 20), rawEntry('B', 'x')]);
+    assert.deepStrictEqual(plain(s.buffs.populationStock()), { total: 20, largest: 20 });
+});
+
+t.test('buildingBuffMatch equals the candidate scan for every name', function () {
+    var s = setup({ buffs: [{ type: 'ByName', amount: 2 }], buffDefs: BDEFS });
+    withGroups(s);
+    var cases = [['IronMine', true], ['CoalMine', true], ['CoalMine', false], ['Bakery', false]];
+    var all = Object.keys(BDEFS).concat(['Missing']);
+    cases.forEach(function (c) {
+        var offered = names(s.buffs.buildingBuffs(c[0], c[1]));
+        all.forEach(function (nm) {
+            assert.strictEqual(s.buffs.buildingBuffMatch(nm, c[0], c[1]), offered.indexOf(nm) !== -1,
+                nm + ' / ' + c[0] + ' / ' + c[1]);
+        });
+    });
+});
+
+t.test('buildingBuffMatch reads only the asked definition', function () {
+    var s = countedWorld();
+    assert.strictEqual(s.buffs.buildingBuffMatch('ByGroup', 'IronMine', true), true);
+    assert.ok(s.counts.targetDesc <= 1, 'targetDesc ' + s.counts.targetDesc);
+    assert.strictEqual(s.counts.menu, 0);
+});
+
+t.test('building precheck and check read live after a pass', function () {
+    var s = mineActing(2);
+    var c = countMenu(s);
+    s.S.kernel.hostRead.pass(function () {
+        assert.strictEqual(s.buffs.buildingBuffs('IronMine', true).length, 1);
+        assert.strictEqual(s.buffs.stock('MineBuff', ''), 2);
+    });
+    s.stockEntry.amount = 0;
+    var def = s.buffs.building('MineBuff', 12, 'IronMine', true);
+    var before = c.n;
+    assert.strictEqual(def.precheck(), 'no buff in stock');
+    assert.ok(c.n > before, 'precheck read the menu');
+    s.stockEntry.amount = 2;
+    assert.strictEqual(def.check(), false);
+    s.mine.productionBuff = {};
+    assert.strictEqual(def.check(), true);
 });

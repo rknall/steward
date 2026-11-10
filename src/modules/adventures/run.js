@@ -101,10 +101,13 @@
     // Maps of `adventure` the player can run: star-menu stock plus one for an
     // own adventure already open. `pass` caches both reads, so a menu pass that
     // asks for every template reads the star menu and the open adventures once.
+    // Null while the star menu cannot be read: a null read is cached too, so one
+    // pass does not ask the host again for each template.
     function available(adventure, pass) {
         pass = pass || {};
-        if (!pass.maps) pass.maps = S.core.buffs.mapCounts();
+        if (pass.maps === undefined) pass.maps = S.core.buffs.mapCounts();
         if (!pass.open) pass.open = S.core.adventures.ownOpen();
+        if (pass.maps === null) return null;
         return (pass.maps[adventure] || 0) + (pass.open.indexOf(adventure) !== -1 ? 1 : 0);
     }
 
@@ -287,6 +290,10 @@
             return null;
         }
         var maps = available(rec.adventure);
+        if (maps === null) {
+            notify('The star menu cannot be read right now. Try again in a moment.');
+            return null;
+        }
         var advLabel = S.core.adventures.label(rec.adventure) || rec.adventure;
         if (maps < 1) {
             notify('No ' + advLabel + ' map in the star menu.');

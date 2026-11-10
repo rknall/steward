@@ -473,3 +473,36 @@ t.test('the per-explorer overrides field wraps so its button sits under the labe
     });
     t.assert.ok(hit);
 });
+
+// ---- deferred portrait redraw ------------------------------------------------
+
+t.test('a portrait the host had not decoded is redrawn once after PORTRAIT_RETRY_MS', function () {
+    var timers = [];
+    var H = harness.boot({
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    mount(H, [explorer(H, { name: 'bee', uid: 'e1', iconID: 'icon_dec' })]);
+    var decoded = false;
+    H.ctx.getImageTag = function () { return decoded ? '<img src="x">' : '<span ph></span>'; };
+    timers.length = 0;
+    var $main = renderLive(H);
+    t.assert.ok(rowsOf($main).eq(0).find('td').eq(0).html().indexOf('<span ph></span>') === 0);
+    t.assert.strictEqual(timers.length, 1);
+    t.assert.strictEqual(timers[0].ms, H.Steward.kernel.TIMEOUTS.PORTRAIT_RETRY_MS);
+    decoded = true;
+    timers[0].fn();
+    t.assert.ok(rowsOf($main).eq(0).find('td').eq(0).html().indexOf('<img') === 0);
+    t.assert.strictEqual(timers.length, 1, 'no further redraw once the portrait is real');
+});
+
+t.test('a render whose portraits are all real schedules no redraw', function () {
+    var timers = [];
+    var H = harness.boot({
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    mount(H, [explorer(H, { name: 'bee', uid: 'e1', iconID: 'icon_ok' })]);
+    H.ctx.getImageTag = function () { return '<img src="x">'; };
+    timers.length = 0;
+    renderLive(H);
+    t.assert.strictEqual(timers.length, 0);
+});

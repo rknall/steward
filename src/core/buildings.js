@@ -7,13 +7,16 @@
  * Buff eligibility: buffState reads every raw fact, buffBlock turns it into
  * null (eligible) or the first reason a production buff must not be applied.
  *
- * Cache: per scheduler tick, cleared at every tick start. Modules that mutate
- * the building set (place, destroy, upgrade) call invalidate() to force a
- * re-read in the same tick.
+ * Cache: the snapshot behind list, byPredicate, listMines and readable is read
+ * on first use and kept until invalidate(). Nothing clears it per tick, so a
+ * caller that needs the current set invalidates first (the action defs do).
+ * byName and byGrid read the host directly; inside a host-read pass byName
+ * answers from one name index of the zone.
  */
 
 (function (S) {
 
+    // Inside a read pass byName scans the zone once for all names.
     var snapshot = null;     // cached array per tick
     var lastGapLog = {};     // last logged name-index gap per building name
 
@@ -183,6 +186,32 @@
         return out;
     }
 
+    // Buildings of the zone named targetName. Inside a read pass byName scans
+    // the zone once for all names and answers from that index; outside a pass
+    // it filters a fresh read, so a caller without a pass sees no memo.
+    function sameNamed(z, targetName) {
+        if (!S.kernel.hostRead.inPass()) {
+            var all = readAllFromZone(z);
+            var out = [];
+            for (var i = 0; i < all.length; i++) {
+                if (name(all[i]) === targetName) out.push(all[i]);
+            }
+            return out;
+        }
+        var index = S.kernel.hostRead.cached('buildings.nameIndex', function () {
+            var map = {};
+            var src = readAllFromZone(z);
+            for (var j = 0; j < src.length; j++) {
+                var n = name(src[j]);
+                if (!n) continue;
+                if (!Object.prototype.hasOwnProperty.call(map, n)) map[n] = [];
+                map[n].push(src[j]);
+            }
+            return map;
+        });
+        return Object.prototype.hasOwnProperty.call(index, targetName) ? index[targetName] : [];
+    }
+
     function byName(targetName, opts) {
         opts = opts || {};
         // Fast path: ask the host's named lookup, then merge in the building
@@ -212,11 +241,10 @@
                     var hg = grid(hits[h]);
                     if (hg !== null) seen[hg] = true;
                 }
-                var all = readAllFromZone(z);
+                var same = sameNamed(z, targetName);
                 var extras = 0;
-                for (var k = 0; k < all.length; k++) {
-                    var b = all[k];
-                    if (name(b) !== targetName) continue;
+                for (var k = 0; k < same.length; k++) {
+                    var b = same[k];
                     var bg = grid(b);
                     if (bg !== null) {
                         if (Object.prototype.hasOwnProperty.call(seen, bg)) continue;

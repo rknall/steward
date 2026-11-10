@@ -7,7 +7,10 @@
  * S.core.actions.attempt. Adventure items (a buff applied to a grid on the
  * island) and the quest targets of a buff are here too. Every reader reports an unreadable host as null, and
  * a def treats null as not observed: an unreadable stock never counts as
- * "the stock dropped".
+ * "the stock dropped". Inside a host-read pass (S.kernel.hostRead) the star
+ * menu and the target table are read once; buildingBuffCandidates and
+ * speedBuffs read them once per call even outside a pass, and the action defs
+ * always read live.
  */
 
 (function (S) {
@@ -49,14 +52,19 @@
     // the player or the menu could not be read, so callers can tell "no buffs"
     // from "unreadable". An item whose type or amount read failed carries
     // bad = true (typeBad when it was the type), so an entry caught mid-update
-    // is not taken for an empty stock.
+    // is not taken for an empty stock. Inside a host-read pass the menu is
+    // read once and the list is shared, so no caller may change it or its
+    // items.
     function readEntries() {
+        return S.kernel.hostRead.cached('buffs.readEntries', readEntriesNow);
+    }
+
+    function readEntriesNow() {
         try {
-            if (typeof game === 'undefined' || !game.gi || !game.gi.mCurrentPlayer ||
-                typeof game.gi.mCurrentPlayer.getAvailableBuffs_vector !== 'function') {
-                return null;
-            }
-            var vec = game.gi.mCurrentPlayer.getAvailableBuffs_vector();
+            if (typeof game === 'undefined' || !game.gi || !game.gi.mCurrentPlayer) return null;
+            // One read of the member: the bridge can show it as a function and
+            // then as undefined on the next read.
+            var vec = S.kernel.hostRead.call(game.gi.mCurrentPlayer, 'getAvailableBuffs_vector');
             if (!vec) return null;
             var out = [];
             var n = vec.length || 0;
@@ -90,7 +98,9 @@
         for (var i = 0; i < raw.length; i++) {
             var key = '';
             try { key = raw[i].uid.toKeyString(); } catch (e) { /* leave default */ }
-            out.push({ type: raw[i].type, resource: raw[i].resource, amount: raw[i].amount, uid: key });
+            // bad is passed on, so a consumer never takes an entry caught
+            // mid-update for a real amount.
+            out.push({ type: raw[i].type, resource: raw[i].resource, amount: raw[i].amount, uid: key, bad: raw[i].bad });
         }
         return out;
     }
@@ -158,26 +168,30 @@
     }
 
     // Plain buffs only: entries bound to a resource are a different stock.
-    // 0 when the menu cannot be read.
+    // A number, or null when the menu or an entry that may be this stock
+    // cannot be read, so a view can show unknown instead of an empty stock.
     function amount(type) {
-        var n = stock(type, '');
-        return typeof n === 'number' ? n : 0;
+        return stock(type, '');
     }
 
     // Adventure maps per adventure name. Runs on the menu's status tick, so
-    // it stays silent while the game is not loaded.
+    // it stays silent ({}) while the game is not loaded. null means the menu
+    // or an entry that may be a map cannot be read, never "no maps".
     function mapCounts() {
         try {
             if (typeof game === 'undefined' || !game.gi || !game.gi.mCurrentPlayer) return {};
         } catch (e) {
             return {};
         }
+        var raw = readEntries();
+        if (!raw) return null;
         var out = {};
-        var inv = inventory();
-        for (var i = 0; i < inv.length; i++) {
-            if (inv[i].type !== ADVENTURE_MAP_TYPE || !inv[i].resource) continue;
-            var name = inv[i].resource;
-            out[name] = (out[name] || 0) + (inv[i].amount || 0);
+        for (var i = 0; i < raw.length; i++) {
+            // The same unreadable rule as stock() for the map type.
+            if (raw[i].bad && (raw[i].typeBad || raw[i].type === ADVENTURE_MAP_TYPE)) return null;
+            if (raw[i].type !== ADVENTURE_MAP_TYPE || !raw[i].resource) continue;
+            var name = raw[i].resource;
+            out[name] = (out[name] || 0) + (raw[i].amount || 0);
         }
         return out;
     }
@@ -206,7 +220,14 @@
         return t.replace(/^\s+|\s+$/g, '');
     }
 
+    // Every defined or stocked speed buff with its amount (null when
+    // unreadable). One read pass per call, so all amounts come from the same
+    // star-menu read.
     function speedBuffs() {
+        return S.kernel.hostRead.pass(speedBuffsNow);
+    }
+
+    function speedBuffsNow() {
         var names = definedNames(SPEED_BUFF_PREFIX);
         var inv = inventory();
         var i;
@@ -335,12 +356,17 @@
         } catch (e) { return null; }
     }
 
-    // Every buff whose definition targets this building: by name, through the
-    // Workyard token (only when the building is a workyard) or through its
-    // target group. Each entry says whether it is offered and, if not, why.
-    // Inventory types without a definition are skipped, since their targets
-    // cannot be checked.
-    function buildingBuffCandidates(buildingName, workyard) {
+    // Every defined buff and every inventory type with a definition, each as
+    // { name, targets, group }. Inventory types without a definition are left
+    // out, since their targets cannot be checked. Reading the target
+    // description of every definition is the costly part of a candidate
+    // lookup, so inside a host-read pass it is done once for all buildings;
+    // the table is shared and must not be changed.
+    function targetTable() {
+        return S.kernel.hostRead.cached('buffs.targetTable', targetTableNow);
+    }
+
+    function targetTableNow() {
         var names = definedNames('');
         var inv = inventory();
         var i;
@@ -349,14 +375,40 @@
         }
         var out = [];
         for (i = 0; i < names.length; i++) {
-            var nm = names[i];
-            if (!defOf(nm)) continue;
-            var targets = targetsOf(nm);
-            var group = groupOf(nm);
-            var via = null;
-            if (targets.indexOf(buildingName) !== -1) via = 'name';
-            else if (workyard && targets.indexOf(WORKYARD_TARGET) !== -1) via = 'workyard';
-            else if (groupContains(group, buildingName)) via = 'group';
+            if (!defOf(names[i])) continue;
+            out.push({ name: names[i], targets: targetsOf(names[i]), group: groupOf(names[i]) });
+        }
+        return out;
+    }
+
+    // groupContains, shared across the buildings of one host-read pass.
+    function groupHas(group, buildingName) {
+        return S.kernel.hostRead.cached('buffs.groupContains|' + group + '|' + buildingName, function () {
+            return groupContains(group, buildingName);
+        });
+    }
+
+    // How a buff's definition reaches this building: 'name', 'workyard' (the
+    // Workyard token, only for a workyard), 'group' or null. The one place
+    // this rule exists, shared by the candidate scan and the single-name match.
+    function viaOf(targets, group, buildingName, workyard) {
+        if (targets.indexOf(buildingName) !== -1) return 'name';
+        if (workyard && targets.indexOf(WORKYARD_TARGET) !== -1) return 'workyard';
+        if (groupHas(group, buildingName)) return 'group';
+        return null;
+    }
+
+    // Every buff whose definition targets this building: by name, through the
+    // Workyard token (only when the building is a workyard) or through its
+    // target group. Each entry says whether it is offered and, if not, why.
+    function buildingBuffCandidates(buildingName, workyard) {
+        var table = targetTable();
+        var out = [];
+        for (var i = 0; i < table.length; i++) {
+            var nm = table[i].name;
+            var targets = table[i].targets;
+            var group = table[i].group;
+            var via = viaOf(targets, group, buildingName, workyard);
             if (!via) continue;
             var type = buffTypeOf(nm);
             var offered = type === PRODUCTION_BUFF_TYPE;
@@ -365,7 +417,8 @@
                 label:    S.core.locale.res(nm),
                 amount:   amount(nm),
                 buffType: type,
-                targets:  targets,
+                // A copy, so a caller cannot change the shared table.
+                targets:  targets.slice(),
                 group:    group,
                 via:      via,
                 offered:  offered,
@@ -382,9 +435,15 @@
         return out;
     }
 
+    // One star-menu read and one target table per call, also outside a pass,
+    // so every amount of one call comes from the same list.
+    function candidatesOnce(buildingName, workyard) {
+        return S.kernel.hostRead.pass(function () { return buildingBuffCandidates(buildingName, workyard); });
+    }
+
     // The candidates that may be applied to this building.
     function buildingBuffs(buildingName, workyard) {
-        var all = buildingBuffCandidates(buildingName, workyard);
+        var all = candidatesOnce(buildingName, workyard);
         var out = [];
         for (var i = 0; i < all.length; i++) {
             if (all[i].offered) out.push(all[i]);
@@ -392,13 +451,13 @@
         return out;
     }
 
-    // Whether this buff is offered for this building.
+    // Whether this buff is offered for this building: the same answer as the
+    // candidate scan for one name, read live, so a queued apply's precheck
+    // costs a handful of host calls instead of a scan of every definition.
     function buildingBuffMatch(name, buildingName, workyard) {
-        var list = buildingBuffs(buildingName, workyard);
-        for (var i = 0; i < list.length; i++) {
-            if (list[i].name === name) return true;
-        }
-        return false;
+        if (!defOf(name)) return false;
+        return viaOf(targetsOf(name), groupOf(name), buildingName, workyard) !== null &&
+            buffTypeOf(name) === PRODUCTION_BUFF_TYPE;
     }
 
     // Applies of one buff name that are in flight (open) and how many have
@@ -512,6 +571,9 @@
         var total = 0;
         var largest = 0;
         for (var i = 0; i < raw.length; i++) {
+            // The same unreadable rule as stock(): an entry that may be a
+            // population buff and could not be read makes the total unknown.
+            if (raw[i].bad && (raw[i].typeBad || raw[i].type === POPULATION_TYPE)) return null;
             if (raw[i].type !== POPULATION_TYPE || (raw[i].resource || '') !== res) continue;
             var a = raw[i].amount || 0;
             total += a;
@@ -616,7 +678,7 @@
         adventureItem: adventureItem,
         targetsOf:     targetsOf,
         buffTypeOf:    buffTypeOf,
-        buildingBuffCandidates: buildingBuffCandidates,
+        buildingBuffCandidates: candidatesOnce,
         buildingBuffs: buildingBuffs,
         buildingBuffMatch: buildingBuffMatch,
         building:      building,

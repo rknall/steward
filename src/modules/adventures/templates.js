@@ -467,10 +467,14 @@
         return null;
     }
 
+    // An amount that is not a number means the star menu could not be read.
+    // It shows as (?) and is not warned about: "none in stock" would be a
+    // claim the host never made.
     function buffOption(b) {
-        var amount = typeof b.amount === 'number' ? b.amount : 0;
-        var label = (b.label || b.name) + ' (' + amount + ')' + (b.effect ? ': ' + b.effect : '');
-        var warn = amount === 0;
+        var known = typeof b.amount === 'number';
+        var amount = known ? b.amount : null;
+        var label = (b.label || b.name) + ' (' + (known ? amount : '?') + ')' + (b.effect ? ': ' + b.effect : '');
+        var warn = known && amount === 0;
         if (warn) label += ' — none in stock';
         return { value: b.name, label: label, amount: amount, warn: warn };
     }
