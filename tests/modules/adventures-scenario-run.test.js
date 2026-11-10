@@ -539,6 +539,19 @@ t.test('Trip: a running quest\'s pick-up not on the map yet holds the trip', fun
     assert.ok(passesUntil(w, 'JumpHome', 60000), 'then it leaves: ' + stepName(w));
 });
 
+t.test('Trip: held and awaited pick-ups are each noted once across repeated passes', function () {
+    var w = atTrip();
+    w.held = [{ name: 'buffad_collectible_Other', quest: 'qx', mode: 2, zoneId: ZONE }];
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    function count(re) {
+        return logLines(w).filter(function (l) { return re.test(l); }).length;
+    }
+    assert.strictEqual(count(/waiting for quest qx to be running/), 1, logLines(w).join('\n'));
+    assert.strictEqual(count(/waiting for it to appear on the map/), 1, logLines(w).join('\n'));
+});
+
 t.test('Trip: leaves once the awaited condition is met', function () {
     var w = atTrip();
     w.awaited = [{ name: HAMMER, zoneId: ZONE }];

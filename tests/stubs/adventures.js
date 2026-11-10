@@ -22,7 +22,9 @@
  *
  * Set w.awaited to a list of { name, zoneId } to name pick-ups a running quest
  * still counts that are not on the map yet; the world's pickups.targets lists
- * them (as collectibles) when asked with opts.awaited.
+ * them (as collectibles) when asked with opts.awaited. Set w.held to a list of
+ * { name, quest, mode, zoneId } for pick-ups whose quest is not running yet;
+ * they are listed when asked with opts.held.
  *
  * Set w.campsUnreadable = true to make the building list of the viewed zone
  * read as unreadable (core.buildings.readable() false), so no camp counts as
@@ -122,6 +124,11 @@ function patchCore(w) {
         if (opts && Array.isArray(opts.awaited) && Array.isArray(w.awaited)) {
             w.awaited.forEach(function (a) {
                 opts.awaited.push({ name: a.name, kind: 'collectible', zoneId: a.zoneId });
+            });
+        }
+        if (opts && Array.isArray(opts.held) && Array.isArray(w.held)) {
+            w.held.forEach(function (h) {
+                opts.held.push({ name: h.name, kind: 'collectible', zoneId: h.zoneId, quest: h.quest, mode: h.mode });
             });
         }
         return list;
@@ -301,6 +308,7 @@ function world(o) {
         blocked: {},
         pickups: [],
         awaited: [],
+        held: [],
         orders: [], raises: [], unloads: [], buffs: [], claims: [], reads: [],
         zoneSends: [], buffActions: [], productionOrders: [], closes: [],
         pending: [], entries: [], ghosts: [],

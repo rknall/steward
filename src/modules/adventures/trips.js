@@ -102,13 +102,16 @@
     }
 
     // Logs a fact once per run, step, trip and key instead of on every pass.
-    // Memory only: after a reload it is logged once more.
+    // Memory only: after a reload it is logged once more. There is one slot,
+    // so a pass with several facts passes them as one list under one key;
+    // separate calls would overwrite each other and log on every pass.
     function noteOnce(r, key, text) {
         var rs = st().current();
         var tag = r.id + ':' + r.step + ':' + r.trip + ':' + key;
         if (rs.tripNote === tag) return;
         rs.tripNote = tag;
-        log(text);
+        var lines = typeof text === 'string' ? [text] : text;
+        for (var i = 0; i < lines.length; i++) log(lines[i]);
     }
 
     // ---- Marks --------------------------------------------------------------
@@ -631,11 +634,17 @@
             return;
         }
         st().current().tripSeenAt = now();
-        if (held.length) noteOnce(r, 'held:' + heldText(held), wt().pickupText(held) + ': ' + heldText(held));
-        if (awaited.length) {
-            noteOnce(r, 'awaited:' + wt().pickupText(awaited),
-                wt().pickupText(awaited) + ': waiting for it to appear on the map');
+        var noteKey = [];
+        var notes = [];
+        if (held.length) {
+            noteKey.push('held:' + heldText(held));
+            notes.push(wt().pickupText(held) + ': ' + heldText(held));
         }
+        if (awaited.length) {
+            noteKey.push('awaited:' + wt().pickupText(awaited));
+            notes.push(wt().pickupText(awaited) + ': waiting for it to appear on the map');
+        }
+        if (notes.length) noteOnce(r, noteKey.join('|'), notes);
         var parts = [];
         if (un.length) parts.push(un.length + ' unread');
         if (pend.length) parts.push(pend.length + ' to claim');
@@ -658,7 +667,7 @@
         APPLY_QUIET_MS:   APPLY_QUIET_MS,
         TRIP_MAX_MS:      TRIP_MAX_MS,
         QUEST_SETTLE_MS:  QUEST_SETTLE_MS,
-        produce:         produce,
+        produce:          produce,
         apply:            apply,
         trip:             trip,
         applyMark:        applyMark,
