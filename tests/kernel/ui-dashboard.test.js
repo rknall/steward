@@ -320,3 +320,44 @@ t.test('an already visible modal binds no shown handler', function () {
     assert.strictEqual(shownCount(false), 1);
     assert.strictEqual(shownCount(true), 0);
 });
+
+// ---- Read pass --------------------------------------------------------------
+
+t.test('a module tab draws its parts inside one read pass, in both layouts', function () {
+    [false, true].forEach(function (compact) {
+        var s = setup();
+        var seen = {};
+        function rec(k) { seen[k] = s.S.kernel.hostRead.inPass(); }
+        if (compact) jq.setWindowHeight(640);
+        mod(s, 'ex', 'specialists', {
+            summary: function () { rec('summary'); return 'x'; },
+            side: function () { rec('side'); },
+            render: function () { rec('render'); }
+        });
+        s.ui.closeDashboard(false);
+        open(s, 'specialists');
+        assert.strictEqual(seen.summary, compact ? true : undefined);
+        assert.strictEqual(seen.side, compact ? undefined : true);
+        assert.strictEqual(seen.render, true);
+        assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
+    });
+});
+
+t.test('tiles draw inside a read pass on the Overview', function () {
+    var s = setup();
+    var seen = null;
+    mod(s, 'ex', 'specialists', {
+        tiles: function () { seen = s.S.kernel.hostRead.inPass(); return one(); }
+    });
+    open(s);
+    assert.strictEqual(seen, true);
+    assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
+});
+
+t.test('a part that throws leaves the read pass closed', function () {
+    var s = setup();
+    mod(s, 'ex', 'specialists', { render: function () { throw new Error('boom'); } });
+    var $body = open(s, 'specialists');
+    assert.strictEqual($body.find('.steward-empty-title').text(), 'Render failed');
+    assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
+});

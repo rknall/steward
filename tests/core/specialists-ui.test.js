@@ -35,6 +35,41 @@ t.test('portraitTag is empty without the global, the icon id or a readable gette
     t.assert.strictEqual(b.c.portraitTag(thrower), '', 'getIconID throws');
 });
 
+t.test('portraitTag caches a real image per icon and size', function () {
+    var b = boot();
+    var calls = 0;
+    b.H.ctx.getImageTag = function (icon, size) { calls++; return '<img ' + icon + ' ' + size + '>'; };
+    var spec = specStubs.spec({ iconID: 'icon_cache' });
+    b.c.portraitTag(spec, '20px');
+    b.c.portraitTag(spec, '20px');
+    t.assert.strictEqual(calls, 1, 'same icon and size is one host call');
+    b.c.portraitTag(spec, '32px');
+    t.assert.strictEqual(calls, 2, 'other size is a second host call');
+});
+
+t.test('portraitTag does not cache the placeholder and marks the pass', function () {
+    var b = boot();
+    var calls = 0;
+    b.H.ctx.getImageTag = function (icon, size) {
+        calls++;
+        return calls === 1 ? '<span ph></span>' : '<img ' + icon + ' ' + size + '>';
+    };
+    var spec = specStubs.spec({ iconID: 'icon_ph' });
+    var pass = {};
+    t.assert.strictEqual(b.c.portraitTag(spec, '20px', pass), '<span ph></span>');
+    t.assert.strictEqual(pass.portraitMissed, true, 'placeholder marks the pass');
+    t.assert.strictEqual(b.c.portraitTag(spec, '20px', pass), '<img icon_ph 20px>');
+    t.assert.strictEqual(b.c.portraitTag(spec, '20px', pass), '<img icon_ph 20px>');
+    t.assert.strictEqual(calls, 2, 'third call is a cache hit');
+});
+
+t.test('portraitTag without a pass argument still works', function () {
+    var b = boot();
+    b.H.ctx.getImageTag = function () { return '<span ph></span>'; };
+    var spec = specStubs.spec({ iconID: 'icon_np' });
+    t.assert.strictEqual(b.c.portraitTag(spec), '<span ph></span>');
+});
+
 t.test('compareByName orders mixed-case names and treats a nameless spec as empty', function () {
     var b = boot();
     var names = ['bravo', 'Alpha', 'charlie', 'Bravo2'];

@@ -93,7 +93,7 @@ Why: per-profile separation (one settings file per game account, set in host ind
 
 ## Rule 3: respect the cache contract
 
-`Steward.core.buildings.list()` is cached per scheduler tick. The cache is cleared at the start of every tick — within a single tick, repeated calls are cheap and consistent.
+`Steward.core.buildings.list()` keeps its snapshot until `Steward.core.buildings.invalidate()` is called. Nothing clears it at the start of a tick, so call `invalidate()` before a read whose freshness matters. `byName` and `byGrid` read the host and are not served from that snapshot.
 
 If your module **mutates the building set** (places a mine, destroys a depleted deposit, upgrades a building), call:
 
@@ -101,7 +101,7 @@ If your module **mutates the building set** (places a mine, destroys a depleted 
 Steward.core.buildings.invalidate();
 ```
 
-Otherwise subsequent reads in the same tick will return the stale snapshot.
+Otherwise subsequent reads will return the stale snapshot.
 
 You don't need to invalidate after server packets that *trigger* an asynchronous mutation — invalidation is for when you've taken an action whose effect you need to see immediately. Most modules never need this.
 
@@ -124,7 +124,25 @@ if (Steward.core.specialists.dropped() !== before) return; // count is not relia
 
 ## Rule 3.6: specialist names are plain text
 
-`Steward.core.specialists.name(spec)` returns plain text, so never strip it again. Escape it before it reaches `html()` (`h.escape`, as in `{ html }` table cells). Identify specialists by `uniqueIdKey` and not by name. Read name-keyed settings with `namedOverride(map, name)`, which also accepts keys saved with entities or markup. Table views take the portrait from `portraitTag(spec)`, sort with `compareByName`, and read a geologist's searched deposit index with `searchingIndex(spec)` instead of reading `GetTask()` themselves.
+`Steward.core.specialists.name(spec)` returns plain text, so never strip it again. Escape it before it reaches `html()` (`h.escape`, as in `{ html }` table cells). Identify specialists by `uniqueIdKey` and not by name. Read name-keyed settings with `namedOverride(map, name)`, which also accepts keys saved with entities or markup. Table views take the portrait from `portraitTag(spec)`, sort with `compareByName`, and read a geologist's searched deposit index with `searchingIndex(spec)` instead of reading `GetTask()` themselves. `portraitTag(spec)` takes an optional pass object as its third argument (`portraitTag(spec, size, pass)`), caches real images per icon and size, and sets `pass.portraitMissed` for a placeholder. A table view answers that with one `h.redrawOnce($holder, redraw, S.kernel.TIMEOUTS.PORTRAIT_RETRY_MS)`.
+
+## Rule 3.7: read the host once, inside a pass
+
+A host member can read as a function and then as undefined, and a view that walks many rows reads the same host lists again and again. `Steward.kernel.hostRead` covers both:
+
+- `hostRead.call(o, m)` reads the member into a local and invokes it on its owner. Use it instead of `o.M ? o.M() : x`. It never catches, so keep your own try.
+- `hostRead.pass(fn)` opens a read pass around a view model, a window render, a dashboard tab draw or a module's planning pass. Inside it the memoizing readers answer from one memo; outside a pass they read fresh, exactly as before. A nested pass joins the open one. A module status that must agree across the parts of one draw memoizes it with `hostRead.cached`.
+- Never wrap an action def, a send or `actions.attempt` in a pass. They run later from the kernel queue and their verification reads must stay live.
+- A cached value is shared by every reader in the pass, so treat it as read-only.
+- The memoizing readers are `buildings.byName` (the name index) and the `buffs` entries, star menu, target table and group-contains reads.
+- `buffs.buildingBuffCandidates` and `buffs.speedBuffs` read the star menu once per call even outside a pass, so the amounts of one call agree.
+- `buffs.amount`, a candidate's or speed buff's `amount`, `mapCounts` and `populationStock` are null when unreadable. A view shows `?`, never 0.
+
+```js
+var model = Steward.kernel.hostRead.pass(function () {
+    return buildViewModel();   // many rows, one host read per list
+});
+```
 
 ## Rule 4: use the locale wrapper
 

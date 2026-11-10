@@ -161,6 +161,7 @@ zone.mStreetDataMap.getDeposits_vectorByType('IronOre');
 // logs; the cause (host garbage collection) is not established.
 // A member can read as a function and then as undefined on the next read, so a
 // typeof guard does not make the call safe; it can still throw "is not a function".
+// Read the member once into a local, as Steward.kernel.hostRead.call(o, 'Member') does.
 ```
 
 ### Building accessors
@@ -246,6 +247,8 @@ createSwitch('id', true, function () { /* on change */ });
 getImageTag('Coin', '24px');
 assets.GetResourceIcon('Coin');
 ```
+
+The host answers synchronously, with no load event. It returns a grey `<span>` placeholder when the bitmap is not decoded yet and a Base64 `<img>` otherwise. Steward caches only the `<img>` and redraws a table view once a second later when it got a placeholder.
 
 ## Star menu and adventures
 

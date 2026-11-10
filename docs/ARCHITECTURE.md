@@ -110,6 +110,8 @@ The numeric prefixes inside `src/kernel/` matter: `00_namespace.js` runs before 
 
 The kernel UI is five files that rely on that order. `89_ui_style.js` loads first: it creates `Steward.kernel.ui` and `ui.views`, and owns the colour tokens, the layout numbers, the generated stylesheet and `ensureStyle`. `90_ui_shell.js` owns the native menu, pause, the settings buffer with its change counting, the screen lifecycle (open, footer, Save, Close) and edit guards. `91_ui_helpers.js` holds the helper set modules draw with (`Steward.kernel.ui.helpers`) plus `settingsParse` and `settingsShow`. `92_ui_dashboard.js` registers the dashboard view and `93_ui_settings.js` the Settings view. A view is looked up only when a screen opens, so no file needs a later one at load time. The dashboard's Overview tab is built by the dashboard itself from the registry (tiles, adventure state, build row); it is not a module tab.
 
+`36_hostread.js` holds `Steward.kernel.hostRead`: the single member read (`call`) and the read-pass memo (`pass`, `cached`, `inPass`). It sits after `35_host.js` and before `40_registry.js`, needs only the namespace, and core readers call it at run time, so no later file is needed at load time.
+
 `16_text.js` holds the host-string cleaner and has no kernel dependencies, so it sits before everything that reads names.
 
 ## Lifecycle

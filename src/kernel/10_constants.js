@@ -24,7 +24,8 @@
         STATUS_UPDATE_MS:        5000,     // cadence for refreshing the in-menu status label
         SETTINGS_SAVE_DEBOUNCE_MS: 500,    // throttle disk writes when many writes hit at once
         LOG_ROTATE_RETRY_MS:     60000,    // delay before a failed log rotation is tried again
-        TICK_INTERVAL_MIN_MS:    10000     // lowest tick the Settings screen accepts
+        TICK_INTERVAL_MIN_MS:    10000,    // lowest tick the Settings screen accepts
+        PORTRAIT_RETRY_MS:       1000      // one redraw of a table whose portraits were not decoded yet
     };
 
     S.kernel.LIMITS = {

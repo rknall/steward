@@ -19,6 +19,9 @@
  * go through updateDeposit, which preserves every schema field (build,
  * upgrade, targetLevel, pause, buff, refill) so later phase landings don't
  * have to migrate user settings.
+ *
+ * The tab is drawn in one host-read pass, so every option and status line of
+ * a draw shows the same stock read, and an unreadable stock shows `?`.
  */
 
 (function (S) {
@@ -392,7 +395,7 @@
         var options = [{ label: 'None', value: '' }];
         var offered = false;
         for (var i = 0; i < list.length; i++) {
-            options.push({ label: list[i].label + ' (' + list[i].amount + ')', value: list[i].name });
+            options.push({ label: list[i].label + ' (' + (typeof list[i].amount === 'number' ? list[i].amount : '?') + ')', value: list[i].name });
             if (list[i].name === chosen) offered = true;
         }
         // Kept selectable so showing the row never rewrites the stored choice.

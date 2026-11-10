@@ -748,3 +748,48 @@ t.test('menu sync rebuilds only when the template set changed', function () {
     assert.strictEqual(menu.sync(), true);
     assert.strictEqual(calls.length, 2);
 });
+
+// ---- unreadable star menu -----------------------------------------------------------
+
+t.test('speedBuffOptions shows ? for an unreadable amount and does not warn', function () {
+    var s = setup();
+    var opts = s.tpl.speedBuffOptions([
+        { name: 'GeneralSpeedBuff_A', label: 'Bronze', amount: null, effect: '' },
+        { name: 'GeneralSpeedBuff_B', label: 'Silver', amount: 0, effect: '' },
+        { name: 'GeneralSpeedBuff_C', label: 'Gold', amount: 4, effect: '' }
+    ], 'SpeedBuffDefault');
+    assert.strictEqual(opts[0].label, 'Bronze (?)');
+    assert.strictEqual(opts[0].amount, null);
+    assert.strictEqual(opts[0].warn, false);
+    assert.strictEqual(opts[1].label, 'Silver (0) — none in stock');
+    assert.strictEqual(opts[1].warn, true);
+    assert.strictEqual(opts[2].label, 'Gold (4)');
+    assert.strictEqual(opts[2].warn, false);
+});
+
+t.test('available is null while the map stock is unreadable and reads it once per pass', function () {
+    var s = runSetup(2);
+    var reads = 0;
+    s.S.core.buffs.mapCounts = function () { reads++; return null; };
+    var pass = {};
+    assert.strictEqual(s.run.available('BlackKnights', pass), null);
+    assert.strictEqual(s.run.available('Other', pass), null);
+    assert.strictEqual(reads, 1);
+    s.S.core.buffs.mapCounts = function () { reads++; return { BlackKnights: 2 }; };
+    assert.strictEqual(s.run.available('BlackKnights', {}), 2);
+});
+
+t.test('a menu label shows ×? while the map stock is unreadable', function () {
+    var s = setup({ buffs: [] });
+    s.tpl.save(record({}), 1000);
+    s.S.core.buffs.mapCounts = function () { return null; };
+    assert.deepStrictEqual(menuLabels(s).slice(8), ['Black Knights ×?']);
+});
+
+t.test('start refuses while the map stock is unreadable', function () {
+    var s = runSetup(2);
+    s.S.core.buffs.mapCounts = function () { return null; };
+    assert.strictEqual(s.run.start(s.id), false);
+    assert.deepStrictEqual(plain(s.alerts), ['Steward: The star menu cannot be read right now. Try again in a moment.']);
+    assert.strictEqual(s.prompts.length, 0);
+});

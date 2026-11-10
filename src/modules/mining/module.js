@@ -397,9 +397,7 @@
         if (name === 'tryRefill')  return tryRefill(info, cfg, ctx);
     }
 
-    function plan() {
-        var s = readSettings();
-        if (!s || !s.enabled) return;
+    function planPass(s) {
         if (!S.core.deposits || !S.core.deposits.types) {
             S.kernel.error('mining', 'core.deposits.types unavailable — bundle order issue?');
             return;
@@ -430,6 +428,15 @@
         if (ctx.queued > 0) {
             S.kernel.log('mining', 'queued', ctx.queued, 'action(s)');
         }
+    }
+
+    // The phases share one read pass, so the star menu, the target table and
+    // the building name index are read once per plan. The queued actions run
+    // later from the kernel queue, outside the pass, and read live.
+    function plan() {
+        var s = readSettings();
+        if (!s || !s.enabled) return;
+        S.kernel.hostRead.pass(function () { planPass(s); });
     }
 
     function boot() {

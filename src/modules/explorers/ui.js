@@ -207,6 +207,8 @@
 
         // Rebuilds only the live card, so a chip click keeps the rest of the tab.
         function draw() {
+            // A portrait the host had not decoded yet is asked for once more a second later.
+            var pass = {};
             var explorers = listExplorers();
             var overrides = (s && s.overrides) || {};
             var rows = [];
@@ -223,7 +225,7 @@
                 if (filter === 'idle' && !isIdle) continue;
                 if (filter === 'ov' && !hasOv) continue;
 
-                var portrait = c.portraitTag(spec);
+                var portrait = c.portraitTag(spec, null, pass);
                 if (portrait) portrait += ' ';
 
                 var $status = h.statusBadge(isIdle, isIdle ? null : c.orders.remaining(spec));
@@ -272,6 +274,7 @@
             }));
             $slot.empty().append($card);
             h.fit();
+            if (pass.portraitMissed) h.redrawOnce($slot, draw, S.kernel.TIMEOUTS.PORTRAIT_RETRY_MS);
         }
 
         draw();

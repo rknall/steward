@@ -334,3 +334,61 @@ t.test('isSelectable is false when the read throws', function () {
     Object.defineProperty(bad, 'mIsSelectable', { get: function () { throw new Error('boom'); } });
     t.assert.strictEqual(H.Steward.core.buildings.isSelectable(bad), false);
 });
+
+// ---- name index in a read pass ----
+
+function nameIndexZone(H, counter) {
+    var z = H.zone.zone();
+    for (var g = 1; g <= 4; g++) z.building(H.zone.building({ name: g % 2 ? 'A' : 'B', grid: g }));
+    H.installZone(z);
+    var sdm = z.zone.mStreetDataMap;
+    var orig = sdm.GetBuildings_vector;
+    sdm.GetBuildings_vector = function () { counter.n++; return orig.apply(sdm, arguments); };
+    sdm.getBuildingsByName_vector = function () { return []; };
+    return z;
+}
+
+t.test('byName in a pass scans the zone once for all names', function () {
+    var H = harness.boot();
+    var counter = { n: 0 };
+    nameIndexZone(H, counter);
+    var B = H.Steward.core.buildings;
+    var outsideA = B.byName('A').length;
+    var outsideB = B.byName('B').length;
+    t.assert.strictEqual(counter.n, 2);
+    counter.n = 0;
+    var inA, inB;
+    H.Steward.kernel.hostRead.pass(function () {
+        inA = B.byName('A');
+        inB = B.byName('B');
+    });
+    t.assert.strictEqual(counter.n, 1);
+    t.assert.strictEqual(inA.length, outsideA);
+    t.assert.strictEqual(inB.length, outsideB);
+});
+
+t.test('byName outside a pass reads the zone on every call', function () {
+    var H = harness.boot();
+    var counter = { n: 0 };
+    nameIndexZone(H, counter);
+    var B = H.Steward.core.buildings;
+    B.byName('A');
+    B.byName('A');
+    t.assert.strictEqual(counter.n, 2);
+});
+
+t.test('byName in a pass still returns a mason only the host index holds', function () {
+    var H = harness.boot();
+    var counter = { n: 0 };
+    var z = nameIndexZone(H, counter);
+    var mason = H.zone.building({ name: 'Mason', grid: 99 });
+    z.zone.mStreetDataMap.getBuildingsByName_vector = function (n) {
+        return n === 'Mason' ? [mason] : [];
+    };
+    var found;
+    H.Steward.kernel.hostRead.pass(function () {
+        found = H.Steward.core.buildings.byName('Mason');
+    });
+    t.assert.strictEqual(found.length, 1);
+    t.assert.strictEqual(found[0].GetGrid(), 99);
+});
