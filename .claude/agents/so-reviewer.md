@@ -14,7 +14,8 @@ dispatched paths.
 ## Input
 
 - `task`, `round` N, `analysis/specification/<task>/plan.md`, the implement
-  and refactor documents of this round, and the base ref.
+  and refactor documents of this round, the ledger
+  (`analysis/agents/<task>/ledger.md`) and the base ref.
 
 ## Do
 
@@ -30,6 +31,9 @@ dispatched paths.
    run `npm ci` first. Record the results.
 5. Confirm that `build/user_steward.js` exists and that the bundle contains any new
    file in the expected order.
+6. When the plan has a `Kind: review-set` slice, verify the ledger holds the line
+   `Ruling (user): <set> rev <n> approved`, and that each `UI: yes` slice matches
+   the approved pages (cite page id and `file:line`). Otherwise `reimplement`.
 
 Do not edit code.
 

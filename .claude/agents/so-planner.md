@@ -33,9 +33,18 @@ Write or rewrite `analysis/specification/<task>/plan.md` (no line limit). It con
    - `Tier:` `haiku` (mechanical), `sonnet` (normal), or `opus` (scheduler, queue,
      lifecycle or state logic, or anything subtle).
    - `Wave:` 1, 2, …. A slice depends only on slices in earlier waves.
-4. **Tests**: which `tests/<area>/*.test.js` files to add or extend (usually a slice
+   - `UI:` `yes|no`. `yes` when the slice changes DOM output, CSS rules or the
+     settings a user sees (typically `src/kernel/89_ui_style.js`,
+     `src/kernel/9*_ui_*.js`, `src/modules/*/{ui,settings,dialog,menu,runmenu}.js`).
+     A `UI: yes` slice names the review-set path it implements.
+4. **Review set**: when the investigation says `UI/UX: considerable`, add a slice
+   `Kind: review-set` with Files `analysis/agents/<task>/design/<task>-mockup.html`,
+   tier sonnet or higher, in a wave before every `UI: yes` slice. Its pages cover
+   each a-d item that applies, with options for the states. Reuse a set the ledger
+   already shows approved unless the plan changes that UI.
+5. **Tests**: which `tests/<area>/*.test.js` files to add or extend (usually a slice
    of their own), using the stubs in `tests/stubs/`.
-5. **Findings ledger**: on a replan, a table with columns finding source,
+6. **Findings ledger**: on a replan, a table with columns finding source,
    finding and where the plan now handles it (slice or "rejected: why").
 
 Rules for `src/` slices: ES5 AIR-safe code only, and file-header style matches

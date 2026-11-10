@@ -1,0 +1,767 @@
+<title>Review Shell Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Review desk: a quiet sidebar of pages on the left, the page under review in the
+   middle, the verdict panel underneath it. Shell chrome only; mockup content gets
+   its own scoped steward look and never inherits these rules. */
+:root {
+  --rv-bg: #f3f4f6;
+  --rv-panel: #ffffff;
+  --rv-ink: #1c2330;
+  --rv-muted: #5b6474;
+  --rv-line: #d8dce3;
+  --rv-accent: #2f5d8a;
+  --rv-accent-ink: #ffffff;
+  --rv-accent-soft: #e3ecf5;
+  --rv-ok: #2c7a4b;
+  --rv-ok-soft: #e1f2e7;
+  --rv-bad: #b23b32;
+  --rv-bad-soft: #f8e3e1;
+  --rv-stale: #8a6413;
+  --rv-stale-soft: #f6ecd4;
+  --rv-code: #eceef2;
+  --rv-font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --rv-mono: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --rv-bg: #12161d;
+    --rv-panel: #1a2029;
+    --rv-ink: #e4e8ee;
+    --rv-muted: #9aa4b4;
+    --rv-line: #2f3845;
+    --rv-accent: #7fb0e0;
+    --rv-accent-ink: #0e1620;
+    --rv-accent-soft: #22344a;
+    --rv-ok: #6cc28f;
+    --rv-ok-soft: #1c3326;
+    --rv-bad: #ec8a80;
+    --rv-bad-soft: #3d2220;
+    --rv-stale: #e0b65c;
+    --rv-stale-soft: #3a3020;
+    --rv-code: #232a35;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --rv-bg: #12161d;
+  --rv-panel: #1a2029;
+  --rv-ink: #e4e8ee;
+  --rv-muted: #9aa4b4;
+  --rv-line: #2f3845;
+  --rv-accent: #7fb0e0;
+  --rv-accent-ink: #0e1620;
+  --rv-accent-soft: #22344a;
+  --rv-ok: #6cc28f;
+  --rv-ok-soft: #1c3326;
+  --rv-bad: #ec8a80;
+  --rv-bad-soft: #3d2220;
+  --rv-stale: #e0b65c;
+  --rv-stale-soft: #3a3020;
+  --rv-code: #232a35;
+  color-scheme: dark;
+}
+/* The published skeleton already has this; repeated so a local preview behaves the same. */
+[hidden] { display: none !important; }
+body { background: var(--rv-bg); color: var(--rv-ink); font-family: var(--rv-font); font-size: 15px; line-height: 1.5; }
+.rv-shell {
+  box-sizing: border-box; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px;
+  max-width: 1320px; margin: 0 auto; padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.rv-shell *, .rv-shell *::before, .rv-shell *::after { box-sizing: border-box; }
+
+/* Sidebar */
+#rv-nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; min-width: 0; }
+#rv-nav-menu > summary { display: none; }
+.rv-nav-head { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--rv-muted); margin: 4px 0 8px; }
+#rv-nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rv-nav-link {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 6px; color: var(--rv-ink); text-decoration: none;
+}
+.rv-nav-link:hover { background: var(--rv-panel); }
+.rv-nav-link[aria-current="page"] { background: var(--rv-accent-soft); font-weight: 600; }
+.rv-nav-num { font-size: 12px; color: var(--rv-muted); font-variant-numeric: tabular-nums; text-align: right; }
+.rv-nav-title { overflow-wrap: anywhere; }
+.rv-badge {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border-radius: 50%; font-size: 12px; font-weight: 700; line-height: 1; border: 1.5px solid var(--rv-line); color: var(--rv-muted);
+}
+.rv-badge[data-status="approve"] { background: var(--rv-ok-soft); border-color: var(--rv-ok); color: var(--rv-ok); }
+.rv-badge[data-status="disapprove"] { background: var(--rv-bad-soft); border-color: var(--rv-bad); color: var(--rv-bad); }
+.rv-badge[data-status="stale"] { background: var(--rv-stale-soft); border-color: var(--rv-stale); color: var(--rv-stale); }
+#rv-progress { margin-top: 14px; font-size: 13px; color: var(--rv-muted); font-variant-numeric: tabular-nums; }
+
+/* Main column */
+#rv-main { min-width: 0; display: grid; gap: 16px; align-content: start; }
+.rv-head { display: grid; gap: 6px; }
+.rv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--rv-muted); }
+#rv-kind {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 4px; background: var(--rv-accent); color: var(--rv-accent-ink);
+}
+#rv-rev { font-variant-numeric: tabular-nums; }
+#rv-title { margin: 0; font-size: 26px; line-height: 1.2; text-wrap: balance; }
+#rv-summary { margin: 0; color: var(--rv-muted); max-width: 70ch; }
+
+#rv-options { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 10px 12px; background: var(--rv-panel); border: 1px solid var(--rv-line); border-radius: 8px; }
+.rv-opt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rv-opt-label { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--rv-muted); }
+.rv-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rv-line); border-radius: 6px; overflow: hidden; }
+.rv-seg button {
+  font: inherit; font-size: 14px; padding: 5px 12px; border: 0; border-right: 1px solid var(--rv-line);
+  background: transparent; color: var(--rv-ink); cursor: pointer;
+}
+.rv-seg button:last-child { border-right: 0; }
+.rv-seg button[aria-pressed="true"] { background: var(--rv-accent); color: var(--rv-accent-ink); }
+
+/* Content area: prose styles reach only direct children of a page section, so a
+   mockup frame (always wrapped in .rv-scroll) keeps the scoped steward look. */
+#rv-content { min-width: 0; }
+#rv-content > section > h2 { font-size: 19px; margin: 18px 0 6px; text-wrap: balance; }
+#rv-content > section > h3 { font-size: 16px; margin: 14px 0 4px; }
+#rv-content > section > p,
+#rv-content > section > ul,
+#rv-content > section > ol { max-width: 72ch; margin: 0 0 10px; }
+#rv-content > section > pre { background: var(--rv-code); padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-family: var(--rv-mono); font-size: 13px; }
+#rv-content > section code { font-family: var(--rv-mono); font-size: .92em; background: var(--rv-code); padding: 0 4px; border-radius: 3px; }
+.rv-scroll { overflow-x: auto; max-width: 100%; margin: 8px 0 14px; }
+
+/* Verdict panel */
+#rv-verdict { display: grid; gap: 10px; padding: 14px; background: var(--rv-panel); border: 1px solid var(--rv-line); border-radius: 8px; }
+#rv-banner { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--rv-stale-soft); color: var(--rv-ink); font-size: 14px; }
+.rv-comment-label { font-size: 13px; font-weight: 600; }
+#rv-comment {
+  width: 100%; min-height: 88px; resize: vertical; font: inherit; padding: 8px 10px;
+  border: 1px solid var(--rv-line); border-radius: 6px; background: var(--rv-bg); color: var(--rv-ink);
+}
+#rv-error { margin: 0; color: var(--rv-bad); font-size: 14px; }
+.rv-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rv-btn {
+  font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--rv-line); background: var(--rv-panel); color: var(--rv-ink);
+}
+.rv-btn:disabled { opacity: .5; cursor: not-allowed; }
+#rv-approve { border-color: var(--rv-ok); color: var(--rv-ok); }
+#rv-approve:not(:disabled):hover { background: var(--rv-ok-soft); }
+#rv-disapprove { border-color: var(--rv-bad); color: var(--rv-bad); }
+#rv-disapprove:not(:disabled):hover { background: var(--rv-bad-soft); }
+.rv-spacer { flex: 1 1 auto; }
+#rv-status { margin: 0; font-size: 14px; color: var(--rv-muted); overflow-wrap: anywhere; }
+#rv-status[data-status="approve"] { color: var(--rv-ok); }
+#rv-status[data-status="disapprove"] { color: var(--rv-bad); }
+#rv-status[data-status="stale"], #rv-status[data-status="error"] { color: var(--rv-stale); }
+#rv-copy-msg { font-size: 13px; color: var(--rv-muted); }
+#rv-feedback { width: 100%; min-height: 120px; font-family: var(--rv-mono); font-size: 12px; padding: 8px; border: 1px solid var(--rv-line); border-radius: 6px; background: var(--rv-bg); color: var(--rv-ink); }
+.rv-pager { display: flex; justify-content: space-between; gap: 8px; }
+
+:focus-visible { outline: 2px solid var(--rv-accent); outline-offset: 2px; }
+
+@media (max-width: 720px) {
+  .rv-shell { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 12px 32px; }
+  #rv-nav { position: static; }
+  #rv-nav-menu { background: var(--rv-panel); border: 1px solid var(--rv-line); border-radius: 8px; padding: 8px 10px; }
+  #rv-nav-menu > summary { display: list-item; cursor: pointer; font-weight: 600; }
+  #rv-nav-menu[open] > summary { margin-bottom: 8px; }
+  .rv-nav-head { display: none; }
+  #rv-title { font-size: 22px; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style id="rv-steward-css">/* steward-css:begin */
+#rv-content *{-webkit-box-sizing:border-box;box-sizing:border-box;}#rv-content .modal-dialog{width:1000px;max-width:96%;}#rv-content .modal-content{color:#ece4cf;}#rv-content .modal-header{padding:14px 24px 12px !important;border-bottom:1px solid rgba(0,0,0,.4);}#rv-content .modal-header .modal-title,#rv-content .modal-header h4{display:inline-block;vertical-align:middle;color:#fff;font-size:19px;font-weight:600;margin:0;text-shadow:0 1px 2px rgba(0,0,0,.7);}#rv-content .modal-header .close{color:#f3ead2;opacity:1;text-shadow:none;font-size:22px;line-height:1;}#rv-content .modal-header .close:hover{color:#fff;}#rv-content .steward-head-extra{display:inline-block;vertical-align:middle;margin-left:12px;}#rv-content .steward-head-sum{color:#d8cfb6;font-size:12.5px;margin-left:8px;vertical-align:middle;}#rv-content .modal-body{padding:0 !important;height:auto !important;overflow:visible;color:#ece4cf;font-size:13px;line-height:1.4;}#rv-content .modal-footer{padding:12px 24px !important;margin:0;text-align:left;background-size:100% 100%,contain;border-top:1px solid rgba(0,0,0,.35);}#rv-content .modal-footer:after{content:"";display:block;clear:both;height:0;}#rv-content .modal-footer .btn{margin:0;vertical-align:middle;}#rv-content .steward-foot-note,#rv-content .steward-foot-dirty,#rv-content .steward-foot-need{display:inline-block;vertical-align:middle;margin-left:12px;}#rv-content .steward-foot-note{color:#bdb39b;font-size:12px;}#rv-content .steward-foot-dirty,#rv-content .steward-foot-need{color:#f0cf8a;font-size:12.5px;font-weight:600;}#rv-content .steward-foot-right{float:right;}#rv-content .steward-tabs{padding:0 22px;border-bottom:1px solid rgba(0,0,0,.4);}#rv-content .steward-tabs:after{content:"";display:block;clear:both;height:0;}#rv-content .steward-tab{float:left;display:block;margin-right:2px;padding:11px 16px 9px;color:#d8cfb6;font-size:14px;background:none;border:0;border-bottom:3px solid transparent;text-decoration:none;cursor:pointer;}#rv-content .steward-tab:hover,#rv-content .steward-tab:focus{color:#fff;text-decoration:none;outline:0;}#rv-content .steward-tab.active{color:#fff;font-weight:600;border-bottom-color:#d9a441;background:rgba(178,165,137,.12);}#rv-content .steward-tab-cnt{display:inline-block;margin-left:6px;padding:0 6px;font-size:11px;font-weight:600;line-height:16px;color:#1f1a10;background:#b2a589;border-radius:8px;}#rv-content .steward-tab-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:6px;vertical-align:1px;background:#7d7462;}#rv-content .steward-tab-dot.steward-live{background:#a8d98c;}#rv-content .steward-tab-chg{color:#f0cf8a;margin-left:4px;font-weight:700;}#rv-content .steward-panel{height:480px;overflow:hidden;padding:16px 22px;}#rv-content .steward-panel.steward-set{height:524px;border-top:1px solid rgba(0,0,0,.4);}#rv-content .steward-panel.steward-compact{overflow-y:auto;}#rv-content .steward-panel::-webkit-scrollbar,#rv-content .steward-fill::-webkit-scrollbar,#rv-content .steward-side::-webkit-scrollbar,#rv-content .steward-main::-webkit-scrollbar,#rv-content .steward-snav::-webkit-scrollbar{width:5px;}#rv-content .steward-panel::-webkit-scrollbar-thumb,#rv-content .steward-fill::-webkit-scrollbar-thumb,#rv-content .steward-side::-webkit-scrollbar-thumb,#rv-content .steward-main::-webkit-scrollbar-thumb,#rv-content .steward-snav::-webkit-scrollbar-thumb{background:#8b8b8b;border-radius:7px;}#rv-content .steward-cols{height:100%;overflow:hidden;}#rv-content .steward-side{float:left;width:318px;height:100%;margin-right:16px;overflow-x:hidden;overflow-y:auto;}#rv-content .steward-side.steward-wide{width:360px;}#rv-content .steward-side.steward-edit{width:440px;}#rv-content .steward-main{height:100%;overflow-x:hidden;overflow-y:auto;}#rv-content .steward-main.steward-narrow{max-width:620px;}#rv-content .steward-side > * + *,#rv-content .steward-main > * + *{margin-top:14px;}#rv-content .steward-stack > * + *{margin-top:12px;}#rv-content .steward-compact .steward-cols,#rv-content .steward-compact .steward-side,#rv-content .steward-compact .steward-main{height:auto;}#rv-content .steward-snav{float:left;width:190px;height:100%;margin-right:16px;padding-top:2px;overflow-x:hidden;overflow-y:auto;}#rv-content .steward-snav-item{display:block;width:100%;margin-bottom:2px;padding:9px 12px;text-align:left;color:#d8cfb6;background:none;border:0;border-left:3px solid transparent;border-radius:6px;font-size:14px;font-family:inherit;text-decoration:none;cursor:pointer;}#rv-content .steward-snav-item:hover,#rv-content .steward-snav-item:focus{color:#fff;text-decoration:none;outline:0;}#rv-content .steward-snav-item.active{background:rgba(178,165,137,.16);color:#fff;font-weight:600;border-left-color:#d9a441;}#rv-content .steward-snav-grp{padding:12px 12px 4px;font-size:11px;color:#a69d87;letter-spacing:.6px;}#rv-content .steward-snav-dot{color:#f0cf8a;margin-left:4px;font-weight:700;}#rv-content .steward-card{background:rgba(0,0,0,.2);border:1px solid rgba(178,165,137,.28);border-radius:8px;overflow:hidden;}#rv-content .steward-card-h{min-height:32px;line-height:32px;padding:0 12px;background:#b2a589;color:#1f1a10;font-size:14px;font-weight:600;overflow:hidden;}#rv-content .steward-card-meta{float:right;margin-left:10px;font-size:12px;font-weight:400;color:#3b3220;}#rv-content .steward-card-h .steward-link{float:right;margin-left:10px;line-height:32px;color:#3b3220;font-size:12px;font-weight:600;}#rv-content .steward-card-h .btn,#rv-content .steward-card-h .switch{float:right;margin:3px 0 0 10px;}#rv-content .steward-card-badge{margin-left:10px;}#rv-content .steward-inline{padding:9px 12px;}#rv-content .steward-inline-item{display:inline-block;margin-right:22px;}#rv-content .steward-note{padding:0 12px 8px;}#rv-content .steward-card-foot{padding:8px 12px;}#rv-content .steward-icon{display:inline-block;min-width:16px;margin-right:8px;text-align:center;}#rv-content .steward-subhead{padding:8px 12px 6px;font-size:12px;font-weight:600;color:#d8cfb6;letter-spacing:.3px;border-bottom:1px solid rgba(178,165,137,.2);overflow:hidden;}#rv-content .steward-subhead-meta{float:right;font-weight:400;color:#bdb39b;letter-spacing:0;}#rv-content .steward-field{padding:9px 12px;border-top:1px solid rgba(255,255,255,.06);overflow:hidden;}#rv-content .steward-card-h + .steward-field,#rv-content .steward-subhead + .steward-field{border-top:0;}#rv-content .steward-field-ctl{float:right;width:122px;margin-left:12px;text-align:right;white-space:nowrap;}#rv-content .steward-field-ctl.steward-wide{width:220px;}#rv-content .steward-field-lbl{display:block;overflow:hidden;}#rv-content .steward-field-name{display:block;font-weight:400;color:#ece4cf;}#rv-content .steward-field-help{display:block;margin-top:1px;color:#bdb39b;font-size:12px;}#rv-content .steward-field.steward-sub{padding-left:30px;}#rv-content .steward-field.steward-dis .steward-field-name,#rv-content .steward-field.steward-dis .steward-field-help{color:#8d8571;}#rv-content .steward-field.steward-wrap .steward-field-ctl{float:none;display:block;width:auto;margin:6px 0 0;text-align:left;}#rv-content .steward-field-ctl .steward-dropdown,#rv-content .steward-field-ctl.steward-wide .steward-input{width:100%;}#rv-content .steward-field-ctl.steward-wide .steward-input{text-align:left;}#rv-content .switch{position:relative;display:inline-block;width:36px;height:19px;margin:0;vertical-align:middle;}#rv-content .switch input{position:absolute;opacity:0;width:0;height:0;margin:0;}#rv-content .switch .slider{position:absolute;top:0;left:0;right:0;bottom:0;cursor:pointer;background:#6b6455;border-radius:10px;-webkit-transition:background .2s;transition:background .2s;}#rv-content .switch .slider:before{content:"";position:absolute;left:2px;top:2px;bottom:auto;width:15px;height:15px;border-radius:50%;background:#f6f0e0;-webkit-transform:none;transform:none;-webkit-transition:-webkit-transform .2s;transition:transform .2s;}#rv-content .switch input:checked + .slider{background:#c8963a;}#rv-content .switch input:checked + .slider:before{-webkit-transform:translateX(17px);transform:translateX(17px);}#rv-content .switch.steward-dirty .slider,#rv-content .switch .slider.steward-dirty{box-shadow:0 0 0 2px rgba(217,164,65,.7);}#rv-content .switch.steward-disabled .slider,#rv-content .switch input:disabled + .slider{opacity:.4;cursor:default;}#rv-content .steward-input,#rv-content .steward-dropdown{height:26px;border:1px solid #5a4a30;border-radius:3px;background:#f1e6c9;color:#2a2418;font-size:13px;font-family:inherit;line-height:normal;box-shadow:none;vertical-align:middle;}#rv-content .steward-input{width:64px;padding:0 7px;text-align:right;}#rv-content .steward-dropdown{max-width:100%;padding:0 5px;cursor:pointer;}#rv-content .steward-input:focus,#rv-content .steward-dropdown:focus{outline:0;border-color:#d9a441;}#rv-content .steward-input.steward-dirty,#rv-content .steward-dropdown.steward-dirty{border-color:#d9a441;box-shadow:0 0 0 2px rgba(217,164,65,.55);}#rv-content .steward-input.steward-invalid,#rv-content .steward-dropdown.steward-invalid{border-color:#c0392b;box-shadow:0 0 0 2px rgba(214,96,80,.6);}#rv-content .steward-unit{display:inline-block;min-width:24px;margin-left:6px;text-align:left;color:#bdb39b;font-size:12px;vertical-align:middle;}#rv-content .btn.steward-btn{height:33px;line-height:33px;padding:0 22px;color:#1d160b;font-size:13px;font-weight:600;white-space:nowrap;vertical-align:middle;}#rv-content .btn.steward-btn[disabled]{color:#6e6555;cursor:default;}#rv-content .btn.steward-btn.steward-btn-sm{height:26px;line-height:26px;padding:0 14px;font-size:12px;background-size:14px 26px,14px 26px,1px 26px;}#rv-content .btn.steward-btn.steward-primary{box-shadow:0 0 0 2px #d9a441;border-radius:6px;}#rv-content .steward-link{background:none;border:0;padding:0;color:#f0cf8a;text-decoration:underline;font-size:12.5px;font-family:inherit;cursor:pointer;}#rv-content .steward-link:hover,#rv-content .steward-link:focus{color:#f0cf8a;text-decoration:underline;}#rv-content .steward-link.steward-danger{color:#f3a299;padding:3px 6px;}#rv-content .steward-link.steward-danger.steward-confirm{background:#9b3b2e;color:#fff;text-decoration:none;border-radius:4px;padding:4px 10px;font-weight:600;}#rv-content .steward-now{display:inline-block;font-size:11px;font-weight:600;color:#f0cf8a;white-space:nowrap;vertical-align:middle;}#rv-content .steward-iconbtn{width:26px;height:24px;padding:0;margin-left:4px;border:1px solid rgba(178,165,137,.45);border-radius:4px;background:rgba(0,0,0,.25);color:#ece4cf;font-size:13px;line-height:1;cursor:pointer;vertical-align:middle;}#rv-content .steward-iconbtn:hover{border-color:#d9a441;color:#fff;}#rv-content .steward-iconbtn[disabled]{opacity:.3;cursor:default;}#rv-content .steward-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;white-space:nowrap;vertical-align:middle;}#rv-content .steward-b-ok{background:rgba(127,174,90,.25);color:#c4e8ad;}#rv-content .steward-b-busy{background:rgba(217,164,65,.22);color:#f3d796;}#rv-content .steward-b-off{background:rgba(125,116,98,.35);color:#cfc6b0;}#rv-content .steward-b-paused{background:rgba(214,96,80,.3);color:#f7b5ab;}#rv-content .steward-b-tag{background:transparent;border:1px solid rgba(217,164,65,.6);color:#f0cf8a;font-weight:500;padding:0 6px;}#rv-content .steward-b-phase{background:rgba(70,110,50,.85);color:#eaf7df;}#rv-content .steward-tbl{width:100%;border-collapse:collapse;table-layout:fixed;margin:0;color:#ece4cf;font-size:13px;font-weight:400;line-height:normal;}#rv-content .steward-tbl th{height:28px;padding:0 10px;text-align:left;font-size:12px;font-weight:600;color:#d8cfb6;background:#2a251c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#rv-content .steward-tbl td{height:31px;padding:0 10px;border-top:1px solid rgba(255,255,255,.06);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#rv-content .steward-tbl tbody tr:nth-child(even) td{background:rgba(178,165,137,.06);}#rv-content .steward-tbl .steward-num{text-align:right;}#rv-content .steward-tbl .steward-c{text-align:center;}#rv-content .steward-tbl tfoot td{font-weight:600;border-top:1px solid rgba(178,165,137,.4);background:rgba(0,0,0,.15);}#rv-content .steward-fill{height:288px;overflow-x:hidden;overflow-y:auto;}#rv-content .steward-who{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}#rv-content .steward-who img{width:22px;height:22px;margin-right:8px;border-radius:50%;background:#7a6a4c;border:1px solid #c3a978;vertical-align:middle;}#rv-content .steward-under{color:#d9a441;font-weight:600;}#rv-content .steward-chips{padding:8px 12px 4px;}#rv-content .steward-chip{display:inline-block;margin:0 6px 4px 0;padding:2px 10px;border:1px solid rgba(178,165,137,.4);border-radius:12px;background:none;color:#d8cfb6;font-size:12px;font-family:inherit;line-height:normal;cursor:pointer;}#rv-content .steward-chip:hover,#rv-content .steward-chip:focus{border-color:#d9a441;outline:0;}#rv-content .steward-chip.active{background:#b2a589;color:#1f1a10;border-color:#b2a589;font-weight:600;}#rv-content .steward-stats{overflow:hidden;}#rv-content .steward-stat{float:left;padding:10px 14px;}#rv-content .steward-stat + .steward-stat{border-left:1px solid rgba(178,165,137,.2);}#rv-content .steward-stat.steward-stat-w1{width:100%;}#rv-content .steward-stat.steward-stat-w2{width:50%;}#rv-content .steward-stat.steward-stat-w3{width:33.333%;}#rv-content .steward-stat.steward-stat-w4{width:25%;}#rv-content .steward-stat-k{display:block;font-size:12px;color:#bdb39b;}#rv-content .steward-stat-v{display:block;margin-top:2px;font-size:18px;font-weight:600;color:#fff;}#rv-content .steward-stat-v small,#rv-content .steward-stat-v .steward-muted{font-size:12px;font-weight:400;color:#bdb39b;}#rv-content .steward-grid{overflow:hidden;margin-right:-12px;}#rv-content .steward-cell{float:left;padding:0 12px 12px 0;}#rv-content .steward-cell.steward-cell-2{width:50%;}#rv-content .steward-cell.steward-cell-3{width:33.333%;}#rv-content .steward-cell-2:nth-child(2n+1),#rv-content .steward-cell-3:nth-child(3n+1){clear:left;}#rv-content .steward-tile{position:relative;min-height:118px;padding:11px 12px 40px;background:rgba(0,0,0,.2);border:1px solid rgba(178,165,137,.28);border-radius:8px;}#rv-content .steward-tile-h{overflow:hidden;line-height:20px;font-size:14px;font-weight:600;color:#fff;}#rv-content .steward-tile-h .switch{float:right;}#rv-content .steward-tile-line{margin-top:6px;color:#d8cfb6;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}#rv-content .steward-tile-foot{position:absolute;left:12px;right:12px;bottom:10px;overflow:hidden;}#rv-content .steward-tile-foot .steward-badge{margin-right:8px;}#rv-content .steward-tile-foot .steward-link{float:right;margin-left:8px;}#rv-content .steward-banner{padding:9px 12px;overflow:hidden;border-radius:8px;background:rgba(217,164,65,.14);border:1px solid rgba(217,164,65,.45);color:#f3e2b8;font-size:12.5px;}#rv-content .steward-banner .btn,#rv-content .steward-banner .steward-link{float:right;margin-left:10px;}#rv-content .steward-empty{padding:28px 12px;text-align:center;color:#bdb39b;}#rv-content .steward-empty-title{margin-bottom:4px;font-size:14px;font-weight:600;color:#ece4cf;}#rv-content .steward-strip{position:relative;padding:7px 120px 7px 12px;line-height:20px;font-size:12.5px;font-weight:600;color:#1f1a10;background:#b2a589;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#rv-content .steward-strip .switch{margin-left:10px;}#rv-content .steward-strip-sum{margin-left:10px;font-weight:400;}#rv-content .steward-strip-link{position:absolute;right:12px;top:7px;background:none;border:0;padding:0;color:#3b3220;font-size:12px;font-weight:600;text-decoration:underline;white-space:nowrap;cursor:pointer;}#rv-content .steward-strip-link:hover{color:#3b3220;}#rv-content .steward-tool{display:table;width:100%;padding:7px 12px;border-top:1px solid rgba(255,255,255,.06);}#rv-content .steward-card-h + .steward-tool,#rv-content .steward-subhead + .steward-tool{border-top:0;}#rv-content .steward-tool > span{display:table-cell;width:100%;padding-right:10px;vertical-align:middle;}#rv-content .steward-tool small{display:block;color:#bdb39b;font-size:12px;}#rv-content .steward-crumb{height:26px;line-height:26px;margin-bottom:10px;font-size:13px;color:#bdb39b;white-space:nowrap;}#rv-content .steward-crumb > *{margin-right:8px;vertical-align:middle;}#rv-content .steward-crumb b{color:#fff;}#rv-content .steward-waves{list-style:none;margin:0;padding:0;}#rv-content .steward-waves li{display:table;width:100%;padding:6px 12px;border-top:1px solid rgba(255,255,255,.06);}#rv-content .steward-waves li:first-child{border-top:0;}#rv-content .steward-waves li.steward-moved{background:rgba(217,164,65,.14);}#rv-content .steward-wave-n{display:inline-block;width:26px;height:22px;margin-right:10px;border-radius:11px;background:#b2a589;color:#1f1a10;font-size:12px;font-weight:700;line-height:22px;text-align:center;vertical-align:middle;}#rv-content .steward-wave-f{display:table-cell;width:100%;padding-right:10px;vertical-align:middle;}#rv-content .steward-wave-f small{display:block;color:#bdb39b;font-size:12px;}#rv-content .steward-handle{display:inline-block;margin-right:10px;color:#8d8571;cursor:move;font-size:13px;letter-spacing:-2px;vertical-align:middle;}#rv-content .ui-sortable-placeholder{visibility:visible !important;background:rgba(217,164,65,.14);}#rv-content .steward-muted{color:#a69d87;}#rv-content .steward-ok{color:#a8d98c;}#rv-content .steward-warn{color:#f0cf8a;}#rv-content .steward-bad{color:#f3a299;}#rv-content .rv-frame{width:1000px;max-width:none;background:#5b4527;border:1px solid #1f1a10;border-radius:8px;color:#ece4cf;font:13px Arial,Helvetica,sans-serif;}
+/* steward-css:end */</style>
+
+<div class="rv-shell">
+  <nav id="rv-nav" aria-label="Pages">
+    <details id="rv-nav-menu" open>
+      <summary id="rv-nav-summary">Pages</summary>
+      <p class="rv-nav-head">Pages</p>
+      <ol id="rv-nav-list"></ol>
+      <p id="rv-progress"></p>
+    </details>
+  </nav>
+
+  <main id="rv-main">
+    <div class="rv-head">
+      <div class="rv-meta">
+        <span id="rv-kind">Review</span>
+        <span id="rv-set-name"></span>
+        <span id="rv-rev"></span>
+      </div>
+      <h1 id="rv-title">Review set</h1>
+      <p id="rv-summary"></p>
+    </div>
+
+    <div id="rv-options" hidden></div>
+
+    <div id="rv-content">
+<!-- review-set:pages:begin -->
+<section data-page="card">
+<div class="rv-scroll"><div class="rv-frame">
+<div class="steward-card">
+  <div class="steward-card-h">Demo module
+    <label class="switch" data-when="state=on"><input type="checkbox" checked><span class="slider"></span></label>
+    <label class="switch" data-when="state=off"><input type="checkbox"><span class="slider"></span></label>
+  </div>
+  <div class="steward-field">
+    <span class="steward-field-name">Status</span>
+    <span class="steward-field-help" data-when="state=on">Enabled: the module runs on every tick.</span>
+    <span class="steward-field-help" data-when="state=off">Disabled: the module is idle.</span>
+  </div>
+</div>
+</div></div>
+</section>
+<section data-page="notes">
+<h2>How to try the round-trip</h2>
+<p>This demo set exists to exercise the review shell end to end.</p>
+<ul>
+<li>Go back to the Settings card page and flip the option bar between Enabled and Disabled.</li>
+<li>Approve the Settings card page.</li>
+<li>Come back to this page, write a short comment and press Disapprove.</li>
+<li>Press Copy feedback and check that the JSON lists both verdicts.</li>
+</ul>
+</section>
+<!-- review-set:pages:end -->
+    </div>
+
+    <form id="rv-verdict" novalidate>
+      <p id="rv-banner" role="status">Connecting to the verdict store…</p>
+      <label class="rv-comment-label" for="rv-comment">Comment</label>
+      <textarea id="rv-comment" name="rv-comment" placeholder="What should change? Required for Disapprove."></textarea>
+      <p id="rv-error" role="alert" hidden></p>
+      <div class="rv-actions">
+        <button type="button" class="rv-btn" id="rv-approve" disabled>Approve</button>
+        <button type="button" class="rv-btn" id="rv-disapprove" disabled>Disapprove</button>
+        <span class="rv-spacer"></span>
+        <button type="button" class="rv-btn" id="rv-copy">Copy feedback</button>
+        <span id="rv-copy-msg" role="status"></span>
+      </div>
+      <p id="rv-status" role="status">No verdict yet</p>
+      <textarea id="rv-feedback" name="rv-feedback" readonly hidden aria-label="Feedback JSON to paste into the chat"></textarea>
+      <div class="rv-pager">
+        <button type="button" class="rv-btn" id="rv-prev">Previous page</button>
+        <button type="button" class="rv-btn" id="rv-next">Next page</button>
+      </div>
+    </form>
+  </main>
+</div>
+
+<script type="application/json" id="review-set">
+{
+  "set": "review-demo",
+  "task": "review-page-shell",
+  "kind": "mockup",
+  "rev": 1,
+  "pages": [
+    {
+      "id": "card",
+      "title": "Settings card",
+      "summary": "A steward card whose switch and status follow the option bar.",
+      "options": [
+        {
+          "id": "state",
+          "label": "State",
+          "values": [
+            {
+              "id": "on",
+              "label": "Enabled"
+            },
+            {
+              "id": "off",
+              "label": "Disabled"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notes",
+      "title": "Notes page",
+      "summary": "How to try the approve and disapprove round-trip."
+    }
+  ]
+}
+</script>
+
+<script id="rv-logic">
+/* Pure review-set logic. It touches no page or browser globals so tests can run it
+   in an empty sandbox; the app script below does all the wiring. */
+var RV = (function () {
+	'use strict';
+
+	var VERDICTS = ['approve', 'disapprove'];
+
+	function parseSet(text) {
+		var set = JSON.parse(text);
+		if (!set || typeof set !== 'object' || !(set.pages instanceof Array) || !set.pages.length) {
+			throw new Error('review-set: "pages" must be a non-empty list');
+		}
+		return set;
+	}
+
+	function pageIndex(set, hash) {
+		var id = String(hash || '');
+		if (id.charAt(0) === '#') { id = id.slice(1); }
+		if (!id) { return 0; }
+		for (var i = 0; i < set.pages.length; i++) {
+			if (set.pages[i].id === id) { return i; }
+		}
+		return 0;
+	}
+
+	function defaultState(page) {
+		var state = {};
+		var opts = (page && page.options) || [];
+		for (var i = 0; i < opts.length; i++) {
+			if (opts[i].values && opts[i].values.length) { state[opts[i].id] = opts[i].values[0].id; }
+		}
+		return state;
+	}
+
+	function parseWhen(str) {
+		var out = [];
+		var parts = String(str || '').split('&');
+		for (var i = 0; i < parts.length; i++) {
+			var part = parts[i];
+			if (!part.replace(/\s+/g, '')) { continue; }
+			var eq = part.indexOf('=');
+			if (eq < 0) {
+				out.push({ opt: part.trim(), val: '' });
+			} else {
+				out.push({ opt: part.slice(0, eq).trim(), val: part.slice(eq + 1).trim() });
+			}
+		}
+		return out;
+	}
+
+	function matches(str, state) {
+		var conds = parseWhen(str);
+		for (var i = 0; i < conds.length; i++) {
+			if (!state || !Object.prototype.hasOwnProperty.call(state, conds[i].opt)) { return false; }
+			if (state[conds[i].opt] !== conds[i].val) { return false; }
+		}
+		return true;
+	}
+
+	function copyState(state) {
+		var out = {};
+		for (var k in state) {
+			if (Object.prototype.hasOwnProperty.call(state, k)) { out[k] = state[k]; }
+		}
+		return out;
+	}
+
+	function makeVerdict(set, page, verdict, comment, state, userId, nowIso) {
+		if (VERDICTS.indexOf(verdict) < 0) {
+			return { error: 'Unknown verdict "' + verdict + '".' };
+		}
+		var text = String(comment === undefined || comment === null ? '' : comment).trim();
+		if (verdict === 'disapprove' && !text) {
+			return { error: 'Write what should change before you disapprove this page.' };
+		}
+		return { doc: {
+			set: set.set,
+			page: page.id,
+			verdict: verdict,
+			comment: text,
+			rev: set.rev,
+			options: copyState(state || {}),
+			by: userId || null,
+			at: nowIso
+		} };
+	}
+
+	// Stored rows are written by viewers, so anything malformed counts as no verdict.
+	function status(set, doc) {
+		if (!doc || typeof doc !== 'object' || VERDICTS.indexOf(doc.verdict) < 0) { return 'none'; }
+		if (doc.rev !== set.rev || doc.set !== set.set) { return 'stale'; }
+		return doc.verdict;
+	}
+
+	function progress(set, docsById) {
+		var out = { approved: 0, disapproved: 0, pending: 0, total: set.pages.length };
+		for (var i = 0; i < set.pages.length; i++) {
+			var s = status(set, docsById ? docsById[set.pages[i].id] : null);
+			if (s === 'approve') { out.approved++; } else if (s === 'disapprove') { out.disapproved++; } else { out.pending++; }
+		}
+		return out;
+	}
+
+	function feedback(set, docsById) {
+		var list = [];
+		for (var i = 0; i < set.pages.length; i++) {
+			var doc = docsById ? docsById[set.pages[i].id] : null;
+			var s = status(set, doc);
+			if (s === 'approve' || s === 'disapprove') { list.push(doc); }
+		}
+		return JSON.stringify(list, null, 2);
+	}
+
+	return {
+		parseSet: parseSet,
+		pageIndex: pageIndex,
+		defaultState: defaultState,
+		parseWhen: parseWhen,
+		matches: matches,
+		makeVerdict: makeVerdict,
+		status: status,
+		progress: progress,
+		feedback: feedback
+	};
+})();
+</script>
+
+<script id="rv-app">
+(function () {
+	'use strict';
+
+	var KIND_LABEL = { mockup: 'Mockup', plan: 'Plan', explainer: 'Explainer' };
+	var BADGE = { none: '', approve: '✓', disapprove: '✕', stale: '!' };
+	var BADGE_TEXT = { none: 'No verdict yet', approve: 'Approved', disapprove: 'Disapproved', stale: 'Verdict out of date' };
+	var NARROW = '(max-width: 720px)';
+
+	function $(id) { return document.getElementById(id); }
+
+	function store(key, value) {
+		try {
+			if (value === null) { window.localStorage.removeItem(key); } else { window.localStorage.setItem(key, value); }
+		} catch (e) { /* storage blocked: conveniences only */ }
+	}
+	function load(key) {
+		try { return window.localStorage.getItem(key); } catch (e) { return null; }
+	}
+
+	var set;
+	try {
+		set = RV.parseSet($('review-set').textContent);
+	} catch (e) {
+		$('rv-title').textContent = 'This review set could not be read';
+		$('rv-summary').textContent = String(e && e.message ? e.message : e);
+		return;
+	}
+
+	var prefix = 'rv:' + set.set + ':';
+	var mode = 'pending';   // pending | db | local
+	var db = null;
+	var userId = null;
+	var docs = {};
+	var opts = {};
+	var current = 0;
+	var writing = false;
+	var loadTimer = null;
+	var sections = {};
+
+	var secs = $('rv-content').querySelectorAll('section');
+	for (var s = 0; s < secs.length; s++) {
+		var pid = secs[s].getAttribute('data-page');
+		if (pid) { sections[pid] = secs[s]; }
+	}
+
+	// Option state per page: the stored choice when it still names a real value.
+	function pageOpts(page) {
+		if (opts[page.id]) { return opts[page.id]; }
+		var state = RV.defaultState(page);
+		var saved = null;
+		try { saved = JSON.parse(load(prefix + 'opts:' + page.id) || 'null'); } catch (e) { saved = null; }
+		var list = page.options || [];
+		if (saved && typeof saved === 'object') {
+			for (var i = 0; i < list.length; i++) {
+				var v = saved[list[i].id];
+				for (var j = 0; j < (list[i].values || []).length; j++) {
+					if (list[i].values[j].id === v) { state[list[i].id] = v; }
+				}
+			}
+		}
+		opts[page.id] = state;
+		return state;
+	}
+
+	function buildNav() {
+		var ol = $('rv-nav-list');
+		ol.textContent = '';
+		for (var i = 0; i < set.pages.length; i++) {
+			var page = set.pages[i];
+			var li = document.createElement('li');
+			var a = document.createElement('a');
+			a.className = 'rv-nav-link';
+			a.href = '#' + page.id;
+			a.id = 'rv-nav-' + page.id;
+			var num = document.createElement('span');
+			num.className = 'rv-nav-num';
+			num.textContent = String(i + 1);
+			var title = document.createElement('span');
+			title.className = 'rv-nav-title';
+			title.textContent = page.title;
+			var badge = document.createElement('span');
+			badge.className = 'rv-badge';
+			badge.setAttribute('data-page-badge', page.id);
+			a.appendChild(num);
+			a.appendChild(title);
+			a.appendChild(badge);
+			a.addEventListener('click', function () {
+				if (window.matchMedia && window.matchMedia(NARROW).matches) { $('rv-nav-menu').open = false; }
+			});
+			li.appendChild(a);
+			ol.appendChild(li);
+		}
+	}
+
+	function renderOptions(page) {
+		var box = $('rv-options');
+		box.textContent = '';
+		var list = page.options || [];
+		box.hidden = !list.length;
+		var state = pageOpts(page);
+		for (var i = 0; i < list.length; i++) {
+			var opt = list[i];
+			var group = document.createElement('div');
+			group.className = 'rv-opt';
+			var label = document.createElement('span');
+			label.className = 'rv-opt-label';
+			label.id = 'rv-opt-' + opt.id + '-label';
+			label.textContent = opt.label || opt.id;
+			var seg = document.createElement('div');
+			seg.className = 'rv-seg';
+			seg.setAttribute('role', 'group');
+			seg.setAttribute('aria-labelledby', label.id);
+			for (var j = 0; j < (opt.values || []).length; j++) {
+				var val = opt.values[j];
+				var b = document.createElement('button');
+				b.type = 'button';
+				b.id = 'rv-opt-' + opt.id + '-' + val.id;
+				b.textContent = val.label || val.id;
+				b.setAttribute('aria-pressed', state[opt.id] === val.id ? 'true' : 'false');
+				b.addEventListener('click', optionClick(page, opt.id, val.id));
+				seg.appendChild(b);
+			}
+			group.appendChild(label);
+			group.appendChild(seg);
+			box.appendChild(group);
+		}
+	}
+
+	function optionClick(page, optId, valId) {
+		return function () {
+			var state = pageOpts(page);
+			state[optId] = valId;
+			store(prefix + 'opts:' + page.id, JSON.stringify(state));
+			renderOptions(page);
+			applyWhen(page);
+		};
+	}
+
+	function applyWhen(page) {
+		var sec = sections[page.id];
+		if (!sec) { return; }
+		var state = pageOpts(page);
+		var els = sec.querySelectorAll('[data-when]');
+		for (var i = 0; i < els.length; i++) {
+			els[i].hidden = !RV.matches(els[i].getAttribute('data-when'), state);
+		}
+	}
+
+	function renderVerdicts() {
+		for (var i = 0; i < set.pages.length; i++) {
+			var page = set.pages[i];
+			var st = RV.status(set, docs[page.id]);
+			var badge = document.querySelector('[data-page-badge="' + page.id + '"]');
+			if (badge) {
+				badge.setAttribute('data-status', st);
+				badge.textContent = BADGE[st];
+				badge.title = BADGE_TEXT[st];
+				badge.setAttribute('aria-label', BADGE_TEXT[st]);
+			}
+		}
+		var page0 = set.pages[current];
+		var doc = docs[page0.id];
+		var st0 = RV.status(set, doc);
+		var el = $('rv-status');
+		el.setAttribute('data-status', st0);
+		if (st0 === 'none') {
+			el.textContent = 'No verdict yet';
+		} else if (st0 === 'stale') {
+			el.textContent = 'Recorded for rev ' + doc.rev + (doc.set !== set.set ? ' of another set' : '') + ', out of date';
+		} else {
+			el.textContent = (st0 === 'approve' ? 'Approved' : 'Disapproved') + ' for rev ' + doc.rev +
+				(doc.comment ? ': “' + doc.comment + '”' : '');
+		}
+		var p = RV.progress(set, docs);
+		var line = p.approved + ' of ' + p.total + ' pages approved';
+		if (p.disapproved) { line += ', ' + p.disapproved + ' disapproved'; }
+		$('rv-progress').textContent = line;
+		$('rv-nav-summary').textContent = 'Pages · ' + (current + 1) + ' of ' + p.total + ' · ' + p.approved + ' approved';
+		var busy = mode === 'pending' || writing;
+		$('rv-approve').disabled = busy;
+		$('rv-disapprove').disabled = busy;
+	}
+
+	function render() {
+		current = RV.pageIndex(set, window.location.hash);
+		var page = set.pages[current];
+		$('rv-kind').textContent = KIND_LABEL[set.kind] || 'Review';
+		$('rv-set-name').textContent = set.set;
+		$('rv-rev').textContent = 'rev ' + set.rev;
+		$('rv-title').textContent = page.title;
+		$('rv-summary').textContent = page.summary || '';
+		for (var id in sections) {
+			if (Object.prototype.hasOwnProperty.call(sections, id)) { sections[id].hidden = id !== page.id; }
+		}
+		var links = document.querySelectorAll('.rv-nav-link');
+		for (var i = 0; i < links.length; i++) {
+			if (links[i].id === 'rv-nav-' + page.id) { links[i].setAttribute('aria-current', 'page'); } else { links[i].removeAttribute('aria-current'); }
+		}
+		renderOptions(page);
+		applyWhen(page);
+		$('rv-comment').value = load(prefix + 'draft:' + page.id) || '';
+		$('rv-error').hidden = true;
+		$('rv-prev').disabled = current === 0;
+		$('rv-next').disabled = current === set.pages.length - 1;
+		renderVerdicts();
+	}
+
+	function setBanner(text) {
+		var b = $('rv-banner');
+		b.textContent = text || '';
+		b.hidden = !text;
+	}
+
+	function showError(text) {
+		var e = $('rv-error');
+		e.textContent = text;
+		e.hidden = false;
+		$('rv-comment').focus();
+	}
+
+	function decide(verdict) {
+		var page = set.pages[current];
+		var made = RV.makeVerdict(set, page, verdict, $('rv-comment').value, pageOpts(page), userId, new Date().toISOString());
+		if (made.error) { showError(made.error); return; }
+		$('rv-error').hidden = true;
+		if (mode === 'db') {
+			writing = true;
+			renderVerdicts();
+			db.doc('verdicts/' + page.id).set(made.doc).then(function () {
+				writing = false;
+				docs[page.id] = made.doc;
+				store(prefix + 'draft:' + page.id, null);
+				if (set.pages[current].id === page.id) { $('rv-comment').value = ''; }
+				renderVerdicts();
+			}, function (err) {
+				writing = false;
+				renderVerdicts();
+				var code = err && err.code ? err.code : 'unavailable';
+				var el = $('rv-status');
+				el.setAttribute('data-status', 'error');
+				el.textContent = code === 'invalid_argument' ?
+					'Your access to this page cannot record verdicts. Use Copy feedback and paste it into the chat.' :
+					'The verdict was not saved (' + code + '). Try again, or use Copy feedback.';
+			});
+		} else if (mode === 'local') {
+			docs[page.id] = made.doc;
+			store(prefix + 'local', JSON.stringify(docs));
+			store(prefix + 'draft:' + page.id, null);
+			$('rv-comment').value = '';
+			renderVerdicts();
+		}
+	}
+
+	function copyFeedback() {
+		var text = RV.feedback(set, docs);
+		var area = $('rv-feedback');
+		var msg = $('rv-copy-msg');
+		function fallback() {
+			area.value = text;
+			area.hidden = false;
+			area.focus();
+			area.select();
+			msg.textContent = 'Copy the selected text and paste it into the chat.';
+		}
+		if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+			window.navigator.clipboard.writeText(text).then(function () {
+				area.hidden = true;
+				msg.textContent = 'Copied. Paste it into the chat.';
+			}, fallback);
+		} else {
+			fallback();
+		}
+	}
+
+	function goLocal() {
+		mode = 'local';
+		db = null;
+		// Only without the shared store: verdicts then live in this browser until copied.
+		try { docs = JSON.parse(load(prefix + 'local') || '{}') || {}; } catch (e) { docs = {}; }
+		setBanner('Local review: record your verdicts, then press Copy feedback and paste it into the chat.');
+		renderVerdicts();
+	}
+
+	function goDb(handle) {
+		db = handle;
+		mode = 'db';
+		docs = {};
+		setBanner('Loading saved verdicts…');
+		loadTimer = window.setTimeout(function () {
+			setBanner('Saved verdicts cannot be reached yet. Verdicts you record now are still sent.');
+		}, 10000);
+		db.collection('verdicts').onSnapshot(function (snap) {
+			var next = {};
+			for (var i = 0; i < snap.docs.length; i++) {
+				if (snap.docs[i].exists) { next[snap.docs[i].id] = snap.docs[i].data(); }
+			}
+			docs = next;
+			if (!snap.metadata || !snap.metadata.fromCache) {
+				if (loadTimer) { window.clearTimeout(loadTimer); loadTimer = null; }
+				setBanner('');
+			}
+			renderVerdicts();
+		}, function (err) {
+			if (loadTimer) { window.clearTimeout(loadTimer); loadTimer = null; }
+			setBanner('Saved verdicts could not be loaded (' + (err && err.code ? err.code : 'unavailable') + '). Use Copy feedback.');
+		});
+		renderVerdicts();
+	}
+
+	$('rv-verdict').addEventListener('submit', function (e) { e.preventDefault(); });
+	$('rv-approve').addEventListener('click', function () { decide('approve'); });
+	$('rv-disapprove').addEventListener('click', function () { decide('disapprove'); });
+	$('rv-copy').addEventListener('click', copyFeedback);
+	$('rv-prev').addEventListener('click', function () { if (current > 0) { window.location.hash = set.pages[current - 1].id; } });
+	$('rv-next').addEventListener('click', function () { if (current < set.pages.length - 1) { window.location.hash = set.pages[current + 1].id; } });
+	$('rv-comment').addEventListener('input', function () {
+		var v = $('rv-comment').value;
+		store(prefix + 'draft:' + set.pages[current].id, v ? v : null);
+		if (v.trim()) { $('rv-error').hidden = true; }
+	});
+	window.addEventListener('hashchange', function () {
+		render();
+		$('rv-main').scrollIntoView({ block: 'start' });
+	});
+
+	if (window.matchMedia) {
+		var mq = window.matchMedia(NARROW);
+		var syncNav = function () { $('rv-nav-menu').open = !mq.matches; };
+		syncNav();
+		if (mq.addEventListener) { mq.addEventListener('change', syncNav); } else if (mq.addListener) { mq.addListener(syncNav); }
+	}
+
+	buildNav();
+	render();
+
+	if (typeof claude !== 'undefined' && claude && typeof claude.use === 'function') {
+		setBanner('Connecting…');
+		claude.use('user').then(function (u) {
+			if (u && typeof u.id === 'function') {
+				u.id().then(function (id) { userId = id || null; }, function () { userId = null; });
+			}
+		}, function () { userId = null; });
+		claude.use('db').then(function (handle) {
+			if (handle) { goDb(handle); } else { goLocal(); }
+		}, goLocal);
+	} else {
+		goLocal();
+	}
+})();
+</script>
