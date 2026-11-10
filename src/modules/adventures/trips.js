@@ -27,9 +27,13 @@
  * that shows no drop at all means it was already full. Out of stock with
  * grids left, the run goes home for more and comes back to the same trip.
  *
- * Trip lets the quests update, waits for unread quests, claimable quests and
- * quest objects to clear, and leaves after TRIP_MAX_MS whatever is left: the
- * next trip or the end of the map deals with it, so this never pauses.
+ * Trip lets the quests update (READ_LAG_MS from the step entry and
+ * QUEST_SETTLE_MS from the last verified quest read or claim on the island),
+ * waits for unread and claimable quests, quest objects and the pick-ups a
+ * running quest still counts that are not on the map yet, leaves only once
+ * all of that has read clear for READ_LAG_MS, and leaves after TRIP_MAX_MS
+ * whatever is left: the next trip or the end of the map deals with it, so
+ * this never pauses.
  *
  * Apply and Trip act only while the run's island is viewed; the quest pool
  * read elsewhere is not the run's.
@@ -52,6 +56,7 @@
     var PRODUCE_RETRY_MS = 60000;    // a failed item order is tried again after this
     var APPLY_QUIET_MS   = 600000;   // quiet time a quest gets to want an item
     var TRIP_MAX_MS      = 300000;   // quiet time a trip waits for quests and objects
+    var QUEST_SETTLE_MS  = 20000;    // settle after a quest read or claim on the island
 
     var CATEGORY = 'adventures';
 
@@ -339,11 +344,12 @@
     }
 
     // The quest objects collect clicks on a scenario island (running quests
-    // only); held gets the ones whose quest is not running yet. null when
-    // the map or the quest pool cannot be read.
-    function islandObjects(held) {
+    // only); held gets the ones whose quest is not running yet, and awaited,
+    // when given, the names a running quest still counts that have no object
+    // on the map yet. null when the map or the quest pool cannot be read.
+    function islandObjects(held, awaited) {
         try {
-            return S.core.pickups.targets({ quests: true, running: true, held: held });
+            return S.core.pickups.targets({ quests: true, running: true, held: held, awaited: awaited });
         } catch (e) {
             S.kernel.warn(CATEGORY, 'quest objects read threw:', e);
             return null;
@@ -572,6 +578,14 @@
         st().go(S.RunStep.JumpHome, 'trip ' + done + '/' + n + ' done');
     }
 
+    // A quest read or claimed on the island shows its map objects and the
+    // next quest some seconds later, so an empty read right after it proves
+    // nothing yet.
+    function questSettling(r) {
+        var c = wt().changedAt(r.zoneId);
+        return typeof c === 'number' && now() - c < QUEST_SETTLE_MS;
+    }
+
     // Trip (island). The last trip hands over to Clear, which waits for the
     // last quest and the quest objects itself.
     function trip(r) {
@@ -582,32 +596,54 @@
             return;
         }
         if (!islandViewed(r)) return;
-        if (now() - r.since < tripSettleMs()) {
+        if (now() - r.since < tripSettleMs() || questSettling(r)) {
             ld().waitBusy(r, null, 'letting the quests update');
             return;
         }
         var un = wt().unread();
         var pend = wt().pending();
         // Objects whose quest is not running are not clicked; they still
-        // count as left, since reading the quest makes them clickable.
+        // count as left, since reading the quest makes them clickable. A
+        // running quest's pick-up with no object on the map yet counts as
+        // left too: its objects show some time after the quest is read.
         var held = [];
-        var objs = wt().patterns() === null ? [] : islandObjects(held);
+        var awaited = [];
+        var objs = [];
+        if (wt().patterns() !== null) {
+            // A spawned object must show in this read, not in a cached list.
+            S.core.buildings.invalidate();
+            objs = islandObjects(held, awaited);
+        }
         if (un === null || pend === null || objs === null) {
             ld().waitRead(r, 'quests or quest objects');
             return;
         }
-        if (!un.length && !pend.length && !objs.length && !held.length) {
+        if (!un.length && !pend.length && !objs.length && !held.length && !awaited.length) {
+            // The map must read clear for a settle time: the finished quest
+            // may not be claimable yet, or a claim's next quest may not show
+            // yet, right after the last pick-up.
+            var seen = st().current().tripSeenAt;
+            if (typeof seen === 'number' && seen >= r.since && now() - seen < tripSettleMs()) {
+                ld().waitBusy(r, null, 'making sure no quest or object is left');
+                return;
+            }
             leave(r, n);
             return;
         }
+        st().current().tripSeenAt = now();
         if (held.length) noteOnce(r, 'held:' + heldText(held), wt().pickupText(held) + ': ' + heldText(held));
+        if (awaited.length) {
+            noteOnce(r, 'awaited:' + wt().pickupText(awaited),
+                wt().pickupText(awaited) + ': waiting for it to appear on the map');
+        }
         var parts = [];
         if (un.length) parts.push(un.length + ' unread');
         if (pend.length) parts.push(pend.length + ' to claim');
         if (objs.length) parts.push(wt().pickupText(objs));
         if (held.length) parts.push(held.length + ' waiting for a running quest');
+        if (awaited.length) parts.push(wt().pickupText(awaited) + ' not on the map yet');
         var text = parts.join(', ');
-        var p = S.modules.adventures.away.pickupClock(r, objs.concat(held));
+        var p = S.modules.adventures.away.pickupClock(r, objs.concat(held).concat(awaited));
         if (p.ms >= TRIP_MAX_MS) {
             log('leaving with: ' + text);
             leave(r, n);
@@ -621,7 +657,8 @@
         PRODUCE_RETRY_MS: PRODUCE_RETRY_MS,
         APPLY_QUIET_MS:   APPLY_QUIET_MS,
         TRIP_MAX_MS:      TRIP_MAX_MS,
-        produce:          produce,
+        QUEST_SETTLE_MS:  QUEST_SETTLE_MS,
+        produce:         produce,
         apply:            apply,
         trip:             trip,
         applyMark:        applyMark,

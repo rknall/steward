@@ -44,7 +44,8 @@
  * or fire wood. It uses the same quest gate as clickNames(). The main quest is
  * skipped, and the trigger status is not read. The caller must narrow the
  * names to host collectibles, because the same action also names buildings
- * that an item destroys.
+ * that an item destroys. openDestroyNames() is the same list kept only
+ * while the condition's trigger is still open.
  *
  * itemWant() tells whether a started quest still waits for an item to be
  * applied, placed or destroyed, so a caller never sends an item before its
@@ -363,17 +364,21 @@
 
     // The item_string of each buildingdestroyed end condition of the quest.
     // The main quest is skipped because it repeats its sub-quests' conditions
-    // and would list an object before its sub-quest runs. The trigger status
-    // is not read: what it means for this action is not known, and a picked-up
-    // object leaves the map, so an empty map is the done signal.
-    function destroyTargetsOf(q) {
+    // and would list an object before its sub-quest runs. Without openOnly the
+    // trigger status is not read, since a picked-up object leaves the map and
+    // an empty map is the done signal. With openOnly a condition whose trigger
+    // the client counts as done is dropped, so a caller can tell a pick-up
+    // still awaited from a done one (a missing status counts as open).
+    function destroyTargetsOf(q, openOnly) {
         if (nameOf(q).indexOf(MAIN_QUEST_MARK) !== -1) return [];
         var def = definition(q).def;
         var ends = def ? toList(def.endConditions_vector) : null;
         if (!ends) return [];
+        var statuses = openOnly === true ? toList(q.mQuestTriggersFinished_vector) : null;
         var out = [];
         for (var k = 0; k < ends.length; k++) {
             var en = ends[k];
+            if (en && openOnly === true && !isTriggerOpen(statuses, en)) continue;
             if (en && en.action_string === DESTROY_ACTION &&
                 typeof en.item_string === 'string' && en.item_string.length > 0) out.push(en.item_string);
         }
@@ -386,6 +391,13 @@
     // opts.running and opts.held work as described at questNames.
     function destroyNames(opts) {
         return questNames(opts, destroyTargetsOf);
+    }
+
+    // { name: true } for the buildingdestroyed items whose trigger is still
+    // open, with the same gate and opts.running / opts.held as destroyNames;
+    // null when the pool cannot be read.
+    function openDestroyNames(opts) {
+        return questNames(opts, function (q) { return destroyTargetsOf(q, true); });
     }
 
     function inList(list, value) {
@@ -669,6 +681,7 @@
     S.core.quests.definition = definition;
     S.core.quests.clickNames = clickNames;
     S.core.quests.destroyNames = destroyNames;
+    S.core.quests.openDestroyNames = openDestroyNames;
     S.core.quests.itemWant = itemWant;
 
 }(Steward));

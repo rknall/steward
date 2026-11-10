@@ -20,6 +20,10 @@
  * the viewed zone (null: the map cannot be read); the world's pickups.click
  * removes the object that was clicked.
  *
+ * Set w.awaited to a list of { name, zoneId } to name pick-ups a running quest
+ * still counts that are not on the map yet; the world's pickups.targets lists
+ * them (as collectibles) when asked with opts.awaited.
+ *
  * Set w.campsUnreadable = true to make the building list of the viewed zone
  * read as unreadable (core.buildings.readable() false), so no camp counts as
  * gone.
@@ -113,8 +117,14 @@ function patchCore(w) {
     S.core.pickups.targets = function (opts) {
         if (w.pickups === null) return null;
         var withPatterns = !!(opts && opts.patterns && opts.patterns.length);
-        return w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest' || p.named === true; })
+        var list = w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest' || p.named === true; })
             .map(function (p) { return { grid: p.grid, name: p.name, kind: p.kind, zoneId: p.zoneId }; });
+        if (opts && Array.isArray(opts.awaited) && Array.isArray(w.awaited)) {
+            w.awaited.forEach(function (a) {
+                opts.awaited.push({ name: a.name, kind: 'collectible', zoneId: a.zoneId });
+            });
+        }
+        return list;
     };
     S.core.pickups.click = function (target) {
         var done = false;
@@ -290,6 +300,7 @@ function world(o) {
             map: true, visit: true, travel: true, close: true, walk: false, starKeep: false, taken: false },
         blocked: {},
         pickups: [],
+        awaited: [],
         orders: [], raises: [], unloads: [], buffs: [], claims: [], reads: [],
         zoneSends: [], buffActions: [], productionOrders: [], closes: [],
         pending: [], entries: [], ghosts: [],

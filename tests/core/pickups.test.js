@@ -282,6 +282,53 @@ t.test('targets holds a named collectible whose quest is not running', function 
     t.assert.strictEqual(held[0].zoneId, ZONE);
 });
 
+// awaited: a running quest's open destroy name with no object on the map (an
+// unrelated object keeps the zone readable)
+function awaitedBoot(objects, collectibles, closed) {
+    var q = destroyQuest(['BuildingBucket'], 3);
+    if (closed) q.mQuestTriggersFinished_vector = [{ status: 1 }];
+    return boot({ quests: [q], objects: objects, collectibles: collectibles });
+}
+
+t.test('targets awaited reports a running quest\'s open destroy name with no object on the map', function () {
+    var b = awaitedBoot([obj('Rock', 50)], ['BuildingBucket']);
+    var awaited = [];
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true, awaited: awaited })), '');
+    t.assert.strictEqual(awaited.length, 1);
+    t.assert.strictEqual(awaited[0].name, 'BuildingBucket');
+    t.assert.strictEqual(awaited[0].kind, 'collectible');
+    t.assert.strictEqual(awaited[0].zoneId, ZONE);
+});
+
+t.test('targets awaited stays empty when the named collectible is on the map (it is listed instead)', function () {
+    var b = awaitedBoot([obj('BuildingBucket', 21, { selectable: false, attackable: false })], ['BuildingBucket']);
+    var awaited = [];
+    var l = targets(b, { quests: true, running: true, awaited: awaited });
+    t.assert.strictEqual(grids(l), 'collectible:BuildingBucket@21');
+    t.assert.strictEqual(awaited.length, 0);
+});
+
+t.test('targets awaited stays empty for a non-collectible object of that name on the map', function () {
+    var b = awaitedBoot([obj('BuildingBucket', 22)], []);
+    var awaited = [];
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true, awaited: awaited })), '');
+    t.assert.strictEqual(awaited.length, 0);
+});
+
+t.test('targets awaited stays empty for a closed trigger', function () {
+    var b = awaitedBoot([obj('Rock', 50)], ['BuildingBucket'], true);
+    var awaited = [];
+    targets(b, { quests: true, running: true, awaited: awaited });
+    t.assert.strictEqual(awaited.length, 0);
+});
+
+t.test('targets awaited is not filled without opts.running', function () {
+    var b = awaitedBoot([obj('Rock', 50)], ['BuildingBucket']);
+    var awaited = [];
+    targets(b, { quests: true, awaited: awaited });
+    t.assert.strictEqual(awaited.length, 0);
+});
+
 // ---- click ---------------------------------------------------------------------
 
 function bootQuest() {

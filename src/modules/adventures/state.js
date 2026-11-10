@@ -55,7 +55,10 @@
  * watched-wait clock of the zone trip, in the shape of quiet), pickupClock
  * (the clock of the wait for map objects, in the shape of quiet plus count,
  * the number of objects last seen, so a pick-up restarts it), zoneWait
- * (whether the "waiting for zone" line was logged) and deployProbe (run id
+ * (whether the "waiting for zone" line was logged), questAt (zone id and time
+ * of the last verified quest read or claim, which the trip end settles from),
+ * tripSeenAt (when the trip end last saw a quest or object left, so the map
+ * must stay clear for a settle time before it leaves) and deployProbe (run id
  * and key of the star-menu probe lines already logged). They describe callbacks and reads of this client session, which do not
  * exist after a restart.
  * resetMemory() is the one place that resets them for a new or loaded run.
@@ -745,6 +748,8 @@
         rs.stuckClock = null;
         rs.pickupClock = null;
         rs.zoneWait = false;
+        rs.questAt = null;
+        rs.tripSeenAt = null;
         rs.deployProbe = {};
     }
 

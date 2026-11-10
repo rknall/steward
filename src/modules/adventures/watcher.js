@@ -29,6 +29,10 @@
  * is memory only: after a client restart every finished quest is simply
  * tried again.
  *
+ * A verified read or claim stamps runState.questAt (memory only), because
+ * the quest's map objects and the next quest show some seconds later and the
+ * trip end settles from that time; changedAt(zoneId) returns the stamp.
+ *
  * One read or claim per plan() call keeps the module inside the scheduler's busy
  * contract: plan() runs only when no adventures queue entry is pending, so
  * a read or claim is never started while the previous one is still in
@@ -109,7 +113,7 @@
 
     // Reads one unread quest that is not waiting for a retry and returns.
     // Returns false when no read was due, so the claim may run instead.
-    function readOne(st) {
+    function readOne(st, zoneId) {
         var list = unread();
         if (!list || list.length === 0) return false;
         var table = retries();
@@ -125,6 +129,7 @@
                 var t = retries();
                 if (result && result.status === S.ActionResult.Verified) {
                     delete t[rkey];
+                    stateApi().current().questAt = { zoneId: zoneId, at: stateApi().now() };
                     S.kernel.log('adventures', 'quest ' + name + ' read');
                 } else {
                     t[rkey] = stateApi().now() + QUEST_RETRY_MS;
@@ -148,7 +153,8 @@
         if (typeof r.zoneId !== 'number' || S.core.zone.id() !== r.zoneId) return;
         if (st.partOf(r.step) === 'home') return;
 
-        if (readOne(st)) return;
+        var zoneId = r.zoneId;
+        if (readOne(st, zoneId)) return;
 
         var list = pending();
         if (!list || list.length === 0) return;
@@ -166,6 +172,7 @@
                 var t = retries();
                 if (result && result.status === S.ActionResult.Verified) {
                     delete t[key];
+                    stateApi().current().questAt = { zoneId: zoneId, at: stateApi().now() };
                     S.kernel.log('adventures', 'quest ' + name + ' claimed');
                 } else {
                     t[key] = stateApi().now() + QUEST_RETRY_MS;
@@ -175,6 +182,13 @@
             S.kernel.warn('adventures', 'quest ' + name + ': claim threw:', e);
         }
         if (!started) table[key] = st.now() + QUEST_RETRY_MS;
+    }
+
+    // Time of the last verified quest read or claim on that zone, or null.
+    function changedAt(zoneId) {
+        var q = stateApi().current().questAt;
+        if (q && typeof q === 'object' && q.zoneId === zoneId && typeof q.at === 'number') return q.at;
+        return null;
     }
 
     // Quest objects on the viewed island an open quest still waits to have
@@ -222,6 +236,7 @@
         objects:        objects,
         patterns:       patterns,
         pickupText:     pickupText,
+        changedAt:      changedAt,
         plan:           plan
     };
 

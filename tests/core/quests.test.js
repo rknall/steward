@@ -850,3 +850,46 @@ t.test('destroyNames skips finished and inactive quests', function () {
     t.assert.strictEqual(destroyList([fin, inactive, ok]), 'c');
     t.assert.strictEqual(destroyList([fin, inactive, ok], { running: true }), 'c');
 });
+
+function openList(list, opts) {
+    var n = bootClick(list).Q.openDestroyNames(opts);
+    return n === null ? null : Object.keys(n).sort().join(',');
+}
+
+t.test('openDestroyNames lists an open buildingdestroyed item of a running quest', function () {
+    var q = destroyQuest({ items: ['BuildingBucket'], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'BuildingBucket');
+});
+
+t.test('openDestroyNames drops a condition whose trigger is closed', function () {
+    var q = destroyQuest({ items: ['BuildingBucket', 'Ore'], statuses: [{ status: 1 }, { status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'Ore');
+});
+
+t.test('openDestroyNames keeps a condition whose trigger status is missing', function () {
+    var q = destroyQuest({ items: ['BuildingBucket', 'Ore'], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'BuildingBucket,Ore');
+});
+
+t.test('openDestroyNames skips the main quest and non-running quests under running', function () {
+    var main = destroyQuest({ name: 'Main quest', items: ['a'], mode: 3 });
+    var waiting = destroyQuest({ name: 'Waiting', items: ['b'], mode: 2 });
+    var sub = destroyQuest({ name: 'Sabotage', items: ['c'], mode: 3 });
+    t.assert.strictEqual(openList([main, waiting, sub], { running: true }), 'c');
+});
+
+t.test('openDestroyNames is null when the pool cannot be read', function () {
+    var b = boot([]);
+    b.H.host.game.quests = {
+        GetQuestPool: function () { throw new Error('pool failed'); }
+    };
+    t.assert.strictEqual(b.Q.openDestroyNames({ running: true }), null);
+    b.H.host.game.quests = undefined;
+    t.assert.strictEqual(b.Q.openDestroyNames({ running: true }), null);
+});
+
+t.test('destroyNames still lists a closed-trigger item', function () {
+    var q = destroyQuest({ items: ['BuildingBucket'], statuses: [{ status: 1 }], mode: 3 });
+    t.assert.strictEqual(destroyList([q], { running: true }), 'BuildingBucket');
+    t.assert.strictEqual(openList([q], { running: true }), '');
+});
