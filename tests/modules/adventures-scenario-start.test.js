@@ -24,7 +24,7 @@ function builtinText(id) {
     return fsys.readFileSync(path.join(ROOT, 'scenarios', id + '.json'), 'utf8');
 }
 
-// A booted setup with the checked-in twins_easy scenario as the one built-in
+// A booted setup with the checked-in twins scenario as the one built-in
 // and `maps` twins maps in the star menu. o.home (default true), o.zoneId
 // (open map's zone, default none), o.known (isProduceable answer: true, false,
 // null, or a function of the name).
@@ -34,8 +34,8 @@ function setup(maps, o) {
     var alerts = [];
     var H = harness.boot({ host: { air: fs.air, showGameAlert: function (m) { alerts.push(m); } } });
     var S = H.Steward;
-    S.modules.adventures.builtinScenarios = { twins_easy: builtinText('twins_easy') };
-    var rec = S.modules.adventures.scenarios.get('twins_easy');
+    S.modules.adventures.builtinScenarios = { twins: builtinText('twins') };
+    var rec = S.modules.adventures.scenarios.get('twins');
     var buffs = maps > 0 ? [{ type: 'Adventure', resource: rec.adventure, amount: maps }] : [];
     A.install(H, { buffs: buffs });
     var s = {
@@ -79,12 +79,12 @@ function lastAlert(s) {
 t.test('menu lists a built-in scenario after the templates with its map count', function () {
     var s = setup(3);
     var labels = menuLabels(s);
-    assert.deepStrictEqual(labels.slice(8), ['No templates yet', '---', 'Twins (easy) ×3']);
+    assert.deepStrictEqual(labels.slice(8), ['No templates yet', '---', 'Twins ×3']);
     var items = s.S.modules.adventures.menu.items();
     var called = [];
     s.run.startScenario = function (id) { called.push(id); };
     items[10].onSelect();
-    assert.deepStrictEqual(called, ['twins_easy']);
+    assert.deepStrictEqual(called, ['twins']);
 });
 
 t.test('menu without scenarios is the template list alone', function () {
@@ -101,7 +101,7 @@ t.test('a broken scenario file is a disabled row', function () {
     var last = items[items.length - 1];
     assert.strictEqual(labelOf(last), 'zz_bad: broken scenario file');
     assert.strictEqual(last.enabled, false);
-    assert.strictEqual(labelOf(items[items.length - 2]), 'Twins (easy) ×1');
+    assert.strictEqual(labelOf(items[items.length - 2]), 'Twins ×1');
 });
 
 t.test('sync rebuilds when the scenario set changes', function () {
@@ -124,7 +124,7 @@ t.test('startScenario refuses an unknown id and a missing map', function () {
     assert.strictEqual(s.run.startScenario('nope'), false);
     assert.ok(/cannot be read/.test(lastAlert(s)), lastAlert(s));
     var none = setup(0);
-    assert.strictEqual(none.run.startScenario('twins_easy'), false);
+    assert.strictEqual(none.run.startScenario('twins'), false);
     assert.ok(/map in the star menu/.test(lastAlert(none)), lastAlert(none));
     assert.strictEqual(none.prompts.length, 0);
     assert.strictEqual(none.st.run(), null);
@@ -132,7 +132,7 @@ t.test('startScenario refuses an unknown id and a missing map', function () {
 
 t.test('startScenario refuses away from home and stores nothing', function () {
     var s = setup(2, { home: false });
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     assert.strictEqual(lastAlert(s), 'Go home, then choose the scenario again.');
     assert.strictEqual(s.st.run(), null);
     assert.strictEqual(s.st.current().request, null);
@@ -140,14 +140,14 @@ t.test('startScenario refuses away from home and stores nothing', function () {
 
 t.test('startScenario refuses an item the game does not produce', function () {
     var s = setup(2, { known: function (n) { return n !== 'ChangeSkin_BuffAd_Bridge'; } });
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     assert.ok(/1 problem\(s\)\. unknown item ChangeSkin_BuffAd_Bridge/.test(lastAlert(s)), lastAlert(s));
     assert.strictEqual(s.st.run(), null);
 });
 
 t.test('startScenario asks to retry while item definitions are unreadable', function () {
     var s = setup(2, { known: null });
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     assert.strictEqual(lastAlert(s), 'Item definitions cannot be read right now; try again in a moment.');
     assert.strictEqual(s.st.run(), null);
 });
@@ -155,27 +155,27 @@ t.test('startScenario asks to retry while item definitions are unreadable', func
 t.test('startScenario stores nothing on a cancelled or invalid prompt', function () {
     var s = setup(2);
     s.answer = null;
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     s.answer = 'x';
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     assert.ok(/Not a run count/.test(lastAlert(s)), lastAlert(s));
     assert.strictEqual(s.st.run(), null);
 
     var open = setup(2, { zoneId: 77 });
     open.answers = ['1', null];
-    assert.strictEqual(open.run.startScenario('twins_easy'), false);
+    assert.strictEqual(open.run.startScenario('twins'), false);
     open.answers = ['1', '9'];
-    assert.strictEqual(open.run.startScenario('twins_easy'), false);
+    assert.strictEqual(open.run.startScenario('twins'), false);
     assert.ok(/Not a trip number: 9/.test(lastAlert(open)), lastAlert(open));
     assert.strictEqual(open.st.run(), null);
 });
 
 t.test('replacing a request needs confirm; declined keeps the old one', function () {
     var s = setup(2);
-    assert.strictEqual(s.run.startScenario('twins_easy'), true);
+    assert.strictEqual(s.run.startScenario('twins'), true);
     var first = s.st.run().id;
     s.agree = false;
-    assert.strictEqual(s.run.startScenario('twins_easy'), false);
+    assert.strictEqual(s.run.startScenario('twins'), false);
     assert.strictEqual(s.confirms.length, 1);
     assert.strictEqual(s.st.run().id, first);
 });
@@ -185,15 +185,15 @@ t.test('replacing a request needs confirm; declined keeps the old one', function
 t.test('startScenario at home stores a scenario run at Muster, trip 0', function () {
     var s = setup(3);
     s.answer = '2';
-    assert.strictEqual(s.run.startScenario('twins_easy'), true);
+    assert.strictEqual(s.run.startScenario('twins'), true);
     var S = s.S;
     var r = s.st.run();
     var q = s.st.current().request;
     assert.strictEqual(r.step, S.RunStep.Muster);
     assert.strictEqual(r.status, S.RunStatus.Running);
-    assert.strictEqual(r.scenarioId, 'twins_easy');
+    assert.strictEqual(r.scenarioId, 'twins');
     assert.strictEqual(r.templateId, '');
-    assert.strictEqual(r.label, 'Twins (easy)');
+    assert.strictEqual(r.label, 'Twins');
     assert.strictEqual(r.adventure, s.rec.adventure);
     assert.strictEqual(r.zoneId, null);
     assert.strictEqual(r.trip, 0);
@@ -203,7 +203,7 @@ t.test('startScenario at home stores a scenario run at Muster, trip 0', function
     assert.strictEqual(s.st.isScenario(r), true);
     assert.strictEqual(q.count, 2);
     assert.strictEqual(q.templateId, '');
-    assert.strictEqual(q.label, 'Twins (easy)');
+    assert.strictEqual(q.label, 'Twins');
     assert.strictEqual(s.prompts.length, 1);
     assert.strictEqual(s.prompts[0].def, '3');
     assert.deepStrictEqual(plain(s.asked), plain(S.modules.adventures.scenarios.buffsOf(s.rec)));
@@ -212,19 +212,19 @@ t.test('startScenario at home stores a scenario run at Muster, trip 0', function
     // The run state is written to its file.
     var saved = Object.keys(s.fs.disk).filter(function (k) { return /run\.json$/.test(k); });
     assert.strictEqual(saved.length, 1);
-    assert.strictEqual(JSON.parse(s.fs.disk[saved[0]]).run.scenarioId, 'twins_easy');
+    assert.strictEqual(JSON.parse(s.fs.disk[saved[0]]).run.scenarioId, 'twins');
 });
 
 t.test('startScenario on an open map asks the start trip', function () {
     var s = setup(1, { zoneId: 77 });
     s.answers = ['1', '2'];
-    assert.strictEqual(s.run.startScenario('twins_easy'), true);
+    assert.strictEqual(s.run.startScenario('twins'), true);
     var r = s.st.run();
     assert.strictEqual(r.trip, 1);
     assert.strictEqual(r.zoneId, 77);
     assert.strictEqual(r.step, s.S.RunStep.Muster);
     assert.strictEqual(s.prompts.length, 2);
-    assert.strictEqual(s.prompts[1].text, 'Start at which trip of "Twins (easy)"? 1..' + s.rec.trips.length);
+    assert.strictEqual(s.prompts[1].text, 'Start at which trip of "Twins"? 1..' + s.rec.trips.length);
     assert.strictEqual(s.prompts[1].def, '1');
 });
 
@@ -232,7 +232,7 @@ t.test('startScenario on an open map asks the start trip', function () {
 
 t.test('run menu of a scenario run: scenario rows, skipped general rows, one Waves row', function () {
     var s = setup(1);
-    assert.strictEqual(s.run.startScenario('twins_easy'), true);
+    assert.strictEqual(s.run.startScenario('twins'), true);
     var rm = s.S.modules.adventures.runmenu;
     var st = s.st;
     var groups = rm.rows();

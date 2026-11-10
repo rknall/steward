@@ -20,7 +20,7 @@ function setup() {
 function twins() {
     return {
         version: 1,
-        label: 'Twins (easy)',
+        label: 'Twins',
         adventure: 'BuffAdventures_Twins',
         trips: [
             {},
@@ -65,9 +65,9 @@ t.test('normTrips rejects bad shapes', function () {
 
 t.test('fromText parses a scenario and reports why a broken one is broken', function () {
     var s = setup();
-    var rec = s.sc.fromText('twins_easy', 'built-in', text(twins()), 'builtin');
-    assert.strictEqual(rec.id, 'twins_easy');
-    assert.strictEqual(rec.label, 'Twins (easy)');
+    var rec = s.sc.fromText('twins', 'built-in', text(twins()), 'builtin');
+    assert.strictEqual(rec.id, 'twins');
+    assert.strictEqual(rec.label, 'Twins');
     assert.strictEqual(rec.source, 'builtin');
     assert.strictEqual(rec.trips.length, 3);
 
@@ -101,15 +101,15 @@ t.test('list merges built-ins and files, a file overrides, broken entries come l
     var other = twins(); other.label = 'Alpha';
     var over = twins(); over.label = 'Twins edited';
     s.S.modules.adventures.builtinScenarios = {
-        twins_easy: text(twins()),
+        twins: text(twins()),
         alpha: text(other),
         'bad id': text(twins())
     };
-    s.fs.disk[DIR + '/twins_easy.json'] = text(over);
+    s.fs.disk[DIR + '/twins.json'] = text(over);
     s.fs.disk[DIR + '/zeta.json'] = '{nope';
     s.fs.disk[DIR + '/notes.txt'] = 'x';
     var all = s.sc.list();
-    assert.deepStrictEqual(plain(all.map(function (r) { return r.id; })), ['alpha', 'twins_easy', 'zeta']);
+    assert.deepStrictEqual(plain(all.map(function (r) { return r.id; })), ['alpha', 'twins', 'zeta']);
     assert.strictEqual(all[0].source, 'builtin');
     assert.strictEqual(all[1].label, 'Twins edited');
     assert.strictEqual(all[1].source, 'file');
@@ -118,19 +118,19 @@ t.test('list merges built-ins and files, a file overrides, broken entries come l
 
 t.test('a broken user file replaces the built-in of its id', function () {
     var s = setup();
-    s.S.modules.adventures.builtinScenarios = { twins_easy: text(twins()) };
-    s.fs.disk[DIR + '/twins_easy.json'] = '{nope';
+    s.S.modules.adventures.builtinScenarios = { twins: text(twins()) };
+    s.fs.disk[DIR + '/twins.json'] = '{nope';
     var all = s.sc.list();
     assert.strictEqual(all.length, 1);
     assert.ok(all[0].error);
-    assert.strictEqual(s.sc.get('twins_easy'), null);
+    assert.strictEqual(s.sc.get('twins'), null);
 });
 
 t.test('list works without a built-in table and get finds records', function () {
     var s = setup();
     assert.deepStrictEqual(plain(s.sc.list()), []);
-    s.S.modules.adventures.builtinScenarios = { twins_easy: text(twins()) };
-    assert.strictEqual(s.sc.get('twins_easy').label, 'Twins (easy)');
+    s.S.modules.adventures.builtinScenarios = { twins: text(twins()) };
+    assert.strictEqual(s.sc.get('twins').label, 'Twins');
     assert.strictEqual(s.sc.get('missing'), null);
 });
 

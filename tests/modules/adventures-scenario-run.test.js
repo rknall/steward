@@ -432,6 +432,24 @@ t.test('Apply: a quest that no longer wants the item skips its grids', function 
     assert.ok(logged(w, /quest no longer wants ChangeSkin_BuffAd_Bridge; 2 grid\(s\) skipped/), logLines(w).join('\n'));
 });
 
+t.test('Trip: a collectible a running quest counts holds the trip; JumpHome once it is picked up', function () {
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12], met: true,
+        stayOpen: true }, { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 5);
+    // The trip counts map objects only where collect picks up on adventures.
+    w.H.settings.write('collect', { enabled: true, namePatterns: [], adventureZones: true });
+    onIsland(w, record(w, ONE), 0);
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    w.pickups = [{ grid: 31, name: 'BuildingBucket', kind: 'collectible', named: true, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    assert.ok(!logged(w, /leaving with/), logLines(w).join('\n'));
+    w.pickups = [];
+    drive(w, { until: at('JumpHome') });
+    assertStep(w, 'JumpHome');
+});
+
 // ---- amounts and stock --------------------------------------------------------------
 
 t.test('Apply: a send offers min(amount, stock); a full-bound send taken whole is done', function () {

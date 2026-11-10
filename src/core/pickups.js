@@ -3,7 +3,11 @@
  *
  * targets() lists two kinds of map object. Quest objects are the map objects
  * an open quest still waits to have clicked (S.core.quests.clickNames()),
- * read only on an adventure zone. Collectibles are the objects the host flags
+ * read only on an adventure zone, plus the host collectibles that an open
+ * quest's buildingdestroyed end condition names (S.core.quests.destroyNames()).
+ * Those are listed only when the host flags them collectible, so a building
+ * site or rubble that an item destroys is never clicked, and they get kind
+ * 'collectible' so the click verifies them as a collectible. Collectibles are the objects the host flags
  * as collectible whose name matches one of the given patterns. On request
  * the quest objects are limited to running quests, and the ones that wait
  * for their quest to run are reported apart. Which kinds to
@@ -92,7 +96,9 @@
     }
 
     // [{ grid, name, kind: 'quest'|'collectible', zoneId }] in building-list
-    // order, or null when the map cannot be read. opts.patterns is an
+    // order, or null when the map cannot be read. With opts.quests, a host
+    // collectible that a quest's buildingdestroyed end condition names is
+    // listed as kind 'collectible' too. opts.patterns is an
     // already expanded pattern list (missing or empty: no collectibles);
     // opts.quests true includes quest objects on an adventure zone.
     // opts.running true takes quest objects of running quests only (the
@@ -107,9 +113,13 @@
         if (!bld.readable()) return null;
         var names = null;
         var held = opts.held ? {} : null;
+        var destroy = null;
+        var heldDestroy = opts.held ? {} : null;
         if (opts.quests === true && S.core.zone.isAdventure()) {
             names = S.core.quests.clickNames(opts.running === true ? { running: true, held: held } : null);
             if (names === null) return null;
+            destroy = S.core.quests.destroyNames(opts.running === true ? { running: true, held: heldDestroy } : null);
+            if (destroy === null) return null;
         }
         var pats = (opts.patterns && opts.patterns.length) ? opts.patterns : null;
         var src = bld.list();
@@ -122,11 +132,15 @@
             if (g === null || g === undefined) continue;
             var kind = null;
             if (names && hasOwn(names, n) && isQuestObject(b)) kind = 'quest';
+            else if (destroy && hasOwn(destroy, n) && bld.isCollectible(b)) kind = 'collectible';
             else if (pats && bld.isCollectible(b) && matches(n, pats)) kind = 'collectible';
             if (kind) out.push({ grid: g, name: n, kind: kind, zoneId: zoneId });
             else if (held && hasOwn(held, n) && isQuestObject(b)) {
                 opts.held.push({ grid: g, name: n, kind: 'quest', zoneId: zoneId,
                     quest: held[n].quest, mode: held[n].mode });
+            } else if (heldDestroy && hasOwn(heldDestroy, n) && bld.isCollectible(b)) {
+                opts.held.push({ grid: g, name: n, kind: 'collectible', zoneId: zoneId,
+                    quest: heldDestroy[n].quest, mode: heldDestroy[n].mode });
             }
         }
         return out;

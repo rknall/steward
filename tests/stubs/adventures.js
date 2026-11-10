@@ -108,12 +108,12 @@ function patchCore(w) {
     };
 
     // Map objects of the viewed zone: w.pickups is null (unreadable) or a
-    // list of { grid, name, kind, zoneId }. Like the real read, an ask with no
-    // patterns lists quest objects only.
+    // list of { grid, name, kind, zoneId, named }. Like the real read, an ask with no
+    // patterns lists quest objects and the collectibles a quest names
     S.core.pickups.targets = function (opts) {
         if (w.pickups === null) return null;
         var withPatterns = !!(opts && opts.patterns && opts.patterns.length);
-        return w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest'; })
+        return w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest' || p.named === true; })
             .map(function (p) { return { grid: p.grid, name: p.name, kind: p.kind, zoneId: p.zoneId }; });
     };
     S.core.pickups.click = function (target) {

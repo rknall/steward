@@ -19,7 +19,7 @@
 | `Steward.core.buffs`       | Star-menu buff stock (including adventure maps), buff definitions and building production buffs. |
 | `Steward.core.breaker`     | Run counter and probe cooldown; named instances for the send guard and mining buffs. |
 | `Steward.core.actions`     | Runs write actions: send, verify by observation, retry once. |
-| `Steward.core.quests`      | Quest pool reads, click trigger names and the claim action. |
+| `Steward.core.quests`      | Quest pool reads, click-trigger and pick-up names and the claim action. |
 | `Steward.core.pickups`     | Clickable quest objects and collectibles of the viewed zone, and the click action. |
 | `Steward.core.production`  | Troop queue reads, order pricing and the order action. |
 | `Steward.core.resources`   | Resource amount and free population reads.            |

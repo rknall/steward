@@ -227,6 +227,61 @@ t.test('targets running lists an object once its quest reaches mode 3', function
     t.assert.strictEqual(grids(targets(b, { quests: true, running: true })), 'quest:crate@1');
 });
 
+// A quest whose end conditions count the named objects as destroyed (the
+// pick-up kind the host has no click trigger for), in the given mode.
+function destroyQuest(namesList, mode, qname) {
+    var ends = namesList.map(function (n, i) {
+        return { action_string: 'buildingdestroyed', item_string: n, triggerIdx: i };
+    });
+    return {
+        isFinished:    function () { return false; },
+        IsQuestActive: function () { return true; },
+        GetQuestDefinition: function () { return { questTriggers_vector: [], endConditions_vector: ends }; },
+        mQuestTriggersFinished_vector: [],
+        mQuestMode: mode,
+        getQuestName_string: function () { return qname || 'Sabotage'; }
+    };
+}
+
+t.test('targets lists a collectible a running quest\'s buildingdestroyed condition names as kind collectible', function () {
+    var b = boot({
+        quests: [destroyQuest(['BuildingBucket'], 3)],
+        objects: [obj('BuildingBucket', 21, { selectable: false, attackable: false }),
+            obj('BuildingStripedEggs', 22, { selectable: false, attackable: false })],
+        collectibles: ['BuildingBucket', 'BuildingStripedEggs']
+    });
+    var l = targets(b, { quests: true, running: true });
+    t.assert.strictEqual(grids(l), 'collectible:BuildingBucket@21');
+    t.assert.strictEqual(l[0].zoneId, ZONE);
+});
+
+t.test('targets does not list a buildingdestroyed target the host does not flag collectible', function () {
+    var b = boot({
+        quests: [destroyQuest(['BuildingSite', 'Rubble'], 3)],
+        objects: [obj('BuildingSite', 31), obj('Rubble', 32)],
+        collectibles: []
+    });
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true })), '');
+    var held = [];
+    t.assert.strictEqual(grids(targets(b, { quests: true, running: true, held: held })), '');
+    t.assert.strictEqual(held.length, 0);
+});
+
+t.test('targets holds a named collectible whose quest is not running', function () {
+    var b = boot({
+        quests: [destroyQuest(['BuildingBucket'], 2, 'Sabotage')],
+        objects: [obj('BuildingBucket', 41, { selectable: false, attackable: false })],
+        collectibles: ['BuildingBucket']
+    });
+    var held = [];
+    var l = targets(b, { quests: true, running: true, held: held });
+    t.assert.strictEqual(grids(l), '');
+    t.assert.strictEqual(grids(held), 'collectible:BuildingBucket@41');
+    t.assert.strictEqual(held[0].quest, 'Sabotage');
+    t.assert.strictEqual(held[0].mode, 2);
+    t.assert.strictEqual(held[0].zoneId, ZONE);
+});
+
 // ---- click ---------------------------------------------------------------------
 
 function bootQuest() {
@@ -293,6 +348,19 @@ t.test('click is verified when a collectible leaves its grid', function () {
     t.assert.strictEqual(l.length, 1);
     var r = run(b, b.P.click(l[0]), function () { remove(b, b.made[0]); });
     t.assert.strictEqual(r.status, b.S.ActionResult.Verified);
+});
+
+t.test('click verifies a named collectible that is not selectable once it leaves its grid', function () {
+    var b = boot({
+        quests: [destroyQuest(['BuildingBucket'], 3)],
+        objects: [obj('BuildingBucket', 51, { selectable: false, attackable: false }), obj('rock', 52)],
+        collectibles: ['BuildingBucket']
+    });
+    var l = targets(b, { quests: true, running: true });
+    t.assert.strictEqual(l.length, 1);
+    var r = run(b, b.P.click(l[0]), function () { remove(b, b.made[0]); });
+    t.assert.strictEqual(r.status, b.S.ActionResult.Verified);
+    t.assert.strictEqual(b.selected.length, 1);
 });
 
 t.test('click is not verified while the object still reads the same', function () {

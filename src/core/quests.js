@@ -39,11 +39,18 @@
  * (click a named map object) and a non-empty name_string, and its entry in
  * mQuestTriggersFinished_vector (by triggerIdx) is missing or has status 0.
  *
+ * destroyNames() names the map objects that an open quest counts as destroyed
+ * (end condition buildingdestroyed), such as quest pick-ups like buckets, ore
+ * or fire wood. It uses the same quest gate as clickNames(). The main quest is
+ * skipped, and the trigger status is not read. The caller must narrow the
+ * names to host collectibles, because the same action also names buildings
+ * that an item destroys.
+ *
  * itemWant() tells whether a started quest still waits for an item to be
  * applied, placed or destroyed, so a caller never sends an item before its
  * quest is read and started.
  *
- * Both take opts.running for the strict gate a scenario island needs: only a
+ * All three take opts.running for the strict gate a scenario island needs: only a
  * running quest counts, meaning in the pool, not finished, IsQuestActive()
  * and in READ_MODE. Any other mode (unread, or one the client set for other
  * reasons) never counts, because a pick-up or item spent on a quest that does
@@ -248,7 +255,7 @@
     }
 
     // The strict gate: the quest is open, the client counts it as active and
-    // it runs in READ_MODE. The one definition clickNames and itemWant use
+    // it runs in READ_MODE. The one definition questNames and itemWant use
     // under opts.running.
     function isRunning(q) {
         return modeOf(q) === READ_MODE && isOpenActive(q);
@@ -282,13 +289,15 @@
         return st.status === 0;
     }
 
-    // { name: true } for every map object an open, active, started quest
-    // still waits to have clicked; null when the pool cannot be read. A quest
-    // whose read throws is skipped, as list() does. With opts.running only
-    // running quests count, and opts.held (an object), when given, gets
-    // name -> { quest, mode } for each object that only a quest not running
-    // yet waits for.
-    function clickNames(opts) {
+    // The walker behind clickNames and destroyNames, so both apply one quest
+    // gate. namesOf(q) gives the map object names one quest still waits for;
+    // it runs only for a quest past the gate (or, under opts.running, one
+    // that is held) and may throw, which skips that quest as list() does.
+    // { name: true } for the quests that count; null when the pool cannot be
+    // read. With opts.running only running quests count, and opts.held (an
+    // object), when given, gets name -> { quest, mode } for each object that
+    // only a quest not running yet waits for.
+    function questNames(opts, namesOf) {
         opts = opts || {};
         var strict = opts.running === true;
         var qs = readPool();
@@ -301,15 +310,11 @@
                 if (!isQuest(q) || q.isFinished() === true) continue;
                 var counts = strict ? isRunning(q) : (modeOf(q) !== UNREAD_MODE && isOpenActive(q));
                 if (!counts && !strict) continue;
-                var def = definition(q).def;
-                var triggers = def ? toList(def.questTriggers_vector) : null;
-                if (!triggers) continue;
-                var statuses = toList(q.mQuestTriggersFinished_vector);
-                for (var k = 0; k < triggers.length; k++) {
-                    var t = triggers[k];
-                    if (!isClickTrigger(t) || !isTriggerOpen(statuses, t)) continue;
-                    if (counts) out[t.name_string] = true;
-                    else if (!hasOwn(held, t.name_string)) held[t.name_string] = { quest: nameOf(q), mode: modeOf(q) };
+                var names = namesOf(q);
+                for (var k = 0; k < names.length; k++) {
+                    var n = names[k];
+                    if (counts) out[n] = true;
+                    else if (!hasOwn(held, n)) held[n] = { quest: nameOf(q), mode: modeOf(q) };
                 }
             } catch (e) {
                 S.kernel.warn('quests', 'quest entry ' + i + ' threw:', e);
@@ -324,12 +329,64 @@
         return out;
     }
 
+    // The name_string of each click trigger of the quest that is still open.
+    function clickTargetsOf(q) {
+        var def = definition(q).def;
+        var triggers = def ? toList(def.questTriggers_vector) : null;
+        if (!triggers) return [];
+        var statuses = toList(q.mQuestTriggersFinished_vector);
+        var out = [];
+        for (var k = 0; k < triggers.length; k++) {
+            var t = triggers[k];
+            if (isClickTrigger(t) && isTriggerOpen(statuses, t)) out.push(t.name_string);
+        }
+        return out;
+    }
+
+    // { name: true } for every map object an open, active, started quest
+    // still waits to have clicked; null when the pool cannot be read. A quest
+    // whose read throws is skipped, as list() does. opts.running and
+    // opts.held work as described at questNames.
+    function clickNames(opts) {
+        return questNames(opts, clickTargetsOf);
+    }
+
+    // End-condition action of a quest that counts a map object as destroyed.
+    var DESTROY_ACTION = 'buildingdestroyed';
+
     // The end-condition actions that name an item to apply, place or destroy.
-    var ITEM_ACTIONS = ['buffappliedonadventure', 'onmap', 'buildingdestroyed'];
+    var ITEM_ACTIONS = ['buffappliedonadventure', 'onmap', DESTROY_ACTION];
 
     // The main quest repeats the conditions of its sub-quests, so counting it
     // would report an item as wanted before any sub-quest is started.
     var MAIN_QUEST_MARK = 'Main';
+
+    // The item_string of each buildingdestroyed end condition of the quest.
+    // The main quest is skipped because it repeats its sub-quests' conditions
+    // and would list an object before its sub-quest runs. The trigger status
+    // is not read: what it means for this action is not known, and a picked-up
+    // object leaves the map, so an empty map is the done signal.
+    function destroyTargetsOf(q) {
+        if (nameOf(q).indexOf(MAIN_QUEST_MARK) !== -1) return [];
+        var def = definition(q).def;
+        var ends = def ? toList(def.endConditions_vector) : null;
+        if (!ends) return [];
+        var out = [];
+        for (var k = 0; k < ends.length; k++) {
+            var en = ends[k];
+            if (en && en.action_string === DESTROY_ACTION &&
+                typeof en.item_string === 'string' && en.item_string.length > 0) out.push(en.item_string);
+        }
+        return out;
+    }
+
+    // { name: true } for every map object an open, active, started quest
+    // counts as destroyed; null when the pool cannot be read. The names are
+    // not narrowed to pick-ups: the caller keeps only host collectibles.
+    // opts.running and opts.held work as described at questNames.
+    function destroyNames(opts) {
+        return questNames(opts, destroyTargetsOf);
+    }
 
     function inList(list, value) {
         for (var i = 0; i < list.length; i++) {
@@ -611,6 +668,7 @@
     S.core.quests.read     = read;
     S.core.quests.definition = definition;
     S.core.quests.clickNames = clickNames;
+    S.core.quests.destroyNames = destroyNames;
     S.core.quests.itemWant = itemWant;
 
 }(Steward));

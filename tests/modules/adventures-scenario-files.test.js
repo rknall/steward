@@ -42,6 +42,15 @@ t.test('the repo has checked-in scenario files', function () {
     assert.ok(files().length >= 1, 'scenarios/*.json');
 });
 
+// Windows git ignores case-only renames, and CI checks out on a case-sensitive
+// file system. Keeping every id lowercase stops the two platforms from
+// disagreeing on the id a file embeds under.
+t.test('every checked-in scenario file name is lowercase', function () {
+    files().forEach(function (name) {
+        assert.strictEqual(name, name.toLowerCase(), name + ': file name must be lowercase');
+    });
+});
+
 t.test('every checked-in scenario parses with a valid id and full buff names', function () {
     var S = boot();
     var sc = S.modules.adventures.scenarios;
