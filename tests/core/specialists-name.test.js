@@ -121,3 +121,51 @@ t.test('byName finds a spec whose name decodes to a literal tag', function () {
     t.assert.strictEqual(c.name(s), 'Camp <x> A');
     t.assert.strictEqual(c.byName('Camp <x> A', { zone: zoneOf([s]) }), s);
 });
+
+// The core caches the static class per context, so it is installed before the
+// first specialist read of a test.
+function withKinds(H, labels) {
+    var cls = H.specs.kindClass(labels);
+    H.host.game.def = function (n) { return n === 'Specialists::cSpecialist' ? cls : null; };
+}
+
+t.test('kind returns GetType and null for a ghost or a non-number', function () {
+    var H = boot();
+    var c = H.Steward.core.specialists;
+    t.assert.strictEqual(c.kind(H.specs.geologist({ kind: 76 })), 76);
+    t.assert.strictEqual(c.kind(H.specs.geologist()), 2);
+    t.assert.strictEqual(c.kind(null), null);
+    var s = H.specs.geologist();
+    s.GetType = function () { return 'x'; };
+    t.assert.strictEqual(c.kind(s), null);
+    s.GetType = function () { return NaN; };
+    t.assert.strictEqual(c.kind(s), null);
+    s.GetType = undefined;
+    t.assert.strictEqual(c.kind(s), null);
+});
+
+t.test('kindLabel reads the static description through the locale and gives empty when unreadable', function () {
+    var H = boot();
+    withKinds(H, { 76: '<b>Gingerbread</b>' });
+    var c = H.Steward.core.specialists;
+    H.Steward.core.locale = null;
+    t.assert.strictEqual(c.kindLabel(76), 'Gingerbread');
+    H.Steward.core.locale = { spe: function (key) { return '<i>L:' + key + '</i>'; } };
+    t.assert.strictEqual(c.kindLabel(76), 'L:Gingerbread');
+    t.assert.strictEqual(c.kindLabel(5), '');
+    t.assert.strictEqual(c.kindLabel('76'), '');
+    t.assert.strictEqual(c.kindLabel(NaN), '');
+});
+
+t.test('kindLabel is empty without the host class', function () {
+    var H = boot();
+    t.assert.strictEqual(H.Steward.core.specialists.kindLabel(76), '');
+});
+
+t.test('name still falls back to the description label', function () {
+    var H = boot();
+    var c = H.Steward.core.specialists;
+    H.Steward.core.locale = { spe: function (key) { return key + '!'; } };
+    t.assert.strictEqual(c.name(locFallbackSpec(H, 'Geo')), 'Geo!');
+    t.assert.strictEqual(c.name(locFallbackSpec(H, '')), '');
+});

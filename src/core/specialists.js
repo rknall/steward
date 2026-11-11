@@ -341,6 +341,41 @@
     // The host returns names as HTML display strings.
     function cleanName(raw) { return (typeof raw === 'string') ? S.kernel.text.plain(raw) : raw; }
 
+    // Localized, cleaned name of a specialist description: the description's
+    // getName_string() is a loca key, looked up when the locale is ready. ''
+    // when the description or the key is missing or a call throws.
+    function descName(desc) {
+        try {
+            if (desc && typeof desc.getName_string === 'function') {
+                var key = desc.getName_string();
+                if (key) {
+                    return cleanName((S.core.locale && S.core.locale.spe) ? S.core.locale.spe(key) : key);
+                }
+            }
+        } catch (e) { /* fall through */ }
+        return '';
+    }
+
+    // A specialist's kind is the host GetType() number: locale independent and
+    // stable, unlike the label. null for a ghost or any non-number.
+    function specKind(spec) {
+        var rt = rawType(spec);
+        return (typeof rt === 'number' && isFinite(rt)) ? rt : null;
+    }
+
+    // Localized label of a kind, read from the static type definition, so it
+    // works for a kind nobody owns. '' when unreadable.
+    function kindLabel(type) {
+        if (typeof type !== 'number' || !isFinite(type)) return '';
+        try {
+            var cls = getCSpecialist();
+            if (cls && typeof cls.GetSpecialistDescriptionForType === 'function') {
+                return descName(cls.GetSpecialistDescriptionForType(type));
+            }
+        } catch (e) { /* fall through */ }
+        return '';
+    }
+
     function specName(spec) {
         if (!spec) return '';
         // ArgumentError #1063 (wrong number of arguments) varies by
@@ -370,13 +405,7 @@
         // name; raw key returned if loca isn't ready.
         try {
             if (typeof spec.GetSpecialistDescription === 'function') {
-                var desc = spec.GetSpecialistDescription();
-                if (desc && typeof desc.getName_string === 'function') {
-                    var key = desc.getName_string();
-                    if (key) {
-                        return cleanName((S.core.locale && S.core.locale.spe) ? S.core.locale.spe(key) : key);
-                    }
-                }
+                return descName(spec.GetSpecialistDescription());
             }
         } catch (e) { /* fall through */ }
         return '';
@@ -1082,6 +1111,8 @@
     S.core.specialists.recall           = recall;
 
     S.core.specialists.name             = specName;
+    S.core.specialists.kind             = specKind;
+    S.core.specialists.kindLabel        = kindLabel;
     S.core.specialists.portraitTag      = portraitTag;
     S.core.specialists.compareByName    = compareByName;
     S.core.specialists.namedOverride    = namedOverride;

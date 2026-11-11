@@ -383,6 +383,23 @@ t.test('table rowCls takes a string or a function', function () {
     assert.ok($b.find('tbody tr').eq(1).hasClass('second'));
 });
 
+t.test('table renders a span row as one full-width cell', function () {
+    var s = setup();
+    var $t = s.h.table({
+        cols: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+        rows: [['x', 'y', 'z'], { span: s.$('<div>', { 'class': 'inner' }).text('in'), cls: 'extra' }, ['p', 'q', 'r']]
+    });
+    var $rows = $t.find('tbody tr');
+    assert.strictEqual($rows.length, 3);
+    var $td = $rows.eq(1).children('td');
+    assert.strictEqual($td.length, 1);
+    assert.strictEqual($td.attr('colspan'), '3');
+    assert.ok($td.hasClass('steward-span'));
+    assert.ok($td.hasClass('extra'));
+    assert.strictEqual($td.find('.inner').length, 1);
+    assert.strictEqual($rows.eq(2).children('td').length, 3);
+});
+
 // ---- Small shapes -----------------------------------------------------------
 
 t.test('card, field and badge emit the contract classes', function () {
@@ -435,6 +452,19 @@ t.test('chips mark the active one and report a pick', function () {
     assert.ok($chips.eq(1).hasClass('active'));
     $chips.eq(0).trigger('click');
     assert.deepStrictEqual(picked, ['a']);
+});
+
+t.test('chips mark every item flagged active and still report the id', function () {
+    var s = setup();
+    var picked = [];
+    var $c = s.h.chips([{ id: 'a', label: 'A', active: true }, { id: 'b', label: 'B' },
+        { id: 'c', label: 'C', active: true }], null, function (id) { picked.push(id); });
+    var $chips = $c.children('.steward-chip');
+    assert.ok($chips.eq(0).hasClass('active'));
+    assert.ok(!$chips.eq(1).hasClass('active'));
+    assert.ok($chips.eq(2).hasClass('active'));
+    $chips.eq(2).trigger('click');
+    assert.deepStrictEqual(picked, ['c']);
 });
 
 t.test('grid, empty, banner and toolRow keep the structure the sheet styles', function () {

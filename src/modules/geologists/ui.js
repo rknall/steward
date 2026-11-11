@@ -4,11 +4,14 @@
  * Renders the Geologists tab in the split layout: the settings column
  * (`side`) holds the module switch, the send delay and the per-deposit
  * table (search on/off, how many are on the map, the Max to keep), the
- * main column (`render`) the live geologist list with filter chips. The
- * per-geologist override map is still hand-edited in settings.json. The
- * "Show ranking in log" link dumps a per-deposit ranking plus idle/busy/
- * wanted state at once, so users can preview routing before they switch
- * the module on.
+ * main column (`render`) the live geologist list with filter chips. Next
+ * to each Search toggle a `default` / `override` word opens the kind
+ * override editor of that deposit: a row of chips, one per geologist kind,
+ * ticking the kinds that alone may search it. The per-geologist name
+ * override map is still hand-edited in settings.json. The "Show ranking in
+ * log" link dumps a per-deposit ranking plus idle/busy/wanted state at
+ * once, filtered the way the dispatcher filters, so users can preview
+ * routing before they switch the module on.
  *
  * Shown values come from the buffer, falling back to readSettings(), which
  * merges the defaults: the stored settings may lack a deposit row the
@@ -52,6 +55,69 @@
         return (Math.round(n * 100) / 100).toFixed(2);
     }
 
+    // ---------------------------------------------------------------
+    // Geologist kinds (host GetType numbers).
+    // ---------------------------------------------------------------
+
+    // Owned geologists grouped by kind: `order` lists the kinds by the name
+    // order of their first geologist, `byKind` holds that geologist's name
+    // as the label and how many of the kind are owned. A geologist whose
+    // kind cannot be read belongs to no group.
+    function indexGeos(geos) {
+        var c = S.core.specialists;
+        var out = { ok: true, order: [], byKind: {} };
+        var list = (geos || []).slice();
+        list.sort(c.compareByName);
+        for (var i = 0; i < list.length; i++) {
+            var k = null, nm = '';
+            try { k = c.kind(list[i]); nm = c.name(list[i]) || ''; }
+            catch (e) { k = null; }
+            if (k === null) continue;
+            var key = String(k);
+            if (!out.byKind[key]) {
+                out.byKind[key] = { label: nm, count: 0 };
+                out.order.push(k);
+            }
+            out.byKind[key].count++;
+        }
+        return out;
+    }
+
+    // One read of the geologists per deposits draw; `ok` is false when the
+    // list could not be read.
+    function kindIndex() {
+        var c = S.core.specialists;
+        var geos;
+        try { geos = (c && c.geologists) ? (c.geologists() || []) : []; }
+        catch (e) {
+            S.kernel.warn('geologists', 'could not list geologists:', e);
+            return { ok: false, order: [], byKind: {} };
+        }
+        return indexGeos(geos);
+    }
+
+    // The label of a kind everywhere it is shown: an owned geologist's
+    // name, else the host's label of the kind, else its number.
+    function kindName(index, k) {
+        var e = index.byKind[String(k)];
+        if (e && e.label) return e.label;
+        var lbl = '';
+        try { lbl = S.core.specialists.kindLabel(k); }
+        catch (err) { lbl = ''; }
+        return lbl || ('Kind ' + k);
+    }
+
+    function kindNames(index, ks) {
+        var names = [];
+        for (var i = 0; i < ks.length; i++) names.push(kindName(index, ks[i]));
+        return names.join(', ');
+    }
+
+    function kindsText(index, row) {
+        var ks = S.modules.geologists.rowKinds(row);
+        return ks.length ? 'only ' + kindNames(index, ks) : 'default';
+    }
+
 
     // Live state link: dump per-deposit ranking + state. Helps users
     // tune `deposits.*.max` and overrides before flipping `enabled`.
@@ -82,6 +148,10 @@
         }
 
         var types = d.types();
+        // The dispatcher's own rule, so the log ranks only geologists the
+        // dispatcher could send to each type.
+        var rule = S.modules.geologists.kindRule(s.deposits || {}, types);
+        var index = indexGeos(allGeos);
         S.kernel.log('geologists', '--- per-deposit ranking (capacity / time) ---');
         for (var t = 0; t < types.length; t++) {
             var info = types[t];
@@ -102,10 +172,11 @@
                 '  cfg: enabled=' + enabled + ' max=' + max +
                 '  on map=' + onMap + '  on task=' + onTask +
                 '  wanted=' + wanted);
+            S.kernel.log('geologists', '  kinds: ' + kindsText(index, cfg));
 
             if (!c.rankGeologistsForDeposit) continue;
             var ranked = c.rankGeologistsForDeposit(info.name, {
-                from:     allGeos,
+                from:     S.modules.geologists.eligibleForDeposit(allGeos, info.name, s.overrides || {}, rule),
                 idleOnly: false
             });
             var topN = Math.min(5, ranked.length);
@@ -191,7 +262,8 @@
     // Earlier buffered rows are kept, so edits before Save layer on each
     // other. A row the buffer lacks starts from the one the dispatcher uses
     // now (stored or default), so switching Search never stores max 0 and
-    // the row is always stored whole.
+    // the row is always stored whole, and an existing kind list is kept
+    // through enabled and max edits.
     function updateDeposit(h, depositName, partial) {
         var s = h.settings('geologists');
         var deposits = {};
@@ -204,6 +276,17 @@
         if (typeof next.max === 'undefined') next.max = 0;
         if (typeof partial.enabled !== 'undefined') next.enabled = partial.enabled;
         if (typeof partial.max !== 'undefined')     next.max = partial.max;
+        if (Object.prototype.hasOwnProperty.call(partial, 'kinds')) {
+            // The buffer counts only the leaves it holds, so a cleared list
+            // whose saved row has one stays as [] to be saved; without a
+            // saved list the key goes, and tick then untick is no change.
+            var ks = S.modules.geologists.rowKinds({ kinds: partial.kinds });
+            var saved = (readSettings().deposits || {})[depositName];
+            var savedHasKinds = !!saved && Object.prototype.hasOwnProperty.call(saved, 'kinds');
+            if (ks.length) next.kinds = ks;
+            else if (savedHasKinds) next.kinds = [];
+            else delete next.kinds;
+        }
         deposits[depositName] = next;
         h.update('geologists', { deposits: deposits });
     }
@@ -230,30 +313,145 @@
         })));
         $side.append($card);
 
+        // An editor pick redraws only the deposits card, inside its own
+        // holder so the first card stays. The dashboard sizes the fill
+        // after the first draw, h.fit() after each later one.
+        editing = null;
+        var $holder = $('<div>');
+        $side.append($holder);
+        var drawn = false;
+        function redraw() {
+            $holder.empty().append(depositsCard(h, redraw));
+            if (drawn) h.fit();
+            drawn = true;
+        }
+        redraw();
+    }
+
+    // The deposit whose kind override editor is open, or null. One at a
+    // time; a fresh draw of the tab starts with none open.
+    var editing = null;
+
+    function depositsCard(h, redraw) {
+        var index = kindIndex();
         // A card without a head: the sub head names it.
         var $deps = $('<div>', { 'class': 'steward-card' });
         $deps.append(h.subHead('DEPOSITS TO SEARCH', 'keep up to Max on the map'));
         $deps.append(h.table({
             cols: [
-                { label: 'Deposit', width: '40%' },
-                { label: 'Search',  width: '20%', cls: 'steward-c' },
-                { label: 'On map',  width: '18%', cls: 'steward-num' },
-                { label: 'Max',     width: '22%', cls: 'steward-num' }
+                { label: 'Deposit', width: '26%' },
+                { label: 'Search',  width: '34%' },
+                { label: 'On map',  width: '20%', cls: 'steward-num' },
+                { label: 'Max',     width: '20%', cls: 'steward-num' }
             ],
-            rows:      depositRows(h),
+            rows:      depositRows(h, index, redraw),
             fill:      true,
             emptyText: 'Deposit types are not available yet.'
         }));
-        $side.append($deps);
+        return $deps;
     }
 
-    function depositRows(h) {
+    function depositRows(h, index, redraw) {
         var types = depositTypes();
         var rows = [];
         for (var i = 0; i < types.length; i++) {
-            rows.push(depositTableRow(h, types[i].name));
+            var name = types[i].name;
+            rows.push(depositTableRow(h, name, index, redraw));
+            if (editing === name) rows.push({ span: editorPanel(h, name, index, redraw) });
         }
         return rows;
+    }
+
+    // `default` or `override` after the Search toggle; a click opens or
+    // closes the editor of this deposit and closes any other.
+    function overrideWord(h, depositName, row, index, redraw) {
+        var ks = S.modules.geologists.rowKinds(row);
+        function onClick() {
+            editing = (editing === depositName) ? null : depositName;
+            redraw();
+        }
+        var $a;
+        if (ks.length) {
+            $a = h.link('override', onClick, {
+                title: 'override: only ' + kindNames(index, ks) + ' may search ' + resName(depositName)
+            });
+        } else {
+            $a = h.link('default', onClick);
+            $a.addClass('steward-muted');
+        }
+        if (h.isChanged('geologists', 'deposits.' + depositName + '.kinds')) $a.addClass('steward-dirty');
+        return $a;
+    }
+
+    // Chips of the owned kinds with their counts, then each listed kind
+    // nobody owns as ×0, so it can still be unticked.
+    function kindItems(index, ks) {
+        var listed = {};
+        var i;
+        for (i = 0; i < ks.length; i++) listed[String(ks[i])] = true;
+        var items = [];
+        for (i = 0; i < index.order.length; i++) {
+            var k = index.order[i];
+            items.push({
+                id:     k,
+                label:  kindName(index, k) + ' ×' + index.byKind[String(k)].count,
+                active: listed[String(k)] === true
+            });
+        }
+        for (i = 0; i < ks.length; i++) {
+            if (index.byKind[String(ks[i])]) continue;
+            items.push({ id: ks[i], label: kindName(index, ks[i]) + ' ×0', active: true });
+        }
+        return items;
+    }
+
+    function countsText(index, ks, depositName) {
+        if (!ks.length) return 'No kind ticked: ' + resName(depositName) + ' searches as default.';
+        var m = 0;
+        for (var i = 0; i < ks.length; i++) {
+            var e = index.byKind[String(ks[i])];
+            if (e) m += e.count;
+        }
+        return ks.length + ' kind' + (ks.length === 1 ? '' : 's') + ' ticked · ' +
+            m + ' geologist' + (m === 1 ? '' : 's') +
+            '. A kind covers every geologist of that kind, now and later.';
+    }
+
+    // Adds the kind when it is not listed, removes it when it is.
+    function flipKind(ks, k) {
+        var next = [];
+        var had = false;
+        for (var i = 0; i < ks.length; i++) {
+            if (ks[i] === k) had = true;
+            else next.push(ks[i]);
+        }
+        if (!had) next.push(k);
+        return next;
+    }
+
+    // The full-width editor row under a deposit. Picks go to the buffer and
+    // apply on Save, like the other controls of this column.
+    function editorPanel(h, depositName, index, redraw) {
+        var ks = S.modules.geologists.rowKinds(depositRow(h, depositName));
+        var $p = $('<div>');
+        $p.append(h.subHead('OVERRIDE: ONLY THESE SEARCH ' + resName(depositName).toUpperCase(),
+            h.link('Back to default', function () {
+                updateDeposit(h, depositName, { kinds: [] });
+                editing = null;
+                redraw();
+            })));
+        var $note = $('<div>', { 'class': 'steward-note' });
+        if (!index.ok) {
+            $note.append($('<span>', { 'class': 'steward-muted' }).text('Geologists could not be read.'));
+        } else {
+            $note.append(h.chips(kindItems(index, ks), null, function (k) {
+                updateDeposit(h, depositName, { kinds: flipKind(ks, k) });
+                redraw();
+            }));
+            $note.append($('<span>', { 'class': 'steward-muted' }).text(countsText(index, ks, depositName)));
+        }
+        $p.append($note);
+        return $p;
     }
 
     function markUnder($n, onMap, max) {
@@ -263,7 +461,7 @@
         else       $n.removeAttr('title');
     }
 
-    function depositTableRow(h, depositName) {
+    function depositTableRow(h, depositName, index, redraw) {
         var row = depositRow(h, depositName);
         var label = resName(depositName);
         var onMap = onMapCount(depositName);
@@ -289,9 +487,12 @@
             onChange: function (next) { markUnder($onMap, onMap, next); }
         });
 
+        var $searchCell = $('<span>').append($search).append(' ')
+            .append(overrideWord(h, depositName, row, index, redraw));
+
         return [
             { text: label, title: depositName },
-            $search,
+            $searchCell,
             { $: $onMap },
             $max
         ];
