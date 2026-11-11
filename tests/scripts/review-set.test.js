@@ -181,3 +181,51 @@ t.test('check validates data-when after a nested section', function () {
     var ok = '<section><p>in</p></section><div data-when="state=on">x</div>';
     t.assert.deepStrictEqual(errorsOf(withContent(html, ok)), []);
 });
+
+t.test('check rejects a set without the Submit button', function () {
+    var html = swap(shell, 'id="rv-submit"', 'id="rv-gone"');
+    t.assert.ok(has(errorsOf(html), /missing id="rv-submit"/));
+});
+
+t.test('checkFeedback accepts the page shape and rejects others', function () {
+    var ok = { set: 'demo', task: 'x', rev: 1, general: '', verdicts: [], pending: 0, at: 'T' };
+    t.assert.strictEqual(rs.checkFeedback(ok), null);
+    t.assert.ok(rs.checkFeedback([]));
+    t.assert.ok(rs.checkFeedback({ set: '../x', rev: 1, general: '', verdicts: [] }));
+    t.assert.ok(rs.checkFeedback({ set: 'demo', rev: 1, general: '', verdicts: {} }));
+});
+
+function post(port, origin, body, cb) {
+    var http = require('http');
+    var req = http.request({ host: '127.0.0.1', port: port, method: 'POST', path: rs.SUBMIT_PATH,
+        headers: { 'Content-Type': 'application/json', Origin: origin } }, function (res) {
+        res.resume();
+        res.on('end', function () { cb(res.statusCode); });
+    });
+    req.on('error', function () { cb(0); });
+    req.end(body);
+}
+
+t.test('serve writes posted feedback next to the set and refuses a foreign origin', function (done) {
+    var os = require('os');
+    var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-serve-'));
+    var file = path.join(dir, 'demo.html');
+    fs.writeFileSync(file, '<title>Demo Set</title>');
+    var server = rs.serve(file, 0, null);
+    server.on('listening', function () {
+        var port = server.address().port;
+        var body = JSON.stringify({ set: 'demo', task: 'x', rev: 1, general: 'g', verdicts: [], pending: 0, at: 'T' });
+        post(port, 'http://evil.example', body, function (code) {
+            t.assert.strictEqual(code, 403);
+            post(port, 'http://127.0.0.1:' + port, body, function (code2) {
+                server.close();
+                try {
+                    t.assert.strictEqual(code2, 200);
+                    var written = JSON.parse(fs.readFileSync(path.join(dir, 'demo-feedback.json'), 'utf8'));
+                    t.assert.strictEqual(written.general, 'g');
+                    done();
+                } catch (e) { done(e); }
+            });
+        });
+    });
+});

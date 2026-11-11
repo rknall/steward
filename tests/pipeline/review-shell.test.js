@@ -41,9 +41,9 @@ function doc(page, verdict, rev, set) {
         options: {}, by: null, at: 't' };
 }
 
-t.test('logic exposes the nine functions', function () {
+t.test('logic exposes the ten functions', function () {
     t.assert.deepStrictEqual(Object.keys(load()).sort(), ['defaultState', 'feedback', 'makeVerdict',
-        'matches', 'pageIndex', 'parseSet', 'parseWhen', 'progress', 'status']);
+        'matches', 'pageIndex', 'parseSet', 'parseWhen', 'progress', 'status', 'submission']);
 });
 
 t.test('logic text uses no page or browser global', function () {
@@ -141,4 +141,15 @@ t.test('feedback lists only current docs in page order', function () {
     var list = JSON.parse(RV.feedback(SET, docs));
     t.assert.ok(Array.isArray(list));
     t.assert.deepStrictEqual(list.map(function (d) { return d.page; }), ['a', 'c']);
+});
+
+t.test('submission carries the general comment and the current verdicts', function () {
+    var RV = load();
+    var docs = { a: doc('a', 'approve', 2), b: doc('b', 'approve', 1) };
+    var sub = plain(RV.submission(SET, docs, '  overall fine  ', 'T'));
+    t.assert.deepStrictEqual(Object.keys(sub).sort(), ['at', 'general', 'pending', 'rev', 'set', 'task', 'verdicts']);
+    t.assert.strictEqual(sub.general, 'overall fine');
+    t.assert.strictEqual(sub.pending, 2);
+    t.assert.deepStrictEqual(sub.verdicts.map(function (d) { return d.page; }), ['a']);
+    t.assert.strictEqual(RV.submission(SET, {}, null, 'T').general, '');
 });
