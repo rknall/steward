@@ -483,14 +483,24 @@ t.test('Clear: time while another zone was viewed is not counted', function () {
     });
 });
 
-t.test('Clear: a quest finished with a general busy waits with no limit', function () {
+t.test('Clear: a quest finished with a busy general who has room for free troops waits with no limit', function () {
     var w = quietWorld();
+    w.g1.GetMaxMilitaryUnits = function () { return 4; };
+    w.frees[ZONE].Rifle = 2;
     w.quests[0].finished = true;
     w.g1.state.task = { type: w.code.attack };
     span(w, 30 * MIN);
     assertStep(w, 'Clear');
     assert.ok(/Anna \(1\.1\) busy/.test(busy(w).text), busy(w).text);
     w.g1.state.task = null;
+    span(w, TICK_MS);
+    assertStep(w, 'PackStar');
+});
+
+t.test('Clear: a quest finished with a busy general and no free troops goes on at once', function () {
+    var w = quietWorld();
+    w.quests[0].finished = true;
+    w.g1.state.task = { type: w.code.attack };
     span(w, TICK_MS * 2);
     assertStep(w, 'LastQuest');
 });

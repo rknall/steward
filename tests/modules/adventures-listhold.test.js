@@ -527,7 +527,9 @@ t.test('a missing report does not end a busy wait', function () {
 
 t.test('Clear: a null quest list does not end a busy wait', function () {
     var w = homeWorld();
-    onIsland(w, [w.g1, w.g2]);
+    // Free troops Anna has room for, so her walk is worth waiting for.
+    w.g1.GetMaxMilitaryUnits = function () { return 4; };
+    onIsland(w, [w.g1, w.g2], { Rifle: 2 });
     var quests = [{ key: 'q9', name: 'Final', finished: true, last: true }];
     w.quests = quests;
     w.g1.state.task = { type: w.code.attack };
@@ -552,7 +554,8 @@ t.test('Clear: a null quest list does not end a busy wait', function () {
     ].forEach(function (a) {
         t.test('Clear: a list without the last quest does not end a busy wait: ' + c.name + ', ' + a.name, function () {
             var w = homeWorld();
-            onIsland(w, [w.g1, w.g2]);
+            w.g1.GetMaxMilitaryUnits = function () { return 4; };
+            onIsland(w, [w.g1, w.g2], { Rifle: 2 });
             var quests = [{ key: 'q9', name: 'Final', finished: true, last: true }];
             w.quests = quests;
             w.g1.state.task = { type: w.code.attack };
