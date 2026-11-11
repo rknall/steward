@@ -48,7 +48,7 @@ then repeats maps like a template series.
 - `amount` is the item's total need over its grids for the trip (default: one
   per grid), for example Storm small dynamite 10 for four boulder groups. Each
   grid is a group that takes only what it needs. Production makes that total at
-  home in one go; each send offers `min(amount, stock)` and what the grid
+  home in one go; each send offers `min((amount or 1) - taken, stock)` and what the grid
   does not take stays in stock. A return trip when stock runs out is only a fallback.
 - The start check refuses a scenario whose buff is not a produceable buff
   definition and stores nothing.
@@ -58,7 +58,8 @@ then repeats maps like a template series.
 - Production overlap: while at home for trip i the run orders the needs of
   trip i (the item total, or one per open grid) plus trip i+1 (all grids), minus stock and queued items,
   and waits only until trip i's needs are in the star menu.
-- Send to a grid: `min(amount or 1, stock)`. Stock is logged before and after.
+- Send to a grid: `min((amount or 1) - taken, stock)`, where `taken` is what the
+  grid has taken of the item so far (0 at first). Stock is logged before and after.
 - Quest gating (strict): on the run's island an item is applied and a map
   object is picked up only while a running quest asks for it explicitly. A map
   pick-up is either a click-trigger object or a host collectible that a quest's
@@ -69,7 +70,9 @@ then repeats maps like a template series.
   IsQuestActive() holds and its mode is 3 (READ_MODE, set once the player or
   the run has read it). Mode 2 (unread) and every other mode never count. The
   main quest is skipped. A pick-up or item spent on a quest that does not take
-  it is lost, so the scenario could run short.
+  it is lost, so the scenario could run short. An item also counts as asked for
+  when a running quest's open type-1 trigger (not a click trigger) names the
+  building standing at the item's grid (e.g. Riches `buffad_sabotage`).
 - While a scenario run (running or paused) has its island viewed, collect
   clicks only the quest objects and the collectibles that running quests count
   there, and no pattern collectibles. Apply and Trip log once "waiting for quest <name> to be
@@ -108,9 +111,10 @@ why.
 
 ## Known limits
 
-- Grid-done rule: a send is done when the grid took less than offered or took
-  the trip-total bound (sendAmount = amount or 1). A send capped by stock
-  keeps the grid open for a top-up after the stock-out trip.
+- Grid-done rule: each grid records what it has taken. A send that takes less
+  than offered keeps the grid open and the rest (`amount - taken`) goes to the
+  same grid next, until the grid has taken the amount, the quest no longer wants
+  the item, or a send takes nothing.
 - Need is not reduced by what grids already took, so after a fallback stock-out
   home trip the run may reorder up to the already-taken count.
 - A top-up send to a grid that shows no stock drop is counted done, also when

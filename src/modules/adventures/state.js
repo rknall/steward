@@ -902,6 +902,8 @@
         return out;
     }
 
+    // A "part:" mark also carries `taken`, what its grid has taken of the item so
+    // far; it is kept only when numeric so every other line keeps its shape.
     function normLines(v) {
         var out = {};
         if (!isPlainObject(v)) return out;
@@ -912,6 +914,8 @@
                 seen:     v[k].seen === true,
                 sentOnce: v[k].sentOnce === true
             };
+            var tk = num(v[k].taken);
+            if (tk !== null) out[k].taken = tk;
         }
         return out;
     }
