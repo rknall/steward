@@ -60,6 +60,9 @@ pasted into the chat is the fallback; a published private link is optional).
 Agents never `git add`, commit or push; the user commits. Commit subjects are
 short and topic-prefixed (`mining: ...`) with no `; v0.x.y` suffix. Trailers, in
 order: `Fixes #N`/`Refs #N`, an optional `Bump:` line, then `Assisted-by: Claude`.
+main is protected: every change lands through a PR, squash-merged. Bring a
+branch up to date by rebasing on `origin/main` (then force-push), never by
+merging main into it.
 
 Versioning: tasks never edit `package.json` `version` or `package-lock.json`.
 The build versions itself from `git describe` (`0.10.14-3-gabc1234[-dirty]`),
