@@ -468,6 +468,58 @@ t.test('dropped is null before a verified check and the observed drop after it',
     assert.strictEqual(def.dropped(), 4);
 });
 
+t.test('adventureItem sends the entry its precheck read, never a third star-menu read', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    s.env.onSend = function (a) { buff.amount -= a.p3; };
+    var player = s.H.host.game.gi.mCurrentPlayer;
+    var menu = player.getAvailableBuffs_vector;
+    var reads = 0;
+    // Reads 1 and 2 are the precheck and the baseline; the bridge misses the
+    // member on the third, where the old send looked the entry up again.
+    player.getAvailableBuffs_vector = function () {
+        reads++;
+        return reads === 3 ? undefined : menu.apply(this, arguments);
+    };
+    var def = s.buffs.adventureItem('ItemA', 7, 10);
+    // No retry to rescue a missed read: the loader runs the grid send this way.
+    def.retries = 0;
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(res.sends, 1);
+    assert.strictEqual(s.sent.actions.length, 1);
+    assert.strictEqual(s.sent.actions[0].id, 61);
+    assert.strictEqual(s.sent.actions[0].data.toKeyString(), 'ItemA');
+});
+
+t.test('adventureItem with an entry that has no unique id sends nothing and says so', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    var player = s.H.host.game.gi.mCurrentPlayer;
+    var menu = player.getAvailableBuffs_vector;
+    player.getAvailableBuffs_vector = function () {
+        var vec = menu.apply(this, arguments);
+        for (var i = 0; i < vec.length; i++) vec[i].GetUniqueId = function () { return null; };
+        return vec;
+    };
+    s.H.clearLogs();
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, 'nothing sent');
+    assert.strictEqual(s.sent.actions.length, 0);
+    var warns = s.H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'buffs' && JSON.stringify(l).indexOf('no unique id') !== -1;
+    });
+    assert.strictEqual(warns.length, 1);
+});
+
+t.test('adventureItem: a packet that cannot be sent is a real failure', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    s.H.host.game.gi.SendServerAction = function () { throw new Error('boom'); };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10));
+    assert.strictEqual(res.status, s.S.ActionResult.Failed);
+    assert.strictEqual(res.reason, 'send failed');
+});
+
 t.test('targetsOf splits and trims the target description', function () {
     var s = setup({ buffs: [], buffDefs: {
         ItemA: { GetTargetDescription_string: function () { return ' Foo , Bar,, Baz '; } }

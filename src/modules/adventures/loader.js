@@ -453,15 +453,16 @@
     }
 
     // Whether a result is a first-step refusal that sent nothing: the general
-    // could not be read, or the round's zone was no longer viewed. Either way
-    // the round had no effect. A ZONE_CHANGED result is normally already
+    // could not be read, the round's zone was no longer viewed, or the send
+    // made no host call (NOT_SENT). Either way the round had no effect. A ZONE_CHANGED result is normally already
     // discarded by record() (its zone differs from the round's), so this branch
     // is a defence for a result that still arrives. Only this exact form counts. A Failed 'retry
     // refused: ...' went out once, and taking it for no effect would send a
     // marked order again.
     function unreadable(res) {
         return !!res && res.status === S.ActionResult.Refused &&
-            (res.reason === S.core.specialists.UNREADABLE || res.reason === ZONE_CHANGED);
+            (res.reason === S.core.specialists.UNREADABLE || res.reason === ZONE_CHANGED ||
+             res.reason === S.core.actions.NOT_SENT);
     }
 
     // First Refused or Failed result: { key, status, reason } or null. A
@@ -913,7 +914,9 @@
 
     // The run's record of a mark; created on first use. sentOnce stays set
     // when Resume clears sentAt, so a step can still tell that the order
-    // went out once.
+    // went out once. A send that made no host call adds the optional fields
+    // notSent (how often that happened) and notSentAt (when it last did), so
+    // a step can bound and space its tries again.
     function mark(r, name) {
         if (!r.marks) r.marks = {};
         if (!has(r.marks, name)) r.marks[name] = { sentAt: null, seen: false, sentOnce: false };
@@ -940,20 +943,42 @@
     // out. Written on the current run only while it is still the same run.
     // This is the one place for "must not go out twice", so the action's own
     // retry goes off here: a slow effect would otherwise be sent again.
+    // A send that made no host call (NOT_SENT) gives the mark back, so the
+    // order may go out in a later round, and counts that on the mark
+    // (notSent, notSentAt). The 'sent' line was logged before the packet and
+    // stays; the 'not sent' line after it says nothing went out.
     function wrapSend(r, name, def) {
         if (!def || typeof def.send !== 'function') return def;
         var send = def.send;
         var runId = r.id;
         def.send = function (b) {
             var cur = st().run();
+            var was = null;
             if (cur && cur.id === runId) {
                 var rec = mark(cur, name);
+                was = { sentAt: rec.sentAt, sentOnce: rec.sentOnce };
                 rec.sentAt = now();
                 rec.sentOnce = true;
                 st().save();
                 S.kernel.log(CATEGORY, st().label() + ': ' + name + ' sent');
             }
-            return send(b);
+            var res = send(b);
+            // Only a mark written above is given back; with no mark written
+            // (the run changed before the send) there is nothing to restore.
+            if (was && res === S.core.actions.NOT_SENT) {
+                var c = st().run();
+                if (c && c.id === runId) {
+                    var m = mark(c, name);
+                    m.sentAt = was.sentAt;
+                    m.sentOnce = was.sentOnce;
+                    m.notSent = (m.notSent || 0) + 1;
+                    m.notSentAt = now();
+                    st().save();
+                    S.kernel.log(CATEGORY, st().label() + ': ' + name +
+                        ' not sent (nothing went out); tried again in a later round');
+                }
+            }
+            return res;
         };
         def.retries = 0;
         return def;

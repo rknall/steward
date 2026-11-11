@@ -10,7 +10,8 @@
  * "the stock dropped". Inside a host-read pass (S.kernel.hostRead) the star
  * menu and the target table are read once; buildingBuffCandidates and
  * speedBuffs read them once per call even outside a pass, and the action defs
- * always read live.
+ * always read live, except that an adventure item sends the entry its
+ * precheck read.
  */
 
 (function (S) {
@@ -123,7 +124,12 @@
     // adventure is stock(ADVENTURE_MAP_TYPE, name).
     function stock(type, resource) {
         var raw = readEntries();
-        if (!raw) return null;
+        return raw ? stockIn(raw, type, resource) : null;
+    }
+
+    // stock() over a list already read, so a caller that needs the stock and
+    // an entry can take both from one read.
+    function stockIn(raw, type, resource) {
         var res = resource || '';
         var sum = 0;
         for (var i = 0; i < raw.length; i++) {
@@ -151,7 +157,11 @@
     // cannot cover a larger amount. The entry is returned with its uid object.
     function entryAtLeast(type, resource, amount) {
         var raw = readEntries();
-        if (!raw) return null;
+        return raw ? entryIn(raw, type, resource, amount) : null;
+    }
+
+    // entryAtLeast() over a list already read.
+    function entryIn(raw, type, resource, amount) {
         var res = resource || '';
         for (var i = 0; i < raw.length; i++) {
             if (!raw[i].bad && raw[i].type === type && (raw[i].resource || '') === res &&
@@ -534,8 +544,14 @@
     // The game takes at most what the grid still needs, so the drop can be
     // smaller than the amount sent; dropped() reports what the verifying check
     // saw, which the caller uses to tell a full grid from a stock-capped send.
+    // The star menu is read once, in the precheck, and the send uses that
+    // entry: the AIR bridge can miss the menu on a re-read within the same
+    // step, which would otherwise leave the send with no entry. A send with no
+    // usable entry makes no host call and says so with NOT_SENT, so it can be
+    // tried again later; only a packet that could not be sent is a failure.
     function adventureItem(name, grid, amount) {
         var drop = null;
+        var found = null;
         return {
             label:     'item ' + name + ' x' + amount + ' -> ' + grid,
             category:  'buffs',
@@ -544,13 +560,25 @@
                 if (!isNum(grid) || !(grid > 0)) return 'no target grid';
                 if (!isNum(amount) || amount !== Math.floor(amount) || !(amount > 0)) return 'invalid amount';
                 if (S.core.zone.isAdventure() !== true) return 'not on an adventure';
-                var n = stock(name, '');
+                found = null;
+                var raw = readEntries();
+                var n = raw ? stockIn(raw, name, '') : null;
                 if (!isNum(n)) return 'buff stock unreadable';
                 if (n < amount) return 'not enough in stock';
+                found = entryIn(raw, name, '', 0);
                 return null;
             },
             baseline: function () { return { stock: stock(name, '') }; },
-            send: function () { return send(name, '', grid, amount); },
+            send: function () {
+                var e = found;
+                found = null;
+                var why = !e ? 'no star-menu entry' : (!e.uid ? 'its star-menu entry has no unique id' : null);
+                if (why) {
+                    S.kernel.warn('buffs', 'item ' + name + ' -> ' + grid + ': not sent, ' + why);
+                    return S.core.actions.NOT_SENT;
+                }
+                return sendEntry(e, grid, amount);
+            },
             check: function (base) {
                 var n = stock(name, '');
                 if (!!base && isNum(base.stock) && isNum(n) && n < base.stock) {

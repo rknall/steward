@@ -902,8 +902,11 @@
         return out;
     }
 
-    // A "part:" mark also carries `taken`, what its grid has taken of the item so
-    // far; it is kept only when numeric so every other line keeps its shape.
+    // Some marks carry one more field: a "part:" mark `taken`, what its grid has
+    // taken of the item so far; an apply mark `notSent` and `notSentAt`, the sends
+    // that made no host call and when the last one was; a "revisit:" mark `count`;
+    // a "short:" mark `text`. Each is kept only when of its type, so every other
+    // line keeps its shape.
     function normLines(v) {
         var out = {};
         if (!isPlainObject(v)) return out;
@@ -916,6 +919,13 @@
             };
             var tk = num(v[k].taken);
             if (tk !== null) out[k].taken = tk;
+            var ns = num(v[k].notSent);
+            if (ns !== null) out[k].notSent = ns;
+            var nsa = num(v[k].notSentAt);
+            if (nsa !== null) out[k].notSentAt = nsa;
+            var ct = num(v[k].count);
+            if (ct !== null) out[k].count = ct;
+            if (typeof v[k].text === 'string') out[k].text = v[k].text;
         }
         return out;
     }
