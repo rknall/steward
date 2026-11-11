@@ -83,17 +83,24 @@ then repeats maps like a template series.
   there, and no pattern collectibles. Apply and Trip log once "waiting for quest <name> to be
   running, mode N" for what waits only on its quest; the run's unread-quest
   reader keeps reading unread quests so they start. Trip and Clear count such
-  objects as left, so the run picks them up before it goes home, until
-  TRIP_MAX_MS on Trip. Trip settles READ_LAG_MS from its entry and
-  QUEST_SETTLE_MS (20 s) from the last quest the run read or claimed on the
-  island, waits while a running quest's open buildingdestroyed pick-up is not on
-  the map yet (its objects show some seconds after the read), and leaves only
-  once all of that has read clear for READ_LAG_MS, within the same TRIP_MAX_MS.
+  objects as left, so the run picks them up before it goes home. Trip settles
+  READ_LAG_MS from its entry and QUEST_SETTLE_MS (20 s) from the last quest the
+  run read or claimed on the island, waits while a running quest's open
+  buildingdestroyed pick-up is not on the map yet (its objects show some seconds
+  after the read), and leaves once all of that has read clear for READ_LAG_MS.
+  Then Trip leaves after TRIP_MAX_MS (5 min quiet) whatever is left, unless
+  pick-ups are left and Produce found that the next trip's items wait for
+  resources: then the run re-visits the island (jump home and back, which
+  reloads the zone and its objects) after TRIP_REVISIT_MS (2 min) while a
+  pick-up is not on the map yet, or after TRIP_MAX_MS otherwise, up to
+  TRIP_REVISITS (2) times per trip, and then pauses on the island ("collect
+  them, then Resume").
   Outside scenario runs collect and template runs
   keep the looser gate (any started, active quest that is not unread).
 - Stock-out (fallback, since trips are produced in full): when an item runs out with grids still open, the run takes a
   return trip home (production is home-only), orders the rest and comes back to
-  the same trip. No pause.
+  the same trip. No pause. A Trip re-visit (see the collect bullet) takes the
+  same return trip, so it reloads the island too.
 - Start trip: the count prompt accepts a trip number, so a run can begin on a
   map that is already open at a later trip.
 
@@ -137,3 +144,9 @@ why.
   the first scenario run.
 - A stuckMinutes setting below 10 lets the stuck zone trip fire during the
   Apply and Trip waits. This costs travel time only.
+- The client data does not say which resource a pick-up gives, so any
+  next-trip shortfall with pick-ups left re-visits the island, not only a
+  shortfall a pick-up covers.
+- An item send that made no host call (its star-menu entry has no unique id)
+  is tried again, 10 s apart, up to 3 times per grid, then BuffFailed pauses.
+  A real packet failure still pauses at once.

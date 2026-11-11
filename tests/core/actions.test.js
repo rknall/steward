@@ -342,3 +342,42 @@ t.test('retries 0: a failed send ends Failed without a retry', function () {
     assert.strictEqual(r.results[0].sends, 1);
     assert.strictEqual(world.sends, 1);
 });
+
+// ---- NOT_SENT: a send that made no host call --------------------------------
+
+t.test('a first send returning NOT_SENT refuses without a retry or a check', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var r = run(b, def(world, {
+        retries: 1,
+        send:  function () { world.sends++; return b.A.NOT_SENT; },
+        check: function () { world.checks++; return false; }
+    }));
+    assert.strictEqual(r.results.length, 1);
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Refused);
+    assert.strictEqual(r.results[0].reason, 'nothing sent');
+    assert.strictEqual(r.results[0].sends, 0);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(r.results[0], 'unseen'), false);
+    assert.strictEqual(world.sends, 1);
+    assert.strictEqual(world.checks, 0);
+    assert.strictEqual(r.drove.rounds, 1);
+});
+
+t.test('a retry send returning NOT_SENT fails with retry refused', function () {
+    var b = boot();
+    var world = { sends: 0, done: false };
+    var r = run(b, def(world, {
+        timeoutMs: gap(b),
+        send: function () { world.sends++; return world.sends === 1 ? true : b.A.NOT_SENT; }
+    }));
+    assert.strictEqual(r.results.length, 1);
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(r.results[0].reason, 'retry refused: nothing sent');
+    assert.strictEqual(r.results[0].sends, 1);
+    assert.strictEqual(world.sends, 2);
+});
+
+t.test('NOT_SENT is exported as the nothing-sent reason', function () {
+    var b = boot();
+    assert.strictEqual(b.A.NOT_SENT, 'nothing sent');
+});

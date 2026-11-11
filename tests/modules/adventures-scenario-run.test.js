@@ -567,7 +567,7 @@ t.test('Trip: leaves once the awaited condition is met', function () {
     assert.ok(passesUntil(w, 'JumpHome', readLag(w) + 3 * PASS_MS), 'left: ' + stepName(w));
 });
 
-t.test('Trip: an awaited pick-up that never appears leaves after TRIP_MAX_MS, no pause', function () {
+t.test('Trip: an awaited pick-up that never appears leaves after TRIP_MAX_MS when the next trip is not short, no pause', function () {
     var w = atTrip();
     w.awaited = [{ name: HAMMER, zoneId: ZONE }];
     passesFor(w, w.S.modules.adventures.trips.TRIP_MAX_MS + 30000);
@@ -1013,4 +1013,210 @@ t.test('Pause and Resume mid-trip: nothing is sent while paused, every grid once
     assertStep(w, 'Trip');
     assert.deepStrictEqual(sendsTo(w, BRIDGE).map(function (s) { return s.grid; }), [11, 12, 13]);
     assert.deepStrictEqual(sendsTo(w, SHEET).map(function (s) { return s.grid; }), [21, 22, 23]);
+});
+
+// ---- storm recovery: re-visit, no-packet sends -------------------------------------
+
+// A visit-only trip 0, then a trip 1 whose items cost Wood 12 (14 with the
+// last trip's): with Wood 3 the next trip is short at Produce of trip 0.
+var SHORTREC = {
+    id: 'short_test', label: 'Short (test)',
+    trips: [{}, { items: [{ buff: BRIDGE, grids: [11, 12, 13] }, { buff: SHEET, grids: [21, 22, 23] }] }]
+};
+
+// The run through Produce of trip 0 on a world short of Wood, up to Trip of
+// trip 0 on the island, collect picking up there.
+function shortTrip(wood) {
+    var w = scenWorld({ world: { resources: { Wood: wood === undefined ? 3 : wood } },
+        quests: [{ key: 'q9', name: 'Final', last: true }] });
+    w.H.settings.write('collect', COLLECT_ON);
+    W.startScenario(w, record(w, SHORTREC), { step: w.S.RunStep.Produce, trip: 0 });
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.strictEqual(w.st.run().trip, 0);
+    return w;
+}
+
+// Steps entered by the run, in order, with the trip each had.
+function stepTrail(w, steps) {
+    return function (w2, name) {
+        var s = name + ':' + w2.st.run().trip;
+        if (steps[steps.length - 1] !== s) steps.push(s);
+    };
+}
+
+t.test('Trip: next trip short and a pick-up not on the map: re-visits the island instead of leaving', function () {
+    var w = shortTrip();
+    assert.ok(w.st.run().marks['short:0'], 'Produce noted the shortfall on trip 0');
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    var steps = [];
+    drive(w, { max: 200, until: function (w2, name) { return name === 'Trip' && steps.indexOf('JumpHome:0') >= 0; },
+        on: stepTrail(w, steps), dt: PASS_MS });
+    assert.ok(steps.indexOf('JumpHome:0') >= 0, steps.join(' '));
+    assert.ok(logged(w, /going home and back to reload the island \(1\/2\)/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /leaving with/), logLines(w).join('\n'));
+    var jh = steps.indexOf('JumpHome:0');
+    assert.ok(steps.indexOf('ArriveHome:0') > jh, steps.join(' '));
+    assert.ok(steps.indexOf('Produce:0') > jh, steps.join(' '));
+    assert.strictEqual(w.st.run().trip, 0);
+    assertStep(w, 'Trip');
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running);
+    assert.ok(!logged(w, /run paused/), logLines(w).join('\n'));
+    // The pick-up shows up and the stock covers trip 1: the trip ends normally.
+    w.awaited = [];
+    w.resources.Wood = 1000;
+    drive(w, { max: 400, until: function (w2) { return w2.st.run().trip === 1 && stepName(w2) === 'Produce'; } });
+    assert.strictEqual(w.st.run().trip, 1, 'left to trip 1');
+    assert.ok(logged(w, /trip 1\/.* done/), logLines(w).join('\n'));
+    drive(w, { max: 400, until: function (w2) { return w2.productionOrders.length > 0; } });
+    assert.ok(w.productionOrders.length > 0, 'trip 1 orders');
+    assert.notStrictEqual(w.st.run().status, w.S.RunStatus.Paused);
+    assert.ok(!w.st.run().marks['short:0'] && !w.st.run().marks['revisit:0'], 'marks gone');
+});
+
+t.test('Trip: still missing after TRIP_REVISITS re-visits pauses on the island', function () {
+    var w = shortTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    var steps = [];
+    drive(w, { max: 600, on: stepTrail(w, steps), dt: PASS_MS });
+    assertPaused(w, w.S.RunPause.NotObserved, /still left after 2 re-visits; the next trip is short of Wood/);
+    assert.strictEqual(w.st.run().trip, 0);
+    assert.strictEqual(steps.filter(function (s) { return s === 'JumpHome:0'; }).length, 2, steps.join(' '));
+    assert.ok(steps.indexOf('JumpHome:1') < 0, steps.join(' '));
+    assert.ok(logged(w, /\(2\/2\)/), logLines(w).join('\n'));
+});
+
+t.test('Trip: next trip short but nothing left leaves as before', function () {
+    var w = shortTrip();
+    var steps = [];
+    drive(w, { max: 200, until: function (w2, name) { return name === 'JumpHome'; }, on: stepTrail(w, steps), dt: PASS_MS });
+    assertStep(w, 'JumpHome');
+    assert.strictEqual(w.st.run().trip, 1, 'trip 1 after the settle');
+    assert.ok(!logged(w, /going home and back to reload/), logLines(w).join('\n'));
+});
+
+t.test('Produce: the next-trip shortfall is noted on the trip and cleared once covered', function () {
+    var w = scenWorld({ world: { resources: { Wood: 3 } } });
+    W.startScenario(w, record(w, SHORTREC), { step: w.S.RunStep.Produce, trip: 0 });
+    tick(w);
+    play(w);
+    var m = w.st.run().marks['short:0'];
+    assert.ok(m && m.seen, 'short:0 mark');
+    assert.ok(/Wood/.test(m.text), String(m.text));
+    var w2 = scenWorld({ world: { resources: { Wood: 1000 } } });
+    W.startScenario(w2, record(w2, SHORTREC), { step: w2.S.RunStep.Produce, trip: 0 });
+    tick(w2);
+    play(w2);
+    assert.ok(!(w2.st.run().marks || {})['short:0'], 'no mark once covered');
+});
+
+// The Bridge trip of ONE on the island at Apply, stock enough for both grids.
+function bridgeTrip() {
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12], met: false,
+        stayOpen: true }, { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 5);
+    w.H.settings.write('collect', COLLECT_ON);
+    onIsland(w, record(w, ONE), 0);
+    return w;
+}
+
+function notSentLines(w) {
+    return logLines(w).filter(function (l) { return /not sent \(nothing went out\)/.test(l); }).length;
+}
+
+t.test('Apply: a send whose star-menu entry has no unique id is tried again, no pause, one packet', function () {
+    var w = bridgeTrip();
+    w.noUid[BRIDGE] = true;
+    drive(w, { until: function () { return notSentLines(w) > 0; } });
+    assert.ok(notSentLines(w) > 0, logLines(w).join('\n'));
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running);
+    assert.strictEqual(sendsTo(w, BRIDGE).length, 0);
+    var mk = w.st.run().marks;
+    var name = Object.keys(mk).filter(function (k) { return /^apply:/.test(k); })[0];
+    assert.ok(name, 'apply mark');
+    assert.strictEqual(mk[name].sentAt, null);
+    assert.strictEqual(mk[name].notSent, 1);
+    w.noUid[BRIDGE] = false;
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    var grids = sendsTo(w, BRIDGE).map(function (s) { return s.grid; }).sort();
+    assert.deepStrictEqual(grids, [11, 12]);
+});
+
+t.test('Apply: no packet three times to a grid pauses BuffFailed', function () {
+    var w = bridgeTrip();
+    var spacing = w.S.modules.adventures.trips.NOT_SENT_RETRY_MS;
+    w.noUid[BRIDGE] = true;
+    drive(w, { until: function () { return notSentLines(w) > 0; } });
+    var first = w.t;
+    // Inside the gap: waiting, no second try.
+    W.ticksFor(w, 3000);
+    play(w);
+    assert.strictEqual(notSentLines(w), 1, logLines(w).join('\n'));
+    assert.ok(/not sent, trying again/.test(w.st.current().busy.text), JSON.stringify(w.st.current().busy));
+    drive(w, { max: 400, dt: 2000 });
+    assertPaused(w, w.S.RunPause.BuffFailed, /nothing sent after 3 tries/);
+    assert.ok(w.t - first >= 2 * spacing, 'spaced: ' + (w.t - first));
+    assert.strictEqual(notSentLines(w), 3);
+    assert.strictEqual(w.itemSends.length, 0);
+    assert.strictEqual(w.S.modules.adventures.run.resume(), true);
+    drive(w, { until: function () { return notSentLines(w) > 3; } });
+    assert.ok(notSentLines(w) > 3, 'resume tries again');
+});
+
+t.test('Apply: a real packet failure still pauses BuffFailed', function () {
+    var w = bridgeTrip();
+    w.buffSendThrows = true;
+    drive(w, { max: 400 });
+    assertPaused(w, w.S.RunPause.BuffFailed, /failed: send failed/);
+    var mk = w.st.run().marks;
+    var name = Object.keys(mk).filter(function (k) { return /^apply:/.test(k); })[0];
+    assert.ok(name && typeof mk[name].sentAt === 'number', 'the mark keeps sentAt');
+});
+
+t.test('Reload: notSent, notSentAt, count and text marks survive a reload; other marks keep their shape', function () {
+    // A no-packet send leaves notSent and notSentAt on the apply mark.
+    var w = bridgeTrip();
+    w.noUid[BRIDGE] = true;
+    drive(w, { until: function () { return notSentLines(w) > 0; } });
+    var mk = w.st.run().marks;
+    var an = Object.keys(mk).filter(function (k) { return /^apply:/.test(k); })[0];
+    assert.ok(typeof mk[an].notSentAt === 'number');
+    var wa = w;
+    // A short and a revisit mark with their fields (one re-visit taken).
+    var w1 = shortTrip();
+    w1.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    drive(w1, { max: 200, until: function (w2) { return !!(w2.st.run().marks['revisit:0']); }, dt: PASS_MS });
+    var m1 = w1.st.run().marks;
+    assert.strictEqual(m1['revisit:0'].count, 1);
+    assert.ok(/Wood/.test(m1['short:0'].text));
+
+    function boot(src) {
+        var x = W.world({ home: true, fs: src.fs, generals: [], free: {}, items: items() });
+        x.mod.boot();
+        assert.ok(x.st.run(), 'the run came back');
+        return x;
+    }
+    function back(x, name) { return plain(x.st.run().marks[name]); }
+    var wa2 = boot(wa);
+    assert.deepStrictEqual(back(wa2, an), plain(mk[an]));
+    var w12 = boot(w1);
+    assert.deepStrictEqual(back(w12, 'revisit:0'), plain(m1['revisit:0']));
+    assert.deepStrictEqual(back(w12, 'short:0'), plain(m1['short:0']));
+
+    // Wrong types are dropped; the plain fields stay as written.
+    var data = JSON.parse(w1.fs.disk[W.RUN_FILE]);
+    var marks = data.run.marks;
+    marks['revisit:0'].count = null;
+    marks['short:0'].text = 5;
+    marks['short:0'].notSent = 'x';
+    marks['plain:0'] = { sentAt: 7, seen: true, sentOnce: true };
+    w1.fs.disk[W.RUN_FILE] = JSON.stringify(data);
+    var w13 = boot(w1);
+    var rv = back(w13, 'revisit:0');
+    var sh = back(w13, 'short:0');
+    assert.ok(!('count' in rv), JSON.stringify(rv));
+    assert.ok(!('text' in sh) && !('notSent' in sh), JSON.stringify(sh));
+    assert.deepStrictEqual(Object.keys(back(w13, 'plain:0')).sort(), ['seen', 'sentAt', 'sentOnce']);
+    assert.deepStrictEqual(back(w13, 'plain:0'), { sentAt: 7, seen: true, sentOnce: true });
 });

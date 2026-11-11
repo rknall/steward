@@ -28,15 +28,21 @@
  * open and the rest is offered to the same grid next, until the grid has
  * taken the amount, the quest no longer wants the item, or a send shows no
  * drop at all (the grid was already full). Out of stock with grids left,
- * the run goes home for more and comes back to the same trip.
+ * the run goes home for more and comes back to the same trip. A send that
+ * made no host call (nothing went out) keeps its grid open and is tried
+ * again after NOT_SENT_RETRY_MS, up to NOT_SENT_MAX times per grid, then
+ * pauses.
  *
  * Trip lets the quests update (READ_LAG_MS from the step entry and
  * QUEST_SETTLE_MS from the last verified quest read or claim on the island),
  * waits for unread and claimable quests, quest objects and the pick-ups a
  * running quest still counts that are not on the map yet, leaves only once
  * all of that has read clear for READ_LAG_MS, and leaves after TRIP_MAX_MS
- * whatever is left: the next trip or the end of the map deals with it, so
- * this never pauses.
+ * whatever is left, unless pick-ups are left and Produce found the next
+ * trip short of resources: those pick-ups may be what covers it, so the run
+ * re-visits the island (home and back, which reloads the zone and its
+ * objects) after TRIP_REVISIT_MS (TRIP_MAX_MS when every pick-up is on the
+ * map), up to TRIP_REVISITS times per trip, and pauses after that.
  *
  * Apply and Trip act only while the run's island is viewed; the quest pool
  * read elsewhere is not the run's.
@@ -60,15 +66,24 @@
     var APPLY_QUIET_MS   = 600000;   // quiet time a quest gets to want an item
     var TRIP_MAX_MS      = 300000;   // quiet time a trip waits for quests and objects
     var QUEST_SETTLE_MS  = 20000;    // settle after a quest read or claim on the island
+    var TRIP_REVISIT_MS  = 120000;   // quiet time an awaited pick-up gets before a re-visit, next trip short
+    var TRIP_REVISITS    = 2;        // re-visits per trip before a pause
+    var NOT_SENT_MAX     = 3;        // no-packet sends per grid before a pause
+    var NOT_SENT_RETRY_MS = 10000;   // gap after a no-packet send before the next try to that grid
 
     var CATEGORY = 'adventures';
 
     // Mark name prefixes: one mark per item ordered, one per grid sent to,
     // and one per grid that took less than the item's amount (written seen,
-    // never sent; its taken field is what the grid has taken so far).
-    var MAKE  = 'make:';
-    var APPLY = 'apply:';
-    var PART  = 'part:';
+    // never sent; its taken field is what the grid has taken so far). One
+    // per trip holds Produce's verdict that the next trip waits for
+    // resources (seen, its text the shortfall), since the island cannot read
+    // the home queues; one per trip counts the re-visits taken (seen, count).
+    var MAKE    = 'make:';
+    var APPLY   = 'apply:';
+    var PART    = 'part:';
+    var SHORT   = 'short:';
+    var REVISIT = 'revisit:';
 
     function has(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj, key);
@@ -196,6 +211,22 @@
         }
     }
 
+    // Records on the trip whether the next trip's items wait for resources
+    // (text) or not (null). Saved only on a change, so a waiting Produce does
+    // not write the run file every pass.
+    function noteShort(r, tripIndex, text) {
+        var name = SHORT + tripIndex;
+        if (text === null) {
+            ld().dropMark(r, name);
+            return;
+        }
+        var m = ld().marked(r, name);
+        if (m && m.seen && m.text === text) return;
+        ld().markSeen(r, name);
+        ld().marked(r, name).text = text;
+        st().save();
+    }
+
     function haveText(thisNeed, info) {
         var out = [];
         for (var b in thisNeed) {
@@ -290,6 +321,7 @@
         }
 
         var list = all;
+        var shortNext = null;
         if (all.length) {
             var j = S.core.production.jointShortfalls(all);
             if (j === null) {
@@ -309,9 +341,11 @@
                         return;
                     }
                 }
-                noteOnce(r, 'next', 'next trip items wait for resources: ' + shortText(j));
+                shortNext = shortText(j);
+                noteOnce(r, 'next', 'next trip items wait for resources: ' + shortNext);
             }
         }
+        noteShort(r, i, shortNext);
         if (list.length) {
             orderRuns(r, list, info);
             return;
@@ -591,6 +625,21 @@
         var b = target.item.buff;
         var tg = target.grid;
         var an = applyMark(r, b, tg);
+        // A send that made no host call left the grid open. The count resets
+        // before the pause, so a Resume gets fresh tries; the gap gives a
+        // passing bridge glitch time to clear before the next try.
+        var nm = ld().marked(r, an);
+        if (nm && nm.notSent >= NOT_SENT_MAX) {
+            nm.notSent = 0;
+            st().save();
+            st().pause(S.RunPause.BuffFailed, 'apply ' + b + ' to ' + tg + ' failed: nothing sent after ' +
+                NOT_SENT_MAX + ' tries; see the log for the reason');
+            return;
+        }
+        if (nm && typeof nm.notSentAt === 'number' && now() - nm.notSentAt < NOT_SENT_RETRY_MS) {
+            ld().waitBusy(r, null, 'item ' + b + ' -> ' + tg + ' not sent, trying again');
+            return;
+        }
         var pn = partMark(r, b, tg);
         // What the grid has taken of this item so far; the next send offers
         // only the rest, so a grid never gets more than the item's amount.
@@ -631,7 +680,10 @@
 
     // ---- Trip ---------------------------------------------------------------
 
+    // A finished trip leaves no per-trip state behind.
     function leave(r, n) {
+        ld().dropMark(r, SHORT + r.trip);
+        ld().dropMark(r, REVISIT + r.trip);
         var done = r.trip + 1;
         r.trip = done;
         newLeg(r);
@@ -644,6 +696,33 @@
     function questSettling(r) {
         var c = wt().changedAt(r.zoneId);
         return typeof c === 'number' && now() - c < QUEST_SETTLE_MS;
+    }
+
+    // Pick-ups are left after lim and the next trip is short (short is
+    // Produce's text): go home and back, which reloads the island and may
+    // show an object the client did not place, without advancing the trip;
+    // the stock-out chain brings the run back here. After TRIP_REVISITS
+    // re-visits the run pauses on the island, where the user can collect
+    // them; the count resets first so a Resume gets fresh re-visits.
+    function revisit(r, text, short, lim) {
+        var name = REVISIT + r.trip;
+        var m = ld().marked(r, name);
+        var k = m && typeof m.count === 'number' ? m.count : 0;
+        if (k >= TRIP_REVISITS) {
+            m.count = 0;
+            st().save();
+            st().pause(S.RunPause.NotObserved, text + ' still left after ' + TRIP_REVISITS +
+                ' re-visits; the next trip is short of ' + short + '; collect them, then Resume');
+            return;
+        }
+        k++;
+        ld().markSeen(r, name);
+        ld().marked(r, name).count = k;
+        st().save();
+        log(text + ' after ' + Math.round(lim / 60000) + ' min; next trip short of ' + short +
+            '; going home and back to reload the island (' + k + '/' + TRIP_REVISITS + ')');
+        newLeg(r);
+        st().go(S.RunStep.JumpHome, 're-visit ' + k + '/' + TRIP_REVISITS);
     }
 
     // Trip (island). The last trip hands over to Clear, which waits for the
@@ -710,6 +789,22 @@
         if (awaited.length) parts.push(wt().pickupText(awaited) + ' not on the map yet');
         var text = parts.join(', ');
         var p = S.modules.adventures.away.pickupClock(r, objs.concat(held).concat(awaited));
+        // A pick-up left behind may be what the next trip is short of, so it
+        // is not given up on the plain limit. One not on the map yet (dead
+        // crops, say) sometimes shows only after a zone reload, so it gets
+        // the shorter wait.
+        var sm = ld().marked(r, SHORT + r.trip);
+        var owed = objs.length + held.length + awaited.length;
+        if (sm && owed) {
+            var lim = awaited.length ? TRIP_REVISIT_MS : TRIP_MAX_MS;
+            if (p.ms >= lim) {
+                revisit(r, text, sm.text, lim);
+                return;
+            }
+            ld().waitBusy(r, null, 'quests and objects left: ' + text + ', ' +
+                S.modules.adventures.away.quietText(p, lim));
+            return;
+        }
         if (p.ms >= TRIP_MAX_MS) {
             log('leaving with: ' + text);
             leave(r, n);
@@ -724,6 +819,10 @@
         APPLY_QUIET_MS:   APPLY_QUIET_MS,
         TRIP_MAX_MS:      TRIP_MAX_MS,
         QUEST_SETTLE_MS:  QUEST_SETTLE_MS,
+        TRIP_REVISIT_MS:  TRIP_REVISIT_MS,
+        TRIP_REVISITS:    TRIP_REVISITS,
+        NOT_SENT_MAX:     NOT_SENT_MAX,
+        NOT_SENT_RETRY_MS: NOT_SENT_RETRY_MS,
         produce:          produce,
         apply:            apply,
         trip:             trip,

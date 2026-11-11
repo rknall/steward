@@ -14,7 +14,8 @@
  *                first send, and then the action verifies with zero sends
  *   precheck()   null when the action may be sent, else a reason string
  *   baseline()   read once, right before the first send; passed on as base
- *   send(base)   issues the host call(s); true when they were issued
+ *   send(base)   issues the host call(s); true when they were issued;
+ *                NOT_SENT when it made no host call (nothing went out)
  *   check(base)  true when the expected effect is observed
  *   describe(base)  optional extra text for the final log line
  *   timeoutMs    verify window per send
@@ -62,6 +63,11 @@
     var STEP = 'core.attempt';
 
     var DEFAULT_CATEGORY = 'actions';
+
+    // Returned by a send that made no host call. Nothing went out, so the
+    // attempt ends without a retry and the caller may try again later with
+    // no risk of a double send.
+    var NOT_SENT = 'nothing sent';
 
     // Poll gap: the kernel's own spacing between queued actions, read at call
     // time. A non-positive value would make the window never close, so it is
@@ -168,6 +174,13 @@
         }
 
         var sent = call(state, 'send', state.base);
+        // Not counted as a send. On a retry an earlier send did go out, so
+        // ending there is a real failure, as with a precheck refusing.
+        if (sent.ok && sent.value === NOT_SENT) {
+            if (first) finish(state, S.ActionResult.Refused, NOT_SENT);
+            else finish(state, S.ActionResult.Failed, 'retry refused: ' + NOT_SENT);
+            return;
+        }
         state.sends++;
         if (!sent.ok || sent.value !== true) {
             if (state.sends <= retriesOf(state.def)) {
@@ -232,10 +245,11 @@
     }
 
     S.core.actions = {
-        RETRIES: RETRIES,
-        STEP:    STEP,
-        attempt: attempt,
-        step:    step
+        RETRIES:  RETRIES,
+        STEP:     STEP,
+        NOT_SENT: NOT_SENT,
+        attempt:  attempt,
+        step:     step
     };
 
     // The kernel loads before core, and a reload re-runs the kernel queue

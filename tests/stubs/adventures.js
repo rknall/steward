@@ -55,7 +55,12 @@
  *     camp grid may carry a name too). Delete the entry and the grid is empty;
  *   - w.sendCap[buff] (o.sendCap, default none) caps what one send of that
  *     item takes, the way the game may take less than offered per send;
- *   - w.produceableUnreadable = true makes the definition list unreadable.
+ *   - w.produceableUnreadable = true makes the definition list unreadable;
+ *   - w.noUid[buff] (o.noUid, default none) makes the star-menu entries of
+ *     that item read with no unique id (GetUniqueId() null), as a bridge read
+ *     that misses the id does;
+ *   - w.buffSendThrows = true makes every action 61 throw before it is sent or
+ *     recorded, a real packet failure (packets.js catches it and reports false).
  *
  * Nothing here edits the shared stubs; host fakes are installed on the booted
  * harness only.
@@ -206,8 +211,13 @@ function patchCore(w) {
 
 // A copy of the list of entries for the star menu; amounts are read at call
 // time, so the world can spend them.
-function buffVector(stock) {
-    return stock.filter(function (b) { return b.amount > 0; }).map(function (b) { return A.buffEntry(b); });
+function buffVector(stock, noUid) {
+    return stock.filter(function (b) { return b.amount > 0; }).map(function (b) {
+        var e = A.buffEntry(b);
+        // A fresh entry per read, so clearing its unique id touches no other read.
+        if (noUid[b.type] === true) e.GetUniqueId = function () { return null; };
+        return e;
+    });
 }
 
 // Adds a GetRemainingTime to the task of a general whose state.task carries
@@ -332,6 +342,8 @@ function world(o) {
         gridNeed: o.gridNeed || {},
         gridBuildings: o.gridBuildings || {},
         sendCap: o.sendCap || {},
+        noUid: o.noUid || {},
+        buffSendThrows: false,
         itemSends: []
     };
     w.lists[home ? HOME : ZONE] = fighters;
@@ -345,7 +357,7 @@ function world(o) {
     gi.mCurrentPlayer.mIsAdventureZone = !home;
     gi.isOnHomzone = function () { return gi.mCurrentViewedZoneID === HOME; };
     H.host.game.zone.GetArmy = function () { return A.armyOf(w.free); };
-    gi.mCurrentPlayer.getAvailableBuffs_vector = function () { return buffVector(w.stock); };
+    gi.mCurrentPlayer.getAvailableBuffs_vector = function () { return buffVector(w.stock, w.noUid); };
     gi.mMouseCursor.CheckIfGarrisonIsPlacableInGame = function (grid) {
         var spec = gi.mCurrentCursor.mCurrentSpecialist;
         var at = spec && spec.GetGarrisonGridIdx ? spec.GetGarrisonGridIdx() : 1;
@@ -522,6 +534,9 @@ function world(o) {
 
     var sendAction = gi.SendServerAction;
     gi.SendServerAction = function (id, p1, p2, p3, data) {
+        // A throw before the call is what a real packet failure looks like to
+        // the caller: nothing left the client, and packets.js reports false.
+        if (id === ACTION_BUFF && w.buffSendThrows) throw new Error('buff packet refused');
         sendAction.apply(this, arguments);
         if (id === ACTION_BUFF) {
             buffAction(p2, p3, data);
