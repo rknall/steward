@@ -452,6 +452,9 @@ t.test('Send home: Clear does not wait on him while he is listed travelling', fu
         var w = homeIsland();
         series(w, { step: w.S.RunStep.Clear, paths: [W1, HOME_BERT, W2], waveIndex: 3,
             run: { marks: sent ? { 'home:1.2': { sentAt: 5, seen: true, sentOnce: true } } : {} } });
+        // Free troops only Bert has room for, so his walk is worth waiting for.
+        w.g2.GetMaxMilitaryUnits = function () { return 6; };
+        w.frees[ZONE].Rifle = 2;
         w.quests.forEach(function (q) { if (q.last) q.finished = true; });
         w.g2.state.task = { type: w.code.travel, remaining: 600000 };
         w.g2.state.travelling = true;

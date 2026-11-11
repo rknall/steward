@@ -69,6 +69,11 @@ function homeWorld(o) {
     return w;
 }
 
+// Gives a general room for n troops, as the client's GetMaxMilitaryUnits does.
+function room(g, n) {
+    g.GetMaxMilitaryUnits = function () { return n; };
+}
+
 function countVisits(w) {
     var visit = w.gi.visitZone;
     w.visits = w.visits || [];
@@ -1121,7 +1126,7 @@ function timeoutText(limit) {
     return new RegExp('last quest not finished after ' + Math.round(limit / 60000) + ' min');
 }
 
-t.test('Clear: waits for the last quest and idle generals; a camp still standing only warns', function () {
+t.test('Clear: goes on while a general walks home; a camp still standing only warns', function () {
     var w = homeWorld();
     // Nothing left to pack, so the clear map goes on to the last quest.
     onIsland(w, null, {});
@@ -1131,10 +1136,8 @@ t.test('Clear: waits for the last quest and idle generals; a camp still standing
     lastQuest(w).finished = true;
     w.g1.state.task = { type: w.code.attack };
     tick(w);
-    assertStep(w, 'Clear');
-    w.g1.state.task = null;
-    tick(w);
     assertStep(w, 'LastQuest');
+    assert.ok(!logged(w, /Anna \(1\.1\) busy/), 'no busy wait on him');
     assert.ok(logged(w, /camps still standing after the last quest: 100, 200/, 'warn'));
 });
 
@@ -1152,9 +1155,10 @@ t.test('Clear: ClearTimeout after CLEAR_MAX_MS of quiet', function () {
     assertPaused(w, w.S.RunPause.ClearTimeout, timeoutText(limit));
 });
 
-t.test('Clear: quest done, a general busy far past CLEAR_MAX_MS stays Running', function () {
+t.test('Clear: a busy general with room for free troops holds with no limit', function () {
     var w = homeWorld();
-    onIsland(w, null, {});
+    room(w.g1, 4);
+    onIsland(w, null, { Rifle: 2 });
     var r = series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
     lastQuest(w).finished = true;
     w.g1.state.task = { type: w.code.attack };
@@ -1165,7 +1169,7 @@ t.test('Clear: quest done, a general busy far past CLEAR_MAX_MS stays Running', 
     assert.ok(logged(w, /Anna \(1\.1\) busy/), 'the wait is logged');
     w.g1.state.task = null;
     tick(w);
-    assertStep(w, 'LastQuest');
+    assertStep(w, 'PackStar');
 });
 
 t.test('Clear: a recovering general is not waited on; Clear goes on to the last quest', function () {
@@ -1197,15 +1201,81 @@ t.test('Clear: troops only the recovering general could hold stay, with one warn
     assert.strictEqual(hits.length, 1, 'one warning');
 });
 
-t.test('Clear: a general on a move task still holds the step', function () {
+t.test('Clear: a general on a move task with room for free troops still holds the step', function () {
     var w = homeWorld();
-    onIsland(w, null, {});
+    room(w.g1, 4);
+    onIsland(w, null, { Rifle: 2 });
     series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
     lastQuest(w).finished = true;
     w.g1.state.task = { type: w.code.move, newGrid: 11 };
     tick(w);
     assertStep(w, 'Clear');
     assert.ok(logged(w, /Anna \(1\.1\) busy/), 'busy logged');
+});
+
+t.test('Clear: a general on a move task with no free troops left does not hold the step', function () {
+    var w = homeWorld();
+    onIsland(w, null, {});
+    series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
+    lastQuest(w).finished = true;
+    w.g1.state.task = { type: w.code.move, newGrid: 11 };
+    tick(w);
+    assertStep(w, 'LastQuest');
+    assert.ok(!logged(w, /Anna \(1\.1\) busy/), 'no busy log');
+});
+
+t.test('Clear: quest done, free pool empty, a general attacking: LastQuest in one pass', function () {
+    var w = homeWorld();
+    onIsland(w, null, {});
+    series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
+    lastQuest(w).finished = true;
+    w.g1.state.task = { type: w.code.attack };
+    tick(w);
+    assertStep(w, 'LastQuest');
+    assert.ok(!logged(w, /Anna \(1\.1\) busy/), 'no busy log');
+});
+
+t.test('Clear: free troops a busy general cannot take do not hold the step', function () {
+    var w = homeWorld();
+    // Anna is full and Bert has no room: nobody can take the pool.
+    room(w.g1, 2);
+    w.g1.state.army = { Rifle: 2 };
+    onIsland(w, null, { Rifle: 4 });
+    series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
+    lastQuest(w).finished = true;
+    w.g1.state.task = { type: w.code.attack };
+    tick(w);
+    assertStep(w, 'LastQuest');
+    assert.ok(!logged(w, /Anna \(1\.1\) busy/), 'no busy log');
+    assert.ok(logged(w, /on the way home by themselves/), 'the transit note');
+});
+
+t.test('Clear: free troops only a busy general can take hold the step until he is ready, then PackStar once', function () {
+    var w = homeWorld();
+    room(w.g1, 4);
+    onIsland(w, null, { Rifle: 2 });
+    series(w, { step: w.S.RunStep.Clear, zoneId: ZONE, keys: { '1.1': true } });
+    lastQuest(w).finished = true;
+    w.g1.state.task = { type: w.code.attack };
+    tick(w);
+    assertStep(w, 'Clear');
+    assert.ok(logged(w, /Anna \(1\.1\) busy/), 'busy logged');
+    w.g1.state.task = null;
+    drive(w, { until: at('LastQuest') });
+    assertStep(w, 'LastQuest');
+    assert.strictEqual(countOf(w, 'Clear', 'PackStar'), 1);
+    assert.deepStrictEqual(w.raises, ['1.1']);
+});
+
+t.test('Clear: a fighter outside the loadout on an Attack task does not hold a finished Clear', function () {
+    var w = homeWorld();
+    var d = gen('1.6', 'Dora', 40);
+    onIsland(w, [w.g1, w.g2, d], {});
+    series(w, { step: w.S.RunStep.Clear, zoneId: ZONE });
+    lastQuest(w).finished = true;
+    d.state.task = { type: w.code.attack };
+    tick(w);
+    assertStep(w, 'LastQuest');
 });
 
 t.test('Clear: a running battle is not quiet time; the quest unfinished pauses ClearTimeout after it', function () {
@@ -2689,7 +2759,8 @@ t.test('waitBusy: logs once a minute under a moved clock, shows the remaining ti
 
 t.test('waitBusy: go, pause and a pass without a wait clear the record; an absent field is tolerated', function () {
     var w = homeWorld();
-    onIsland(w, null, {});
+    room(w.g1, 4);
+    onIsland(w, null, { Rifle: 2 });
     var r = series(w, { step: w.S.RunStep.Clear, zoneId: ZONE, run: { marks: plain(CLAIMED) } });
     var rs = w.st.current();
     var quest = lastQuest(w);

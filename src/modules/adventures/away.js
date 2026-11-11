@@ -384,18 +384,42 @@
     // idle loadout generals, each holding one troop class within its
     // capacity. Sharing it keeps the three steps from disagreeing on what is
     // left to pack, so the Pack -> Clear -> PackStar cycle ends.
+    // fieldHolders is the one split of the field holders; Clear also uses it
+    // for the busy and the recovering generals, so it reads them only once.
     function packPlan(r, inv) {
+        return planOf(fieldHolders(r, inv), inv);
+    }
+
+    // The loadout's field holders of this read, in key order: carriers in any
+    // state, ready generals, busy generals and the keys of recovering ones.
+    function fieldHolders(r, inv) {
         var keys = ld().fieldKeys(r);
-        var carriers = [];
-        var generals = [];
+        var out = { carriers: [], ready: [], busy: [], resting: [] };
         for (var i = 0; i < keys.length; i++) {
             var g = ld().gen(inv, keys[i]);
             if (!g) continue;
             var h = { key: g.key, capacity: g.capacity, army: g.army };
-            if (isCarrier(g)) carriers.push(h);
-            else if (g.cls === S.SpecialistType.General && ld().ready(g)) generals.push(h);
+            if (isCarrier(g)) out.carriers.push(h);
+            else if (g.cls !== S.SpecialistType.General) continue;
+            else if (ld().ready(g)) out.ready.push(h);
+            else if (ld().recovering(keys[i])) out.resting.push(keys[i]);
+            else out.busy.push(h);
         }
-        return S.core.army.planPack(inv.free, carriers.concat(generals));
+        return out;
+    }
+
+    function planOf(h, inv) {
+        return S.core.army.planPack(inv.free, h.carriers.concat(h.ready));
+    }
+
+    // Key of the first planned raise whose holder is not ready, or null. A
+    // carrier is planned in any state, so Clear waits on him here instead of
+    // sending PackStar a holder it cannot raise.
+    function heldRaise(p, inv) {
+        for (var i = 0; i < p.raises.length; i++) {
+            if (!ld().ready(ld().gen(inv, p.raises[i].key))) return p.raises[i].key;
+        }
+        return null;
     }
 
     // Keys of the planned raises whose holder is not on a map grid, in plan
@@ -418,12 +442,14 @@
         return out;
     }
 
-    // The map is clear when its last quest is finished and no loadout general
-    // is still fighting. Once the quest is done a busy general is waited on
-    // with no limit, so only the quest itself can time out. A general
-    // recovering after a lost battle is not waited on: he takes no order
-    // until his rest ends and goes home with the map. Free troops that only
-    // he could have held stay in the pool, with one warning when Clear
+    // The map is clear when its last quest is finished. From then on only
+    // free troops hold Clear: generals walking back to their garrison go home
+    // with the map anyway, so a busy general is waited on (with no limit)
+    // only while he has room for free troops that no ready holder takes.
+    // Troops nobody can take stay in the pool and travel home by themselves.
+    // A general recovering after a lost battle is not waited on: he takes no
+    // order until his rest ends and goes home with the map. Free troops that
+    // only he could have held stay in the pool, with one warning when Clear
     // leaves. A camp still standing only warns: it may belong to a side
     // quest or have been beaten in a way the map does not show. While quest
     // objects are left the quest may still need them, so the last quest's
@@ -435,20 +461,7 @@
         var list = S.core.quests.list();
         var last = list ? lastQuestOf(list) : null;
         var questDone = !!(last && last.finished);
-        var keys = ld().fieldKeys(r);
-        var firstKey = null;
-        var resting = [];
-        for (var i = 0; i < keys.length; i++) {
-            var g = ld().gen(inv, keys[i]);
-            if (!g || ld().ready(g)) continue;
-            if (ld().recovering(keys[i])) {
-                resting.push(keys[i]);
-                continue;
-            }
-            firstKey = keys[i];
-            break;
-        }
-        if (questDone && firstKey === null && !ld().anyAttacking()) {
+        if (questDone) {
             if (!inv.ok) {
                 ld().waitRead(r, 'free troops and armies');
                 return;
@@ -457,14 +470,25 @@
             // fighting during the first pack, are packed before the claim.
             // A recovering general is not ready, so the plan leaves his share
             // in the remainder.
-            var p = packPlan(r, inv);
+            var h = fieldHolders(r, inv);
+            var p = planOf(h, inv);
+            var held = heldRaise(p, inv);
+            if (held === null && !p.raises.length && S.core.army.total(p.remainder) > 0) {
+                var back = S.core.army.planPack(p.remainder, h.busy);
+                if (back.raises.length) held = back.raises[0].key;
+            }
+            if (held !== null) {
+                ld().waitBusy(r, held, ld().who(inv, held) + ' busy, has room for free troops');
+                return;
+            }
             if (p.raises.length) {
                 st().go(S.RunStep.PackStar, 'free troops left to pack');
                 return;
             }
+            var resting = h.resting;
             if (resting.length && S.core.army.total(p.remainder) > 0) {
                 var names = [];
-                for (i = 0; i < resting.length; i++) names.push(ld().who(inv, resting[i]));
+                for (var i = 0; i < resting.length; i++) names.push(ld().who(inv, resting[i]));
                 warn('left in the free pool while ' + names.join(', ') +
                     (resting.length === 1 ? ' recovers: ' : ' recover: ') + S.core.army.text(p.remainder));
             }
@@ -476,10 +500,6 @@
                     ', counted as yours for ' + Math.round(TRANSIT_MS / 60000) + ' min');
             }
             st().go(S.RunStep.LastQuest, 'last quest finished');
-            return;
-        }
-        if (questDone) {
-            ld().waitBusy(r, firstKey, firstKey !== null ? ld().who(inv, firstKey) + ' busy' : 'a fighter is busy');
             return;
         }
         // An unreadable list says nothing about the quest, so it does not feed
