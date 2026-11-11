@@ -1,14 +1,30 @@
 name: Release
 
+# One workflow for every release path. scripts/release.js works out the next
+# version from the latest v* tag and the Bump: trailers since it; this file only
+# decides whether to publish:
+#   push to main       -> release when a minor/major bump is pending
+#   workflow_dispatch  -> release whatever is pending (the manual patch path)
+#   push of a v* tag   -> release that tag
+# Tags created here by GITHUB_TOKEN do not trigger workflows, so a main-path
+# release never starts a second tag-path run. Nothing here commits or pushes.
+
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Build and publish release bundle
+    name: Plan and publish release bundle
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -24,30 +40,78 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
-
-      - name: Sync package.json version
-        run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
-
       - name: Install dependencies
         run: npm ci
 
       - name: Lint source (AIR ruleset)
         run: npm run lint
 
-      - name: Build bundle (with injected version)
+      - name: Run tests
+        run: npm test
+
+      - name: Plan release
+        id: plan
+        shell: bash
         env:
-          STEWARD_VERSION: ${{ steps.version.outputs.VERSION }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = "tag" ]; then
+            node scripts/release.js --at "$GITHUB_REF_NAME" --github-output --notes-out notes.md
+          else
+            node scripts/release.js --github-output --notes-out notes.md
+          fi
+
+          # Read back what release.js appended for this step.
+          get() { grep "^$1=" "$GITHUB_OUTPUT" | tail -n 1 | cut -d= -f2-; }
+          tag="$(get tag)"
+          level="$(get level)"
+          pending="$(get pending)"
+          tagged="$(get tagged)"
+          count="$(get count)"
+
+          go=false
+          if [ "$REF_TYPE" = "tag" ]; then
+            go=true
+          elif [ "$tagged" = "false" ] && [ "$count" -gt 0 ]; then
+            # A push to main releases only a pending minor/major bump; a manual
+            # run also releases a patch.
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$pending" = "true" ]; then
+              go=true
+            fi
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release plan"
+            echo ""
+            echo "- Event: $GITHUB_EVENT_NAME ($GITHUB_REF_NAME)"
+            echo "- Version: $tag"
+            echo "- Bump: $level"
+            echo "- Commits: $count"
+            echo "- HEAD already tagged: $tagged"
+            echo "- Release: $go"
+            echo ""
+            echo "### Notes"
+            echo ""
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build bundle (with injected version)
+        if: steps.plan.outputs.go == 'true'
+        env:
+          STEWARD_VERSION: ${{ steps.plan.outputs.version }}
         run: npm run build
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/user_steward.js
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+        if: steps.plan.outputs.go == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        # On the main and manual paths gh creates the tag at this commit; on the
+        # tag path the tag exists and --target is ignored.
+        run: >-
+          gh release create "$TAG" build/user_steward.js
+          --title "steward $TAG"
+          --notes-file notes.md
+          --target "$GITHUB_SHA"

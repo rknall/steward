@@ -57,14 +57,17 @@ orchestrator shows sets in the user's Chrome through `node scripts/review-set.js
 serve`, and the page's Submit writes the verdicts next to the set (Copy feedback
 pasted into the chat is the fallback; a published private link is optional).
 
-Agents never `git add`, commit or push; the user commits. Commit messages are
-short, topic-prefixed (`mining: ...`) and end with `Assisted-by: Claude`.
+Agents never `git add`, commit or push; the user commits. Commit subjects are
+short and topic-prefixed (`mining: ...`) with no `; v0.x.y` suffix. Trailers, in
+order: `Fixes #N`/`Refs #N`, an optional `Bump:` line, then `Assisted-by: Claude`.
 
-Versioning: `package.json` `version` is the only hand-kept version (the build
-injects it into the bundle banner and the dashboard Build row). Every shipped
-task bumps it exactly once, as part of that task's change: a new module or a
-massive redesign bumps minor, a bugfix or smaller feature bumps patch. Use
-`npm version <x.y.z> --no-git-tag-version` so `package-lock.json` follows.
+Versioning: tasks never edit `package.json` `version` or `package-lock.json`.
+The build versions itself from `git describe` (`0.10.14-3-gabc1234[-dirty]`),
+and `STEWARD_VERSION` overrides it. A new module or a massive redesign puts a
+`Bump: minor` line in the commit body (`Bump: major` is rare); anything else
+carries no Bump line, which means patch. A merge to main with a pending minor or
+major bump is released by CI, with notes built from the commit subjects. Patch
+releases are manual. See [docs/RELEASING.md](docs/RELEASING.md).
 
 Line limits on agent-facing markdown (this file at most 200 lines, agents 100,
 SKILL.md 160, handoff/todo notes 70) are enforced by a local hook; see

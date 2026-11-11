@@ -12,7 +12,7 @@ Steward is a clean-sheet replacement for [autoTSO](https://github.com/rknall/aut
 
 ## Install (end users)
 
-> Not yet released. The instructions below describe the target installation flow once v0.1 ships.
+Releases are published on [GitHub Releases](https://github.com/rknall/steward/releases).
 
 1. Download `user_steward.js` from the latest [GitHub Release](https://github.com/rknall/steward/releases).
 2. Drop it into your TSO client's `userscripts/` folder.
@@ -28,6 +28,7 @@ cd steward
 npm install            # installs eslint + husky pre-commit hook
 npm run lint           # AIR-compatible linting over src/
 npm run build          # produces build/user_steward.js
+npm run release        # dry run: next version and release notes, changes nothing
 ```
 
 The bundle is a single concatenated script. During development, source lives under `src/` split into kernel / core / modules; the build step concatenates everything into one file because Adobe AIR has no module system. See [`docs/MODULE_GUIDE.md`](docs/MODULE_GUIDE.md) for how to add a module.
