@@ -12,8 +12,9 @@ the test harness use the first of these that is set:
 2. `git describe --tags --match "v[0-9]*" --dirty`, with the leading `v`
    removed, for example `0.10.14-3-gabc1234-dirty`: three commits after tag
    `v0.10.14`, on a dirty tree.
-3. `package.json` `version`. It is a frozen fallback for a checkout without git
-   or tags and is never bumped by a task.
+3. `package.json` `version`, the placeholder `0.0.0-git`, for a checkout
+   without git or tags. It is never bumped, so the `steward@0.0.0-git` line npm
+   prints before a build is not the bundle version; the build's own last line is.
 4. `0.0.0`.
 
 Tags are the version record. A release build made on a tagged commit reads
