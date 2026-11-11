@@ -15,8 +15,16 @@
  *   3. For each wanted slot, pick the best idle geologist via
  *      S.core.specialists.bestGeologistForDeposit (capacity primary,
  *      speed tiebreak; ignores friendpremiumbuff1 — see core/specialists/
- *      geologists.js for the algorithm). A geologist already pinned by
- *      `overrides` is only eligible for deposits in its override list.
+ *      geologists.js for the algorithm). Two filters narrow the pool
+ *      first, and a geologist must pass both (an intersection):
+ *        - a geologist pinned by name in `overrides` is only eligible
+ *          for the deposits in its override list;
+ *        - a deposit row may carry `kinds`, a list of geologist kinds
+ *          (host GetType numbers). A listed type takes only geologists
+ *          of those kinds. A kind listed for any type is reserved: it
+ *          searches only the types that list it and stays idle
+ *          otherwise. A geologist whose kind cannot be read never
+ *          enters a listed type, and searches default types as usual.
  *   4. Collect the picks, then enqueue them via
  *      queue.add('geologists.dispatch', ...) unless the specialist list
  *      lost entries during the pass; such a pass queues nothing. While
@@ -75,15 +83,61 @@
         return n;
     }
 
-    // Filter `idle` to only those eligible for `depositName` given the
-    // `overrides` map. Geologists with no override are always eligible.
-    // Geologists with an override list are eligible only when that list
-    // contains the deposit.
-    function eligibleForDeposit(idle, depositName, overrides) {
-        var c = S.core.specialists;
+    // The kind list of a deposit row: finite numbers only, without
+    // duplicates, sorted ascending. An absent key and a stored [] both give
+    // [], so readers never have to tell the two apart.
+    function rowKinds(row) {
         var out = [];
-        for (var i = 0; i < idle.length; i++) {
-            var g = idle[i];
+        if (!row || !Array.isArray(row.kinds)) return out;
+        var seen = {};
+        for (var i = 0; i < row.kinds.length; i++) {
+            var k = row.kinds[i];
+            if (typeof k !== 'number' || !isFinite(k)) continue;
+            if (seen[String(k)] === true) continue;
+            seen[String(k)] = true;
+            out.push(k);
+        }
+        out.sort(function (a, b) { return a - b; });
+        return out;
+    }
+
+    // Kind lists per deposit name and the set of reserved kinds, built from
+    // the rows of the known deposit types only, so stale keys in the stored
+    // map have no effect. A row counts whether its Search toggle is on or
+    // off: listing a kind reserves it, even for a type that is not searched.
+    function kindRule(depCfg, types) {
+        var rule = { lists: {}, reserved: {} };
+        depCfg = depCfg || {};
+        types = types || [];
+        for (var t = 0; t < types.length; t++) {
+            var info = types[t];
+            if (!info || !Object.prototype.hasOwnProperty.call(depCfg, info.name)) continue;
+            var ks = rowKinds(depCfg[info.name]);
+            if (!ks.length) continue;
+            var list = {};
+            for (var i = 0; i < ks.length; i++) {
+                list[String(ks[i])] = true;
+                rule.reserved[String(ks[i])] = true;
+            }
+            rule.lists[info.name] = list;
+        }
+        return rule;
+    }
+
+    // Filter `geos` to those eligible for `depositName`. A geologist with a
+    // name override is eligible only when that list contains the deposit. On
+    // top of that, a deposit with a kind list takes only geologists of a
+    // listed kind, and a deposit without one takes every geologist whose
+    // kind is not reserved. An unreadable kind (null) fails closed for
+    // listed deposits. Without `rule` no kind lists apply.
+    function eligibleForDeposit(geos, depositName, overrides, rule) {
+        var c = S.core.specialists;
+        var lists = (rule && rule.lists) || {};
+        var reserved = (rule && rule.reserved) || {};
+        var list = Object.prototype.hasOwnProperty.call(lists, depositName) ? lists[depositName] : null;
+        var out = [];
+        for (var i = 0; i < geos.length; i++) {
+            var g = geos[i];
             var ov = c.namedOverride(overrides, c.name(g));
             if (ov && ov.length) {
                 var allowed = false;
@@ -91,6 +145,12 @@
                     if (ov[j] === depositName) { allowed = true; break; }
                 }
                 if (!allowed) continue;
+            }
+            var k = c.kind(g);
+            if (list) {
+                if (k === null || list[String(k)] !== true) continue;
+            } else if (k !== null && reserved[String(k)] === true) {
+                continue;
             }
             out.push(g);
         }
@@ -141,6 +201,7 @@
         var types = S.core.deposits.types();
         var depCfg = (s && s.deposits) || {};
         var overrides = (s && s.overrides) || {};
+        var rule = kindRule(depCfg, types);
         var assigned = {};   // uid → true (this tick)
         var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay
             : S.modules.geologists.defaultSettings.dispatchDelay;
@@ -168,10 +229,10 @@
             var wanted = max - onMap - onTask;
             if (wanted <= 0) continue;
 
-            // Apply override constraint to the candidate pool, then ask
-            // the scoring helper for ranking. We re-rank per slot so the
+            // Apply the name and kind constraints to the candidate pool, then
+            // ask the scoring helper for ranking. We re-rank per slot so the
             // exclude set updates between picks.
-            var pool = eligibleForDeposit(idleGeos, info.name, overrides);
+            var pool = eligibleForDeposit(idleGeos, info.name, overrides, rule);
             for (var w = 0; w < wanted; w++) {
                 var best = c.bestGeologistForDeposit(info.name, {
                     from:            pool,
@@ -205,6 +266,10 @@
     }
 
     S.modules.geologists.busyOnDeposit = busyOnDeposit;
+    // Shared with the dashboard, so its ranking log filters the same way.
+    S.modules.geologists.rowKinds = rowKinds;
+    S.modules.geologists.kindRule = kindRule;
+    S.modules.geologists.eligibleForDeposit = eligibleForDeposit;
 
     function boot() {
         if (!S.kernel.settings.read('geologists')) {

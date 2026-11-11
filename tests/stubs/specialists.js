@@ -38,6 +38,7 @@ function makeSkill(opts) {
 function makeSpec(opts) {
     opts = opts || {};
     var typeId  = (typeof opts.type === 'number') ? opts.type : TYPE.GENERAL;
+    var getType = (typeof opts.kind === 'number') ? opts.kind : typeId;
     var uid     = opts.uid || ('spec-' + Math.random().toString(36).slice(2, 8));
     var name    = opts.name || 'Specialist';
     var task    = opts.task || null;
@@ -45,7 +46,7 @@ function makeSpec(opts) {
     var timeBonus = opts.timeBonus;
 
     return {
-        GetType:     function () { return typeId; },
+        GetType:     function () { return getType; },
         GetUniqueID: function () {
             return {
                 toKeyString: function () { return uid; },
@@ -137,6 +138,24 @@ function geologist(opts) {
     return makeSpec(opts);
 }
 
+// Fake Specialists::cSpecialist class for kind labels: the static
+// GetSpecialistDescriptionForType(t) answers { getBaseType, getName_string }
+// for every key of labels and null for any other type. The core caches the
+// class per context, so a test installs it before the first specialist read:
+//   H.host.game.def = function (n) { return n === 'Specialists::cSpecialist' ? cls : null; };
+function kindClass(labels) {
+    labels = labels || {};
+    return {
+        GetSpecialistDescriptionForType: function (t) {
+            if (!Object.prototype.hasOwnProperty.call(labels, String(t))) return null;
+            return {
+                getBaseType:    function () { return 2; },
+                getName_string: function () { return labels[t]; }
+            };
+        }
+    };
+}
+
 function explorer(opts) {
     opts = opts || {};
     opts.type = TYPE.EXPLORER;
@@ -155,6 +174,7 @@ function task(typeId, subTypeId, remainingMs) {
 module.exports = {
     TYPE:      TYPE,
     geologist: geologist,
+    kindClass: kindClass,
     explorer:  explorer,
     spec:      makeSpec,
     ghost:     ghost,

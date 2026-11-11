@@ -402,6 +402,11 @@
             '.steward-tbl td{height:' + px(t.tdH) + ';padding:0 10px;border-top:' + line + ';' +
                 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
             '.steward-tbl tbody tr:nth-child(even) td{background:' + t.bandZebra + ';}',
+            // A full-width editor row: it grows with its content instead of
+            // keeping the data row height and ellipsis.
+            '.steward-tbl td.steward-span{height:auto;padding:0;white-space:normal;' +
+                'overflow:visible;text-overflow:clip;}',
+            '.steward-tbl td.steward-span .steward-note{padding-top:8px;}',
             '.steward-tbl .steward-num{text-align:right;}',
             '.steward-tbl .steward-c{text-align:center;}',
             '.steward-tbl tfoot td{font-weight:600;border-top:1px solid ' + t.bandChip + ';' +

@@ -6,7 +6,7 @@
  *   {
  *     enabled:       false,
  *     dispatchDelay: 1500,
- *     deposits:      { <Name>: { enabled: bool, max: int }, ... },
+ *     deposits:      { <Name>: { enabled: bool, max: int, kinds: [GetType] }, ... },
  *     overrides:     { '<geologist name>': ['Stone', 'Marble'] }
  *   }
  *
@@ -18,6 +18,15 @@
  * pins the named geologist to a deposit-name list — the routing
  * algorithm only considers that geo for those deposits, never others.
  * Same shape pattern as the explorers module's per-name overrides.
+ *
+ * `kinds` on a deposit row lists the geologist kinds (host GetType
+ * numbers, never labels, so it holds across locales) allowed to search
+ * that type. Absent or empty means default: any geologist whose kind is
+ * not reserved. A kind listed for any type is reserved for the types
+ * that list it and stays idle otherwise. A name in `overrides` still
+ * applies on top: a geologist must pass both. The dashboard stores
+ * `kinds: []` when a saved list is cleared, which means the same as an
+ * absent key.
  */
 
 (function (S) {

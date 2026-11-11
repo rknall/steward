@@ -97,7 +97,7 @@ var CLASSES = [
     'steward-danger', 'steward-confirm', 'steward-now', 'steward-iconbtn',
     'steward-badge', 'steward-b-ok', 'steward-b-busy', 'steward-b-off',
     'steward-b-paused', 'steward-b-tag', 'steward-b-phase', 'steward-tbl',
-    'steward-num', 'steward-c', 'steward-fill', 'steward-who', 'steward-under',
+    'steward-num', 'steward-c', 'steward-span', 'steward-fill', 'steward-who', 'steward-under',
     'steward-chips', 'steward-chip', 'steward-stats', 'steward-stat',
     'steward-stat-w1', 'steward-stat-w2', 'steward-stat-w3', 'steward-stat-w4',
     'steward-stat-k', 'steward-stat-v', 'steward-grid', 'steward-cell',

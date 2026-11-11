@@ -428,7 +428,8 @@
         for (var i = 0; i < (items || []).length; i++) {
             (function (item) {
                 var $b = $('<button>', { type: 'button', 'class': 'steward-chip' }).text(item.label || '');
-                if (item.id === active) $b.addClass('active');
+                // item.active lets a caller mark several chips (multi-select).
+                if (item.id === active || item.active === true) $b.addClass('active');
                 $b.on('click', function (e) {
                     e.preventDefault();
                     if (typeof onPick !== 'function') return;
@@ -555,6 +556,17 @@
             var $tr = $('<tr>');
             var rc = typeof opts.rowCls === 'function' ? opts.rowCls(rows[r], r) : opts.rowCls;
             if (rc) $tr.addClass(rc);
+            if (rows[r] && !Array.isArray(rows[r]) && typeof rows[r] === 'object' &&
+                    Object.prototype.hasOwnProperty.call(rows[r], 'span')) {
+                var $sp = $('<td>', {
+                    'class': 'steward-span' + (rows[r].cls ? ' ' + rows[r].cls : ''),
+                    colspan: String(Math.max(1, cols.length))
+                });
+                put($sp, rows[r].span);
+                $tr.append($sp);
+                $body.append($tr);
+                continue;
+            }
             for (var k = 0; k < rows[r].length; k++) {
                 $tr.append(cell('td', rows[r][k], cols[k] ? cols[k].cls : null));
             }
