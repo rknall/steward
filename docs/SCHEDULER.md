@@ -24,18 +24,24 @@ A higher tier always runs before a lower one in a given tick. Within a tier, mod
 
 ```
 tick(now):
-    ctx = buildContext()                    # zone, now, session flags
-    for tier in [Critical, Normal, Idle]:
-        modules = registry.byTier(tier)     # array of module specs
-        cursor  = scheduler.cursors[tier]   # 0..modules.length-1
-        for offset in 0..modules.length:
-            m = modules[(cursor + offset) % modules.length]
-            if not safeIsReady(m, ctx): continue
-            safePlan(m, ctx)                # may enqueue tasks
-        scheduler.cursors[tier] = (cursor + 1) % modules.length
-    queue.drain()
-    schedule(tick, tickInterval)
+    try:
+        ctx = buildContext()                    # zone, now, session flags
+        for tier in [Critical, Normal, Idle]:
+            try:
+                modules = registry.byTier(tier)     # array of module specs
+                cursor  = scheduler.cursors[tier]   # 0..modules.length-1
+                for offset in 0..modules.length:
+                    m = modules[(cursor + offset) % modules.length]
+                    if not safeIsReady(m, ctx): continue
+                    safePlan(m, ctx)                # may enqueue tasks
+                scheduler.cursors[tier] = (cursor + 1) % modules.length
+            catch: log (rate-limited)               # later tiers still run
+        queue.drain()
+    finally:
+        schedule(tick, tickInterval)
 ```
+
+The tick always reschedules. A throwing tier is logged (rate-limited) and the later tiers and the drain still run. The scheduler writes a heartbeat line from the tick itself every `HEARTBEAT_MS`, so a missing heartbeat means the timer or AIR stopped, for example while paused: a pause stops the tick and its heartbeat. A tick later than `TICK_GAP_FACTOR` intervals logs one gap WARN.
 
 The cursor advance happens **once per tier per tick**, regardless of how many modules in that tier had work. That's the round-robin guarantee: if module A and module B are both `Normal`, they alternate first-look across ticks.
 
@@ -115,7 +121,13 @@ An entry added while a tagged action is running inherits that action's module ta
 
 ### Modal-aware execution
 
-Each action is gated by a host-modal check before it fires (`60_queue.js:isHostModalVisible`). If any `div[role="dialog"]:visible` is on the page when the queue tries to run the next entry, the entry is **deferred** (not dropped) — the queue re-polls every `QUEUE_MODAL_RECHECK_MS` (2 s) and resumes the moment the user closes their window. This prevents Steward from yanking a window the user just opened.
+Each action is gated by a host-modal check before it fires (`60_queue.js:visibleDialogs()`). If any element matching `S.kernel.HOST_DIALOG_SELECTOR` (`div[role="dialog"]`) is visible on the page when the queue tries to run the next entry, the entry is **deferred** (not dropped) — the queue re-polls every `QUEUE_MODAL_RECHECK_MS` (2 s) and resumes the moment the user closes their window. This prevents Steward from yanking a window the user just opened.
+
+A deferral writes a few `queue` lines and nothing per 2 s poll: `deferring <depth> action(s): dialog visible: <list>` on the first poll (L1a), `still deferring ...` at most once per `LOG_REPEAT_MS` (L1b), a one-time WARN at `QUEUE_MODAL_STALE_MS` (L1c), and `resumed after <s> s` (L1d), `deferral ended after <s> s: queue empty` (L1e) or `reset while deferring ...` (L1f) when it ends. The full text is in [LOGGING.md](LOGGING.md#kernel-health-lines).
+
+#### A dialog the user cannot see
+
+A steward modal survives a script reload, and a wedged stage can leave one shown behind the game, so only a client restart clears it. The guard does not expire on its own, because a false resume would close a window the user is editing. Instead, after `QUEUE_MODAL_STALE_MS` (10 min) it warns once and the native-menu status shows `queue held <m> min`.
 
 ## Module busy contract
 

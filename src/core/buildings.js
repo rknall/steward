@@ -20,9 +20,12 @@
     var snapshot = null;     // cached array per tick
     var lastGapLog = {};     // last logged name-index gap per building name
 
-    // GetProductionState() value of a building that is working. 1 (resource
-    // missing), 2 (warehouse full) and 5 (stopped) must not take a buff.
+    // GetProductionState() value of a building that is working. MISSING_INPUT_STATE,
+    // 2 (warehouse full) and 5 (stopped) must not take a buff.
     var PRODUCING_STATE = 0;
+
+    // switched on but an input is missing; such a building does not produce
+    var MISSING_INPUT_STATE = 1;
 
     // Optional host methods that say a building cannot take a buff right now.
     // Feature-detected: buffState records whether each exists.
@@ -84,32 +87,42 @@
 
     function name(b) {
         if (!b) return '';
-        try { return b.GetBuildingName_string ? b.GetBuildingName_string() : ''; }
-        catch (e) { return ''; }
+        try {
+            var v = S.kernel.hostRead.call(b, 'GetBuildingName_string');
+            return v === undefined ? '' : v;
+        } catch (e) { return ''; }
     }
 
     function grid(b) {
         if (!b) return null;
-        try { return b.GetGrid ? b.GetGrid() : null; }
-        catch (e) { return null; }
+        try {
+            var v = S.kernel.hostRead.call(b, 'GetGrid');
+            return v === undefined ? null : v;
+        } catch (e) { return null; }
     }
 
     function level(b) {
         if (!b) return 0;
-        try { return b.GetUpgradeLevel ? b.GetUpgradeLevel() : 0; }
-        catch (e) { return 0; }
+        try {
+            var v = S.kernel.hostRead.call(b, 'GetUpgradeLevel');
+            return v === undefined ? 0 : v;
+        } catch (e) { return 0; }
     }
 
     function playerId(b) {
         if (!b) return null;
-        try { return typeof b.getPlayerID === 'function' ? b.getPlayerID() : null; }
-        catch (e) { return null; }
+        try {
+            var v = S.kernel.hostRead.call(b, 'getPlayerID');
+            return v === undefined ? null : v;
+        } catch (e) { return null; }
     }
 
     function goContainer(b) {
         if (!b) return null;
-        try { return typeof b.GetGOContainer === 'function' ? b.GetGOContainer() : null; }
-        catch (e) { return null; }
+        try {
+            var v = S.kernel.hostRead.call(b, 'GetGOContainer');
+            return v === undefined ? null : v;
+        } catch (e) { return null; }
     }
 
     // True while the host still lets the object be clicked. A clicked map
@@ -136,8 +149,8 @@
     function hasArmy(b) {
         if (!b) return false;
         try {
-            var a = typeof b.GetArmy === 'function' ? b.GetArmy() : null;
-            return !!(a && typeof a.HasUnits === 'function' && a.HasUnits());
+            var a = S.kernel.hostRead.call(b, 'GetArmy');
+            return !!(a && S.kernel.hostRead.call(a, 'HasUnits'));
         } catch (e) { return false; }
     }
 
@@ -411,13 +424,14 @@
         } catch (e) { return null; }
     }
 
+    // knownDef spares a second read of the definition when the caller has it.
     // Milliseconds left on one buff appliance (duration minus elapsed time, as
     // the client's own time-left label does), or null when it has run out or
     // the host cannot answer.
-    function applianceRemainingMs(a, now) {
+    function applianceRemainingMs(a, now, knownDef) {
         try {
-            if (!a || typeof a.GetBuffDefinition !== 'function') return null;
-            var def = a.GetBuffDefinition();
+            if (!a) return null;
+            var def = knownDef || S.kernel.hostRead.call(a, 'GetBuffDefinition');
             if (!def || typeof def.getDuration !== 'function' ||
                 typeof a.GetApplicanceMode !== 'function' ||
                 typeof a.GetStartTime !== 'function') return null;
@@ -459,6 +473,18 @@
         return best;
     }
 
+    // The GetProductionState() number of a building, or null when there is no
+    // building, a method is missing, a call throws or the value is not a number.
+    function productionState(b) {
+        if (!b) return null;
+        try {
+            var rc = S.kernel.hostRead.call(b, 'GetResourceCreation');
+            if (!rc) return null;
+            var ps = S.kernel.hostRead.call(rc, 'GetProductionState');
+            return (typeof ps === 'number') ? ps : null;
+        } catch (e) { return null; }
+    }
+
     // Every raw read that decides whether a production buff may be applied.
     // Unknown facts are null; presence flags tell a missing optional method
     // from one that threw. Null for no building.
@@ -471,15 +497,7 @@
             var v = b.mBuffs_vector;
             st.buffsVector = (v && typeof v.length === 'number') ? v.length : null;
         } catch (e2) { st.buffsVector = null; }
-        try {
-            if (typeof b.GetResourceCreation === 'function') {
-                var rc = b.GetResourceCreation();
-                if (rc && typeof rc.GetProductionState === 'function') {
-                    var ps = rc.GetProductionState();
-                    if (typeof ps === 'number') st.productionState = ps;
-                }
-            }
-        } catch (e3) { st.productionState = null; }
+        st.productionState = productionState(b);
         for (var i = 0; i < BUFF_BLOCKERS.length; i++) {
             var m = BUFF_BLOCKERS[i].method;
             var present = typeof b[m] === 'function';
@@ -526,23 +544,22 @@
     function productionBuffInfo(b) {
         if (!b) return null;
         var a = null;
+        var def = null;
         try { a = b.productionBuff || null; } catch (e) { a = null; }
         if (!a) return null;
         var nm = null;
         try {
-            var def = typeof a.GetBuffDefinition === 'function' ? a.GetBuffDefinition() : null;
+            def = S.kernel.hostRead.call(a, 'GetBuffDefinition') || null;
             if (def) {
                 var readers = ['GetName_string', 'GetBuffName_string'];
                 for (var i = 0; i < readers.length && nm === null; i++) {
-                    if (typeof def[readers[i]] === 'function') {
-                        var v = def[readers[i]]();
-                        if (typeof v === 'string') nm = v;
-                    }
+                    var v = S.kernel.hostRead.call(def, readers[i]);
+                    if (typeof v === 'string') nm = v;
                 }
                 if (nm === null && typeof def.name === 'string') nm = def.name;
             }
         } catch (e2) { /* name stays null */ }
-        return { name: nm, remainingMs: applianceRemainingMs(a, clientTime()) };
+        return { name: nm, remainingMs: applianceRemainingMs(a, clientTime(), def) };
     }
 
     S.core.buildings = {
@@ -572,6 +589,8 @@
         productionBuffInfo: productionBuffInfo,
         BUFF_BLOCKERS:     BUFF_BLOCKERS,
         PRODUCING_STATE:   PRODUCING_STATE,
+        MISSING_INPUT_STATE: MISSING_INPUT_STATE,
+        productionState:   productionState,
         isSelectable:      isSelectable,
 
         // state predicates

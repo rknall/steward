@@ -138,6 +138,71 @@ t.test('needs names what the draft still lacks, including a taken label', functi
     assert.deepStrictEqual(plain(s.dialog.needs(draft, taken)), []);
 });
 
+// The same window on the host Modal model: stage swaps, Bootstrap's
+// hide-fires-first rule and the fade are all counted.
+function setupHost() {
+    var afs = airfs.make();
+    var H = harness.boot({ host: {
+        air: afs.air,
+        showGameAlert: function () {}
+    } });
+    var $ = jq.install(H);
+    var rig = hostStubs.installModal(H, { host: true });
+    H.Steward.kernel.ui.ensureStyle = function () {};
+    return {
+        H: H, $: $, rig: rig, S: H.Steward,
+        dialog: H.Steward.modules.adventures.dialog
+    };
+}
+
+t.test('a window fading out after a hide holds no edits', function () {
+    var s = setupHost();
+    s.dialog.open();
+    click(s.rig.made[s.rig.made.length - 1].modal.Body(), s.$, 'New template');
+    s.rig.made[s.rig.made.length - 1].modal.Body().find('input').eq(0).val('Changed').trigger('input');
+    assert.strictEqual(s.dialog.hasEdits(), true);
+    s.S.kernel.ui.hideModal(s.rig.made[s.rig.made.length - 1].modal);
+    assert.strictEqual(s.dialog.hasEdits(), false);
+    s.rig.flushFades();
+    assert.strictEqual(s.dialog.hasEdits(), false);
+});
+
+t.test('without the shell probe a dirty draft reads no edits and does not throw', function () {
+    var s = setup();
+    openEdit(s);
+    typeLabel(s, 'Changed');
+    delete s.S.kernel.ui.isModalShown;
+    assert.strictEqual(s.dialog.hasEdits(), false);
+});
+
+t.test('Close clicked twice before the fade ends fires one hide event and stays balanced', function () {
+    var s = setupHost();
+    s.dialog.open();
+    assert.strictEqual(s.rig.isShown('StewardAdventures'), true);
+    assert.strictEqual(s.rig.balanced(), true);
+    var before = s.rig.swaps;
+    var $foot = s.rig.element('StewardAdventures').children().eq(1);
+    click($foot, s.$, 'Close');
+    click($foot, s.$, 'Close');
+    assert.strictEqual(s.rig.swaps - before, 1);
+    s.rig.flushFades();
+    assert.strictEqual(s.rig.shownIds().length, 0);
+    assert.strictEqual(s.rig.balanced(), true);
+});
+
+t.test('opening the template dialog right after the dashboard Close stays balanced', function () {
+    var s = setupHost();
+    s.S.kernel.ui.openDashboard();
+    s.rig.element('StewardDashboard').find('.steward-foot-right').trigger('click');
+    // No flush: the dashboard is still fading out.
+    s.dialog.open();
+    assert.deepStrictEqual(s.rig.shownIds(), ['StewardAdventures']);
+    assert.strictEqual(s.rig.balanced(), true);
+    s.rig.flushFades();
+    assert.deepStrictEqual(s.rig.shownIds(), ['StewardAdventures']);
+    assert.strictEqual(s.rig.balanced(), true);
+});
+
 // ---- Template steps and the star switch ------------------------------------
 
 var LOADOUT = 'C:/b/loadout.txt';

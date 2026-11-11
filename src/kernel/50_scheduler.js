@@ -17,17 +17,25 @@
  * A module keeps a chain going by asking again from plan(); the next tick picks
  * up a chain that ended. stop() clears pending wakes, so none survives a kernel
  * Pause or a reload.
+ *
+ * The tick always reschedules, even when its body throws: each tier is walked
+ * in its own try, and the next tick is armed from a finally. The tick writes a
+ * heartbeat at most every HEARTBEAT_MS and a gap WARN when the timer was held
+ * (e.g. by a locked or disconnected session). A missing heartbeat in the log
+ * therefore means the timer itself stopped.
  */
 
 (function (S) {
 
     var state = {
-        running:        false,
-        tickIntervalMs: S.kernel.TIMEOUTS.TICK_INTERVAL_MS,
-        tickCount:      0,
-        timer:          null,
-        cursors:        {},     // { priority: number }
-        wakes:          {}      // { moduleId: { timer, due } }
+        running:         false,
+        tickIntervalMs:  S.kernel.TIMEOUTS.TICK_INTERVAL_MS,
+        tickCount:       0,
+        timer:           null,
+        cursors:         {},     // { priority: number }
+        wakes:           {},     // { moduleId: { timer, due } }
+        lastTickAt:      null,   // start of the last tick, for the gap check
+        lastHeartbeatAt: null    // last heartbeat line
     };
 
     function buildContext() {
@@ -100,19 +108,108 @@
         }
     }
 
-    function tick() {
-        if (!state.running) return;
+    function seconds(ms) { return Math.round(ms / 1000); }
+
+    // A tick body throw would repeat on every tick, so it writes one line per
+    // LOG_REPEAT_MS with a count of the lines held back. The limiter never
+    // throws, so logging cannot stop the tick.
+    var tickThrewNote = S.kernel.log.limited(function () { return S.kernel.TIMEOUTS.LOG_REPEAT_MS; });
+
+    function noteTickThrew(err) {
+        tickThrewNote('error', 'scheduler', 'tick threw', err);
+    }
+
+    // A tick far later than its interval means the host held the timer. The
+    // stamp is set on every tick; start() clears it, so a resume after a pause
+    // reports no gap. A wake never touches it.
+    function noteGap(now) {
+        var last = state.lastTickAt;
+        state.lastTickAt = now;
+        try {
+            if (last !== null && now - last > S.kernel.LIMITS.TICK_GAP_FACTOR * state.tickIntervalMs) {
+                S.kernel.warn('scheduler', 'tick gap ' + seconds(now - last) + ' s (interval ' +
+                    seconds(state.tickIntervalMs) + ' s): the timer was held, e.g. by a locked or ' +
+                    'disconnected session');
+            }
+        } catch (e) { /* logging never stops the tick */ }
+    }
+
+    // Each queue read is checked, since an older queue may be loaded during a
+    // reload; a missing read prints '?'.
+    function heartbeatLine() {
+        var Q = S.kernel.queue || {};
+        var depth = typeof Q.depth === 'function' ? Q.depth() : '?';
+        var draining = typeof Q.isDraining === 'function'
+            ? (Q.isDraining() ? 'draining' : 'idle') : '?';
+        var deferring = '?';
+        if (typeof Q.deferral === 'function') {
+            var d = Q.deferral();
+            if (d === null) {
+                deferring = 'no';
+            } else {
+                deferring = seconds(d.ms) + ' s by ' + (typeof Q.dialogList === 'function'
+                    ? Q.dialogList(d.ids) : String(d.ids));
+            }
+        }
+        var busy = '?';
+        if (typeof Q.isModuleBusy === 'function') {
+            var mods = S.kernel.registry.list();
+            var ids = [];
+            for (var i = 0; i < mods.length; i++) {
+                if (Q.isModuleBusy(mods[i].id)) ids.push(mods[i].id);
+            }
+            busy = ids.length > 0 ? ids.join(', ') : 'none';
+        }
+        return 'heartbeat: tick ' + state.tickCount + ', queue ' + depth + ' (' + draining +
+            '), deferring ' + deferring + ', busy ' + busy;
+    }
+
+    // A manual tick without start() has no stamp yet; it sets one and writes
+    // nothing, so the first line comes one full interval later.
+    function noteHeartbeat(now) {
+        try {
+            if (state.lastHeartbeatAt === null) {
+                state.lastHeartbeatAt = now;
+                return;
+            }
+            if (now - state.lastHeartbeatAt < S.kernel.TIMEOUTS.HEARTBEAT_MS) return;
+            state.lastHeartbeatAt = now;
+            S.kernel.log('scheduler', heartbeatLine());
+        } catch (e) { /* logging never stops the tick */ }
+    }
+
+    function tickBody() {
+        var now = Date.now();
+        noteGap(now);
         state.tickCount++;
         var ctx = buildContext();
         S.kernel.debug('scheduler', 'tick', state.tickCount, 'modules:', S.kernel.registry.count());
 
+        // One throwing tier still lets the later tiers and the drain run.
         for (var i = 0; i < S.kernel.PRIORITY_ORDER.length; i++) {
-            walkTier(S.kernel.PRIORITY_ORDER[i], ctx);
+            try {
+                walkTier(S.kernel.PRIORITY_ORDER[i], ctx);
+            } catch (e) {
+                noteTickThrew(e);
+            }
         }
 
         drainQueue();
 
-        scheduleNext();
+        noteHeartbeat(now);
+    }
+
+    // The finally keeps the timer chain alive whatever the body does: a tick
+    // that stops rescheduling would stop steward for the life of the instance.
+    function tick() {
+        if (!state.running) return;
+        try {
+            tickBody();
+        } catch (e) {
+            noteTickThrew(e);
+        } finally {
+            scheduleNext();
+        }
     }
 
     function scheduleNext() {
@@ -181,6 +278,9 @@
     function start() {
         if (state.running) return;
         state.running = true;
+        // A resume after a pause is no gap, and needs no immediate heartbeat.
+        state.lastTickAt = null;
+        state.lastHeartbeatAt = Date.now();
         S.kernel.log('scheduler', 'started, tickInterval=' + state.tickIntervalMs + 'ms');
         // Defer the first tick to next loop turn so callers can finish setting up.
         state.timer = setTimeout(tick, 0);

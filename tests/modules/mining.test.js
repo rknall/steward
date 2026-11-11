@@ -4,6 +4,7 @@ var t = require('../runner');
 var harness = require('../harness');
 var jq = require('../stubs/jq');
 var A = require('../stubs/army');
+var AC = require('../stubs/actions');
 var Z = require('../stubs/zone');
 
 t.test('plan no-ops when module is disabled', function () {
@@ -291,6 +292,43 @@ t.test('tryPause skips when cfg.pause is undefined', function () {
     var H = withPauseFixture({ producing: true, amount: 10 });   // pause is undefined
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('mining.setProduction sends a verified pause through sendAction', function () {
+    var H = harness.boot();
+    var state = { on: true };
+    var mine = H.zone.building({ name: 'IronMine', grid: 12 });
+    mine.IsProductionActive = function () { return state.on; };
+    H.installZone(H.zone.zone().building(mine).buildQueue(0, 4));
+    var sent = AC.wire(H);
+    // The host takes the absolute state action 107 asks for.
+    var gi = H.host.game.gi;
+    var base = gi.SendServerAction;
+    gi.SendServerAction = function (id, p1) {
+        base.apply(this, arguments);
+        if (id === 107) state.on = p1 === 1;
+    };
+    // The registered handler, captured while the module boots.
+    var q = H.Steward.kernel.queue;
+    var orig = q.action;
+    var fn = null;
+    q.action = function (name, f) {
+        if (name === 'mining.setProduction') fn = f;
+        return orig.apply(q, arguments);
+    };
+    H.module('mining').boot();
+    q.action = orig;
+
+    H.clearQueued();
+    fn([12, 'IronMine', false]);
+    AC.drive(H);
+    t.assert.deepStrictEqual(JSON.parse(JSON.stringify(sent.actions)),
+        [{ id: 107, p1: 0, p2: 12, p3: 0, data: null }]);
+    var paused = H.logs().filter(function (l) {
+        return l.level === 'log' && l.category === 'mining' &&
+               l.args.join(' ') === 'paused IronMine on grid 12';
+    });
+    t.assert.strictEqual(paused.length, 1);
 });
 
 t.test('tryBuild enqueues nothing when byType fails', function () {

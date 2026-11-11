@@ -81,7 +81,8 @@
  * the entry is in the bar at build; the module then moves it with
  * Steward.kernel.ui.showBarMenu(id, on). Without `visible` it is always shown.
  *
- * The `events` tab hosts read-only event tools.
+ * The `events` tab hosts read-only event tools. The `production` tab hosts
+ * the production manager's side settings, summary and banners.
  *
  * The Overview is not a registry tab: the dashboard builds it from the
  * sections' `tiles`. `misc` sections render as groups on the Settings screen,
@@ -101,6 +102,7 @@
         mining:      true,
         buildings:   true,
         events:      true,
+        production:  true,
         misc:        true
     };
 

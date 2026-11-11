@@ -149,6 +149,39 @@ Examples:
 [ERROR] [2026-04-26 14:32:11] [packets] sendAction failed: TypeError: ...
 ```
 
+## Kernel health lines
+
+| Id | Where | Level, category | Text (values in `<>`) | When |
+|---|---|---|---|---|
+| L1a | queue | log `queue` | `deferring <depth> action(s): dialog visible: <list>` | the first poll of a deferral |
+| L1b | queue | log `queue` | `still deferring <depth> action(s) after <s> s: dialog visible: <list>` | at most once per `LOG_REPEAT_MS` while deferred |
+| L1c | queue | warn `queue` | `held <m> min by dialog <list>; if no steward window is on screen the game may be covering it: restart the client` | once per deferral, at `QUEUE_MODAL_STALE_MS` |
+| L1d | queue | log `queue` | `resumed after <s> s` | the first poll with no visible dialog after a deferral |
+| L1e | queue | log `queue` | `deferral ended after <s> s: queue empty` | the queue emptied while deferred (cancel) |
+| L1f | queue | log `queue` | `reset while deferring after <s> s, <depth> action(s) dropped` | `reset()` while deferred |
+| L2 | scheduler | log `scheduler` | `heartbeat: tick <n>, queue <depth> (<draining|idle>), deferring <no|<s> s by <list>>, busy <ids|none>` | at most once per `HEARTBEAT_MS`, from `tick()` |
+| L3 | scheduler | warn `scheduler` | `tick gap <s> s (interval <i> s): the timer was held, e.g. by a locked or disconnected session` | a tick more than `TICK_GAP_FACTOR` intervals after the last one |
+| L4a | scheduler | error `scheduler` | `tick threw[ (<n> more since the last line)]: <e>` | a throw in the tick body, rate-limited |
+| L4b | queue | error `queue` | `runOne threw[ (<n> more since the last line)]: <e>` | a throw outside the action call, rate-limited |
+| L5a | ui | log `ui` | `window shown: <rawId>` / `window show had no effect: <rawId> (still closing)` | after `modal.show()` in `showModal` |
+| L5b | ui | log `ui` | `window hidden: <rawId>` | a `hide.bs.modal` event on a shown steward modal (steward, host X or the host's `Modal.show`) |
+| L5c | ui | warn `ui` | `second hide of <rawId> while it closes: the game may now cover steward windows; restart the client if the game stops reacting` | a `hide.bs.modal` event on a steward modal that is not shown |
+| L6a | lifecycle | log `lifecycle` | `boot complete — <buildLabel> — modules: <n> — state: <active|paused> — dialogs visible: <list>` | end of `boot()` |
+| L6b | lifecycle | warn `lifecycle` | `<n> dialog(s) visible at boot: <list>; queued actions wait until they close` | at boot when the list is not empty |
+
+`<s>` is whole seconds, `<m>` whole minutes. No line is written per 2 s poll.
+
+`tick threw` and `runOne threw` each use one `S.kernel.log.limited(ms)` limiter (kernel/20_logger.js), which writes at most one line per `LOG_REPEAT_MS` and adds `(<n> more since the last line)` when lines were held back. The deferral repeat keeps its own stamp, since it repeats a state line.
+
+Examples:
+
+```
+[LOG]   [2026-04-26 14:30:00] [lifecycle] boot complete — v0.11.0 — modules: 9 — state: active — dialogs visible: none
+[LOG]   [2026-04-26 14:32:01] [queue] deferring 3 action(s): dialog visible: #steward-production
+```
+
+Reading a stall: no heartbeat for more than 15 min means the timer stopped. A `deferring` line with no `resumed` means a dialog holds the queue. A `second hide` WARN marks the moment the stage may have been wedged.
+
 ## Output sinks
 
 The logger writes to (in order):
@@ -160,10 +193,11 @@ Sinks fail safely — if the file write throws, the console write still happens.
 
 ## Conventions
 
-- Use the module ID as the category. Don't reuse another module's category.
+- Use the module ID as the category. Don't reuse another module's category. The production module and the production core (queue readers, planner, demand ledger, complete and on/off actions) log under `production`; the diagnostics dump of the production queues logs under `diag:production`.
 - Reserve `kernel:*` prefixes for internal kernel logging (`scheduler`, `queue`, `lifecycle`).
 - Don't `try/catch` around `Steward.kernel.log` — the logger swallows its own failures.
-- Don't log at INFO level inside hot loops. The scheduler tick should produce one INFO line per cycle and that's it.
+- Don't log at INFO level inside hot loops. The scheduler tick writes no INFO line per cycle; its only INFO line is the rate-limited heartbeat.
+- A condition that can repeat every tick logs through `S.kernel.log.limited`, never a hand-kept stamp and counter.
 - Errors caught from game APIs should be logged at ERROR with category context, then handled — never re-thrown into the kernel tick.
 
 ## What this replaces

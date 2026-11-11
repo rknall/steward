@@ -662,3 +662,85 @@ t.test('an oversized file rotates during a full bundle load with no stored setti
     assert.ok(text.length < KB * KB);
     assert.ok(/\[registry\]/.test(text));
 });
+
+
+// ---- log.limited ------------------------------------------------------------
+
+// The kernel stub wraps the level functions and captures; the real ones sit on
+// .raw. Put them back so lines reach the console sink.
+function limitedSetup() {
+    var s = setup({ noIntrospector: true, hostDebug: true });
+    ['debug', 'log', 'warn', 'error'].forEach(function (n) {
+        if (s.K[n].raw) s.K[n] = s.K[n].raw;
+    });
+    s.configure({ debugEnabled: true });
+    return s;
+}
+
+t.test('limited: the first call writes at error level and a second call 1 s later is held', function () {
+    var s = limitedSetup();
+    var note = s.K.log.limited(5000);
+    assert.strictEqual(note('error', 'scheduler', 'tick threw', 'Error: x'), true);
+    assert.strictEqual(s.consoleLines.length, 1);
+    assert.ok(/^\[ERROR\] .*\[scheduler\] tick threw: Error: x$/.test(s.consoleLines[0]));
+    s.setNow(s.clock.nowMs + 1000);
+    assert.strictEqual(note('error', 'scheduler', 'tick threw', 'Error: x'), false);
+    assert.strictEqual(s.consoleLines.length, 1);
+});
+
+t.test('limited: after ms the next line carries the held count, which then resets', function () {
+    var s = limitedSetup();
+    var note = s.K.log.limited(5000);
+    note('error', 'scheduler', 'tick threw', 'Error: x');
+    s.setNow(s.clock.nowMs + 1000);
+    note('error', 'scheduler', 'tick threw', 'Error: x');
+    note('error', 'scheduler', 'tick threw', 'Error: x');
+    s.setNow(s.clock.nowMs + 5000);
+    assert.strictEqual(note('error', 'scheduler', 'tick threw', 'Error: x'), true);
+    assert.ok(/tick threw \(2 more since the last line\): Error: x$/.test(s.consoleLines[1]));
+    s.setNow(s.clock.nowMs + 5000);
+    note('error', 'scheduler', 'tick threw', 'Error: x');
+    assert.ok(/tick threw: Error: x$/.test(s.consoleLines[2]));
+});
+
+t.test('limited: without a detail argument the line is the text plus the suffix', function () {
+    var s = limitedSetup();
+    var note = s.K.log.limited(1000);
+    note('warn', 'q', 'queue stuck');
+    s.setNow(s.clock.nowMs + 10);
+    note('warn', 'q', 'queue stuck');
+    s.setNow(s.clock.nowMs + 2000);
+    note('warn', 'q', 'queue stuck');
+    assert.ok(/\[q\] queue stuck$/.test(s.consoleLines[0]));
+    assert.ok(/\[q\] queue stuck \(1 more since the last line\)$/.test(s.consoleLines[1]));
+});
+
+t.test('limited: two limiters do not share state', function () {
+    var s = limitedSetup();
+    var a = s.K.log.limited(5000);
+    var b = s.K.log.limited(5000);
+    assert.strictEqual(a('log', 'c', 'a'), true);
+    assert.strictEqual(b('log', 'c', 'b'), true);
+    assert.strictEqual(a('log', 'c', 'a'), false);
+    assert.strictEqual(s.consoleLines.length, 2);
+});
+
+t.test('limited: ms as a function is read on every call', function () {
+    var s = limitedSetup();
+    var window = 5000;
+    var note = s.K.log.limited(function () { return window; });
+    assert.strictEqual(note('log', 'c', 'x'), true);
+    s.setNow(s.clock.nowMs + 1000);
+    assert.strictEqual(note('log', 'c', 'x'), false);
+    window = 500;
+    assert.strictEqual(note('log', 'c', 'x'), true);
+});
+
+t.test('limited: an unknown level writes at log, and a throwing sink returns false', function () {
+    var s = limitedSetup();
+    var note = s.K.log.limited(0);
+    assert.strictEqual(note('bogus', 'c', 'x'), true);
+    assert.ok(/^\[LOG\] /.test(s.consoleLines[0]));
+    s.K.error = function () { throw new Error('boom'); };
+    assert.strictEqual(note('error', 'c', 'y'), false);
+});

@@ -9,6 +9,8 @@
  *   3. Run each registered module's boot() hook
  *   4. Initialize UI shell
  *   5. Start the scheduler
+ *   6. Log the build and any dialog already visible (a steward window
+ *      survives a script reload and holds the queue)
  *
  * Boot is auto-scheduled at the end of this file via a deferred setTimeout —
  * by the time the timer fires, every other source file in the bundle (kernel,
@@ -98,8 +100,41 @@
             }
         }
 
-        S.kernel.log('lifecycle', 'boot complete — modules:', S.kernel.registry.count(),
-                     '— state:', startPaused ? 'paused' : 'active');
+        logBootComplete(startPaused);
+    }
+
+    // The boot line names the build, so a log can be matched to the bundle
+    // that wrote it, and any dialog already visible: a steward window that
+    // survived a script reload holds the queue from the first tick. Each
+    // lookup is guarded on its own, so a missing or throwing piece reads as
+    // '?' and the boot line is always written.
+    function logBootComplete(startPaused) {
+        var k = S.kernel;
+        var label = '?';
+        var dialogs = '?';
+        var count = 0;
+        try {
+            if (typeof k.buildLabel === 'function') label = k.buildLabel();
+        } catch (e) { label = '?'; }
+        try {
+            if (k.queue && typeof k.queue.visibleDialogs === 'function' &&
+                    typeof k.queue.dialogList === 'function') {
+                var ids = k.queue.visibleDialogs();
+                count = (ids && ids.length) || 0;
+                dialogs = k.queue.dialogList(ids);
+            }
+        } catch (e) {
+            count = 0;
+            dialogs = '?';
+        }
+        if (count > 0) {
+            k.warn('lifecycle', count + ' dialog(s) visible at boot: ' + dialogs +
+                   '; queued actions wait until they close');
+        }
+        k.log('lifecycle', 'boot complete — ' + label +
+              ' — modules: ' + k.registry.count() +
+              ' — state: ' + (startPaused ? 'paused' : 'active') +
+              ' — dialogs visible: ' + dialogs);
     }
 
     // Calls obj[name]() if it exists. Returns true only when the call ran

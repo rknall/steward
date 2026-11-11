@@ -79,7 +79,7 @@ function setup(opts) {
             return world.buffs.map(function (d) {
                 return {
                     GetName_string: function () { return d.name; },
-                    GetGroup_string: function () { return d.group; },
+                    GetGroup_string: function () { if (d.groupThrows) throw new Error('group failed'); return d.group; },
                     GetProductionAmount: function () { return d.yield; },
                     GetCosts_vector: function () { return d.costs; }
                 };
@@ -314,6 +314,19 @@ t.test('isProduceable is true, false or null', function () {
     b.world.buffsUnreadable = true;
     assert.strictEqual(b.P.isProduceable('BB_Fish'), null);
     assert.strictEqual(b.P.queueIdFor('BB_Fish'), null);
+});
+
+t.test('a buff whose group cannot be read has no queue and warns', function () {
+    var b = setup();
+    b.world.buffs[0].groupThrows = true;
+    b.H.clearLogs();
+    assert.strictEqual(b.P.queueIdFor('BB_Plank'), null);
+    assert.strictEqual(b.P.isProduceable('BB_Plank'), true);
+    var w = b.H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'production' && String(l.args[0]) === 'GetGroup_string(BB_Plank) unreadable';
+    });
+    assert.strictEqual(w.length, 1);
+    assert.strictEqual(b.P.queueIdFor('BB_Fish'), 6);
 });
 
 t.test('yieldOf: unit 1, buff its production amount, bad amount null', function () {

@@ -141,12 +141,11 @@ t.test('typing then the blur change saves on the first Save', function () {
 
 t.test('a typing-only edit neither blocks opening nor survives it', function () {
     var s = setup();
-    var handlers = recordHandlers(s);
+    jq.install(s.H);
     var rig = hostStubs.installModal(s.H);
     s.ui.openSettings();
     rig.visible = true;
-    s.ui.helpers.input({ onChange: function () {} });
-    handlers.input[0]();
+    s.ui.helpers.input({ onChange: function () {} }).trigger('input');
     assert.strictEqual(s.ui.canSave(), true);
 
     s.ui.openDashboard();
@@ -201,6 +200,7 @@ t.test('openSettings opens the StewardSettings modal', function () {
 
 t.test('opening is refused while the open screen has unsaved edits', function () {
     var s = setup();
+    jq.install(s.H);
     var rig = hostStubs.installModal(s.H);
     s.ui.openSettings();
     rig.visible = true;

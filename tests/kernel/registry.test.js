@@ -100,6 +100,14 @@ t.test('ui.tab events is accepted', function () {
     t.assert.strictEqual(H.Steward.kernel.registry.byTab('events').length, 1);
 });
 
+t.test('ui.tab production is accepted', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.register(uiSpec('pr', 'production')), true);
+    t.assert.ok(H.Steward.kernel.registry.get('pr').ui);
+    t.assert.strictEqual(H.Steward.kernel.registry.byTab('production').length, 1);
+    t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
+});
+
 t.test('ui.tab misc is accepted', function () {
     var H = harness.boot({ sections: ['kernel'] });
     var s = validSpec('m');

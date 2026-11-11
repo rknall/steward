@@ -39,7 +39,7 @@ runs last and triggers `reloadScripts(null)` which loads userscripts.
 | `settings` | `0-common.js:942` | Per-profile JSON settings instance. `settings.store(data, module)` / `settings.read(key, module)`. Backed by `air.File.applicationDirectory.resolvePath(settingsFile)`. |
 | `settingsFile` | `index.html` (per-profile) | Filename for the settings JSON. Default `'settings.json'`; per-game-account profiles override (e.g. `'rknall.json'`). |
 | `mainSettings` | `0-common.js:7-51` | ~50 client-wide preferences. Loaded into globals at `0-common.js:944` via `$.extend(mainSettings, settings.read())`. |
-| `Modal` | `0-common.js:564` | Standard modal-dialog class. **Hides other visible modals on show.** Used by every host UI. |
+| `Modal` | `0-common.js:564` | Standard modal-dialog class. **Hides other visible modals on show, including one still fading out.** Every show and hide event swaps the stage's game and HTML layers; see TSO_API.md, UI helpers. Used by every host UI. |
 | `Utils` / `utils` | `0-common.js:489` / `941` | DOM/image helpers. |
 | `TimedQueue` | `0-common.js:432` | Already-built paced action queue. |
 | `getText(id, module)` | `0-common.js:99` | Userscript-extensible translation lookup. `extendBaseLang(data, module)` adds entries. |

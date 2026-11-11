@@ -6,7 +6,8 @@
  * that can see the outcome reports each one here: miss() for an action that
  * was not seen to take effect, verify() for one that was. `misses` misses in
  * a row open the breaker, which warns once and from then on admits one probe
- * every `cooldownMs`. The first verify closes it again.
+ * every `cooldownMs`. The first verify closes it again, and reset(by)
+ * clears it at once for an owner whose user switched the work back on.
  *
  * create() returns an independent instance per caller, so a sender that
  * keeps failing pauses only itself: the specialist send guard holds one, the
@@ -79,6 +80,14 @@
             return 0;
         }
 
+        // by: names who reset it in the log line; optional.
+        function reset(by) {
+            run = 0;
+            open = false;
+            nextProbeAt = 0;
+            S.kernel.log(category, label + ' reset' + (by ? ' by ' + by : ''));
+        }
+
         function isOpen() {
             return open;
         }
@@ -93,6 +102,7 @@
         inst.miss        = miss;
         inst.verify      = verify;
         inst.admit       = admit;
+        inst.reset       = reset;
         inst.isOpen      = isOpen;
         inst.snapshot    = snapshot;
         return inst;

@@ -47,14 +47,16 @@ Steward
 │   ├── adventures      ← adventure definitions, own adventures, close action
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
-│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs)
+│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, production orders and buffs)
+│   ├── buffing         ← shared building-buff engine: verified apply, per-grid hold, breaker; one instance per owner (mining, production)
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
-│   ├── production      ← troop and item queues, order pricing and order action
+│   ├── production      ← queue profiles and entries per type, generic order, complete, on/off, planner, demand ledger
 │   ├── quests          ← quest pool and claim action
 │   ├── resources       ← resource amount and free population reads
 │   └── sound           ← pause alert sound
 ├── modules
 │   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
+│   ├── production      ← standing orders, producer buffs, Bookbinder completion and the "Steward production" window
 │   ├── updater         ← release check, verified install, settings backups and restore (see RELEASING.md)
 │   └── <id>            ← exposed only if the module chooses to publish state
 └── (shared enums)
@@ -104,7 +106,7 @@ This works because:
 The build script (`scripts/build.js`) concatenates files in this order:
 
 1. `src/kernel/<NN>_*.js` — sorted by filename. The numeric prefix is the load-order knob.
-2. `src/core/**/*.js` — sorted by filename within each directory.
+2. `src/core/**/*.js` — sorted by name within each directory. A folder loads before a file of the same name, so `core/production/*.js` runs before `core/production.js`. The folder files create `Steward.core.production` when it is missing and `production.js` extends it.
 3. `src/modules/**/*.js` — sorted by directory then filename.
 4. `src/vendor/**/*.js` — optional, last.
 5. Generated scenarios chunk (`scenarios/*.json` as `Steward.modules.adventures.builtinScenarios`) — after the modules section.

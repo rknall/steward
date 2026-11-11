@@ -220,3 +220,162 @@ t.test('stop clears pending wakes and a stale fired callback does nothing', func
     t.assert.strictEqual(o.plansA, plansBefore);
     t.assert.strictEqual(o.wakeIds().length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Tick safety, heartbeat and gap: recording timers and a fake clock, so a test
+// fires each tick by hand at a chosen time.
+// ---------------------------------------------------------------------------
+
+function clockSetup() {
+    var timers = makeTimers();
+    var H = harness.boot({ sections: ['kernel'], timers: timers });
+    var clock = { T: 0 };
+    function D(v) { return arguments.length ? new Date(v) : new Date(clock.T); }
+    D.now = function () { return clock.T; };
+    H.ctx.Date = D;
+    var K = H.Steward.kernel;
+    var o = { H: H, K: K, timers: timers, clock: clock, plans: 0 };
+    K.register({
+        id: 'a', priority: H.Steward.Priority.Normal,
+        isReady: function () { return true; },
+        plan: function () { o.plans++; }
+    });
+    // Fires the pending tick timer at time T.
+    o.tickAt = function (T) {
+        clock.T = T;
+        o.timers.fire(K.scheduler.state.timer);
+    };
+    o.lines = function (level) {
+        return H.logs().filter(function (l) {
+            return l.level === level && l.category === 'scheduler';
+        }).map(function (l) { return l.args.join(' '); });
+    };
+    o.armed = function () {
+        var id = K.scheduler.state.timer;
+        return id !== null && !!timers.get(id) && timers.get(id).ms === K.scheduler.state.tickIntervalMs;
+    };
+    return o;
+}
+
+t.test('a throwing tier is logged rate-limited and the other tiers and the next tick still run', function () {
+    var o = clockSetup();
+    var K = o.K;
+    var Critical = o.H.Steward.Priority.Critical;
+    var byTier = K.registry.byTier;
+    K.registry.byTier = function (p) {
+        if (p === Critical) throw new Error('tier boom');
+        return byTier(p);
+    };
+    K.scheduler.start();
+    o.H.clearLogs();
+    o.tickAt(0);
+    var errors = o.lines('error');
+    t.assert.strictEqual(errors.length, 1);
+    t.assert.strictEqual(errors[0], 'tick threw: Error: tier boom');
+    t.assert.strictEqual(o.plans, 1);
+    t.assert.ok(o.armed());
+    for (var i = 1; i <= 10; i++) o.tickAt(i * 1000);
+    t.assert.strictEqual(o.lines('error').length, 1);
+    t.assert.strictEqual(o.plans, 11);
+    o.tickAt(K.TIMEOUTS.LOG_REPEAT_MS + 1000);
+    errors = o.lines('error');
+    t.assert.strictEqual(errors.length, 2);
+    t.assert.strictEqual(errors[1], 'tick threw (10 more since the last line): Error: tier boom');
+    t.assert.ok(o.armed());
+});
+
+t.test('a throw in the tier loop itself still arms the next tick and logs', function () {
+    var o = clockSetup();
+    var K = o.K;
+    var saved = K.PRIORITY_ORDER;
+    var broken = {};
+    Object.defineProperty(broken, 'length', { get: function () { throw new Error('loop boom'); } });
+    K.scheduler.start();
+    o.H.clearLogs();
+    K.PRIORITY_ORDER = broken;
+    try {
+        o.tickAt(0);
+    } finally {
+        K.PRIORITY_ORDER = saved;
+    }
+    var errors = o.lines('error');
+    t.assert.strictEqual(errors.length, 1);
+    t.assert.strictEqual(errors[0], 'tick threw: Error: loop boom');
+    t.assert.ok(o.armed());
+    o.tickAt(10000);
+    t.assert.strictEqual(o.plans, 1);
+});
+
+t.test('heartbeat goes out once per HEARTBEAT_MS with tick, queue, deferral and busy', function () {
+    var o = clockSetup();
+    var K = o.K;
+    var HB = K.TIMEOUTS.HEARTBEAT_MS;
+    K.scheduler.start();
+    o.H.clearLogs();
+    function beats() {
+        return o.lines('log').filter(function (s) { return s.indexOf('heartbeat:') === 0; });
+    }
+    var T;
+    for (T = 0; T < HB; T += 10000) o.tickAt(T);
+    t.assert.strictEqual(beats().length, 0);
+    o.tickAt(HB);
+    var b = beats();
+    t.assert.strictEqual(b.length, 1);
+    t.assert.strictEqual(b[0], 'heartbeat: tick ' + (HB / 10000 + 1) +
+        ', queue 0 (idle), deferring no, busy none');
+    for (T = HB + 10000; T < 2 * HB; T += 10000) o.tickAt(T);
+    t.assert.strictEqual(beats().length, 1);
+    o.tickAt(2 * HB);
+    t.assert.strictEqual(beats().length, 2);
+});
+
+t.test('heartbeat reports a deferral and busy modules', function () {
+    var o = clockSetup();
+    var K = o.K;
+    K.queue.deferral = function () {
+        return { ms: 61000, ids: ['StewardProduction'], depth: 3, since: 0 };
+    };
+    K.queue.isModuleBusy = function (id) { return id === 'a'; };
+    K.scheduler.start();
+    o.H.clearLogs();
+    o.tickAt(0);
+    o.tickAt(K.TIMEOUTS.HEARTBEAT_MS);
+    var b = o.lines('log').filter(function (s) { return s.indexOf('heartbeat:') === 0; });
+    t.assert.strictEqual(b.length, 1);
+    t.assert.ok(b[0].indexOf('deferring 61 s by #StewardProduction') >= 0, b[0]);
+    t.assert.ok(b[0].indexOf('busy a') >= 0, b[0]);
+});
+
+t.test('a held timer warns one tick gap, and a restart reports none', function () {
+    var o = clockSetup();
+    var K = o.K;
+    K.scheduler.configure({ tickInterval: 10000 });
+    K.scheduler.start();
+    o.H.clearLogs();
+    o.tickAt(0);
+    o.tickAt(60000);
+    var warns = o.lines('warn');
+    t.assert.strictEqual(warns.length, 1);
+    t.assert.strictEqual(warns[0], 'tick gap 60 s (interval 10 s): the timer was held, ' +
+        'e.g. by a locked or disconnected session');
+    o.tickAt(70000);
+    t.assert.strictEqual(o.lines('warn').length, 1);
+    K.scheduler.stop();
+    o.clock.T = 70000 + 3600000;
+    K.scheduler.start();
+    o.tickAt(70000 + 3600000);
+    t.assert.strictEqual(o.lines('warn').length, 1);
+});
+
+t.test('a wake does not set the tick stamp', function () {
+    var o = clockSetup();
+    var K = o.K;
+    K.scheduler.start();
+    o.tickAt(0);
+    var stamp = K.scheduler.state.lastTickAt;
+    K.scheduler.wake('a', 1000);
+    var wakeId = K.scheduler.state.wakes.a.timer;
+    o.clock.T = 1000;
+    o.timers.fire(wakeId);
+    t.assert.strictEqual(K.scheduler.state.lastTickAt, stamp);
+});

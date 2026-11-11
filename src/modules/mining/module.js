@@ -9,19 +9,22 @@
  *            per-mine affordability.
  *   upgrade  raises mines below the configured target level.
  *   pause    stops producing mines whose deposit fell below the global
- *            pause threshold.
+ *            pause threshold, verified through S.core.production.setActive
+ *            so the pause counts only once the mine reads paused.
  *   buff     applies the configured production buff (deposits.<Type>.buff)
  *            to every mine or mason that is producing, unbuffed and not
  *            upgrading, through S.core.buffs and S.core.actions, so each
  *            apply is verified on the building itself.
  *   refill   still a stub.
  *
- * The buff phase owns its own S.core.breaker instance: applies that are
- * sent but never seen on their building open it, which pauses buffing
- * only (geologists and explorers keep the specialist send guard). A
- * building whose apply was not seen is also held for a while, because
- * the buff may have landed unseen and a second one would be wasted.
- * Breaker and holds are memory only, so a script reload resets both.
+ * The buff phase owns its own engine from the shared S.core.buffing:
+ * applies that are sent but never seen on their building open its
+ * breaker, which pauses mine and mason buffing only (geologists and
+ * explorers keep the specialist send guard, production buildings their
+ * own engine). A building whose apply was not seen is also held for a
+ * while, because the buff may have landed unseen and a second one would
+ * be wasted. Breaker and holds are memory only, so a script reload
+ * resets both.
  * Buff values stored before the buff phase existed are cleared once at
  * boot (the `buffVersion` marker), and the buff phase runs only once
  * that marker is stored.
@@ -44,12 +47,8 @@
     // and the busy contract re-plans only once the queue drains, so a
     // pass sends only a few and the next pass picks up the rest.
     var BUFFS_PER_PLAN = 2;
-    // A building whose apply was not seen waits 30 min, so a buff that
-    // landed unseen is not paid for twice.
-    var BUFF_HOLD_MS = 1800000;
-    var holds = {};                 // grid -> hold until, on the breaker clock
 
-    var buffBreaker = S.core.breaker.create({
+    var buffEngine = S.core.buffing.create({
         category:   'mining',
         label:      'buff breaker',
         missText:   'buff applies in a row were not seen on their building',
@@ -361,15 +360,14 @@
 
         for (var i = 0; i < list.length; i++) {
             var b = list[i];
-            var grid = S.core.buildings.grid(b);
-            if (grid === null || typeof grid === 'undefined') continue;
-            if (ctx.assigned[grid]) continue;                    // build/upgrade/pause claimed it
-            if (holds[grid] > buffBreaker.clock()) continue;     // last apply was not seen
-            if (S.core.buildings.buffBlock(b) !== null) continue;
-            if (buffBreaker.admit(1) === 0) {                    // open and no probe due
+            // The grids build/upgrade/pause claimed are skipped as well.
+            var verdict = buffEngine.eligible(b, ctx.assigned);
+            if (verdict === S.BuffVerdict.Stop) {                            // open and no probe due
                 ctx.buffs = BUFFS_PER_PLAN;
                 return;
             }
+            if (verdict !== S.BuffVerdict.Ok) continue;
+            var grid = S.core.buildings.grid(b);
 
             ctx.assigned[grid] = true;
             ctx.queued++;
@@ -524,15 +522,24 @@
                              active ? 'active' : 'paused', '— skipping');
                 return;
             }
-            try {
-                // Action 107: SendServerAction(107, 1=resume / 0=pause, grid, 0, null).
-                // Source: tso_client/.../scripts/7-building.js:125.
-                game.gi.SendServerAction(107, active ? 1 : 0, grid, 0, null);
-                S.kernel.log('mining', active ? 'resumed' : 'paused',
-                             mineName, 'on grid', grid);
-                // No buildings.invalidate(): pause/resume doesn't change snapshot composition.
-            } catch (e) {
-                S.kernel.error('mining', 'SendServerAction(107) threw for', mineName, ':', e);
+            function onDone(r) {
+                var R = S.ActionResult;
+                if (r.status === R.Verified) {
+                    S.kernel.log('mining', active ? 'resumed' : 'paused',
+                                 mineName, 'on grid', grid);
+                } else if (r.status === R.Failed) {
+                    S.kernel.warn('mining', 'could not', active ? 'resume' : 'pause',
+                                  mineName, 'on grid', grid, ':', r.reason);
+                } else if (r.status === R.Refused) {
+                    S.kernel.debug('mining', active ? 'resume' : 'pause', mineName,
+                                   'on grid', grid, 'refused:', r.reason);
+                }
+            }
+
+            if (!S.core.actions.attempt(
+                    S.core.production.setActive(grid, mineName, active), onDone)) {
+                S.kernel.error('mining', 'could not start setProduction for', mineName,
+                               'on grid', grid);
             }
         });
 
@@ -550,41 +557,15 @@
                 return;
             }
 
-            function onDone(r) {
-                var R = S.ActionResult;
-                if (r.status === R.Verified && r.sends > 0) {
-                    delete holds[grid];
-                    buffBreaker.verify(bName + ' grid ' + grid);
-                    S.kernel.log('mining', 'buffed', bName, 'on grid', grid, 'with', buffName);
-                } else if (r.status === R.Failed && r.unseen) {
-                    holds[grid] = buffBreaker.clock() + BUFF_HOLD_MS;
-                    buffBreaker.miss();
-                    S.kernel.warn('mining', buffName, 'on', bName, 'grid', grid,
-                                  'was not seen to apply — holding the grid');
-                } else if (r.status === R.Failed) {
-                    // The send itself failed: hold the grid, but only an
-                    // unseen apply counts towards the breaker.
-                    holds[grid] = buffBreaker.clock() + BUFF_HOLD_MS;
-                    S.kernel.warn('mining', buffName, 'on', bName, 'grid', grid,
-                                  'failed:', r.reason, '— holding the grid');
-                } else if (r.status === R.Refused) {
-                    S.kernel.debug('mining', buffName, 'on', bName, 'grid', grid,
-                                   'refused:', r.reason);
-                }
-            }
-
-            if (!S.core.actions.attempt(
-                    S.core.buffs.building(buffName, grid, bName, true), onDone)) {
-                S.kernel.error('mining', 'could not start buff', buffName, 'on', bName,
-                               'grid', grid);
-            }
+            // The engine judges the outcome: holds, breaker and log lines.
+            buffEngine.apply(grid, bName, buffName, true);
         });
     }
 
     // Exposed for ui.js and the tests.
     S.modules.mining.readSettings = readSettings;
-    S.modules.mining.buffBreaker  = buffBreaker;
-    S.modules.mining.buffHolds    = function () { return holds; };
+    S.modules.mining.buffBreaker  = buffEngine.breaker;
+    S.modules.mining.buffHolds    = buffEngine.holds;
 
     S.kernel.register({
         id:       'mining',

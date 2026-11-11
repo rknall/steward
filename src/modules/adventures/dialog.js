@@ -208,20 +208,17 @@
             snapshot(state.draft) !== state.orig);
     }
 
-    function bodyVisible() {
-        if (!modal) return false;
-        try {
-            var $b = modal.Body();
-            return !!($b && $b.length && typeof $b.is === 'function' && $b.is(':visible'));
-        } catch (e) {
-            return false;
-        }
+    // Shown as Bootstrap sees it: a window fading out after a hide reads closed.
+    function shown() {
+        var ui = S.kernel.ui;
+        return !!(modal && ui && typeof ui.isModalShown === 'function' && ui.isModalShown(modal));
     }
 
     // The edit guard: a changed draft in a window the user can see. A hidden
-    // window (closed by its header X or a zone load) holds nothing to lose.
+    // or fading window (closed by its header X or a zone load) holds nothing
+    // to lose.
     function hasEdits() {
-        return bodyVisible() && isDirty();
+        return shown() && isDirty();
     }
 
     var NEED_PHRASES = {
@@ -343,9 +340,12 @@
         $c.append($card);
     }
 
+    // Hides only a dialog that is really shown: a second hide during the fade
+    // would unbalance the host's stage swap and leave the game layer on top.
     function closeWindow() {
         if (isDirty()) notify('Template changes discarded');
-        try { modal.hide(); } catch (e) { /* ignore */ }
+        var ui = S.kernel.ui;
+        if (ui && typeof ui.hideModal === 'function') ui.hideModal(modal);
     }
 
     function backToList() {
@@ -426,7 +426,10 @@
             modal = new Modal(MODAL_ID, TITLE, true);
             modal.create();
             render();
-            modal.show();
+            // The kernel show settles dialogs still fading out, which a raw
+            // host show would hide a second time.
+            if (ui && typeof ui.showModal === 'function') ui.showModal(modal);
+            else modal.show();
             syncMenu();
         } catch (e) {
             S.kernel.error('adventures', 'open template dialog threw:', e);

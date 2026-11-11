@@ -264,7 +264,7 @@ A module may declare `barMenu: { title, items }` to add a root item beside `~Ste
 
 Dashboard settings go through a buffer: `h.settings(id)` returns it, `h.update(id, patch)` merges changes into it, and the Save button in the footer writes only the namespaces that changed to the module's settings. Keep state that describes the current moment out of the buffer; a session-only value is cleared when the menu entry reopens the dashboard.
 
-A module can also own a dialog of its own, opened from its `menu` items, when a dashboard tab does not fit (the adventures module's template dialog is the example). Settings is a dialog of the same kind, with its own id. Such a module registers only a `menu` (plus, if it has settings, a `misc` section), so it gets no dashboard section and no quick toggle. Its dialog uses its own `Modal` id, calls `S.kernel.ui.ensureStyle(id)` before it is first shown so it shares the dashboard stylesheet, and passes every user string through `h.escape` before it reaches the page. Opening a modal hides the dashboard. A zone load closes host modals and drops unsaved edits.
+A module can also own a dialog of its own, opened from its `menu` items, when a dashboard tab does not fit (the adventures module's template dialog is the example). Settings is a dialog of the same kind, with its own id. Such a module registers only a `menu` (plus, if it has settings, a `misc` section), so it gets no dashboard section and no quick toggle. Its dialog uses its own `Modal` id, calls `S.kernel.ui.ensureStyle(id)` before it is first shown so it shares the dashboard stylesheet, and passes every user string through `h.escape` before it reaches the page. The dialog opens with `S.kernel.ui.showModal(modal)` and closes with `S.kernel.ui.hideModal(modal)`, never `modal.hide()`: a second hide during the fade unbalances the host stage swap (see TSO_API.md, UI helpers). The host hides the dashboard when the dialog shows. A dialog whose Save writes settings the dashboard buffers calls `S.kernel.ui.releaseDashboard()` right before it shows, as the production window does. A zone load closes host modals and drops unsaved edits.
 
 UI primitives are host-provided; see [`TSO_API.md`](TSO_API.md).
 
@@ -296,6 +296,24 @@ One exception exists: a diagnostic chain that is bounded, read-only and stops it
 - Module `id` is lowercase, no spaces, dash-separated if multi-word: `'collect'`, `'auto-mail'`, `'templates-explorers'`.
 - Reserve `Steward.modules.<id>` for any state your module wants to publish (helpers, render functions, public read-only data).
 - Internal state goes in IIFE-scoped `var`s, not on the namespace.
+
+## Declaring production demand
+
+A module that needs items or troops produced does not order them itself. It tells the production ledger and lets the planner price the request against everyone else's, in priority order:
+
+```js
+Steward.core.production.demand.put('mymodule', 'trip-3', {
+    label: 'Trip 3', type: 0, item: 'Rifleman', items: 40,
+    basis: Steward.DemandBasis.Stock, priority: Steward.ProductionPriority.RunNow
+});
+```
+
+- Re-`put` on every pass. A need not renewed within 2 minutes is dropped, so a stopped module never reserves anything.
+- To keep other owners away from a kind or item, `hold` it, or register a provider with `provide(owner, fn)` that returns `{ needs, holds }` and is read each time the ledger is read. `src/modules/adventures/demand.js` is the example: it holds troops while a template run is active.
+- No timers. A provider is a pure read of state the module already keeps, and the module's `plan()` does the re-`put`. Do not start an interval or a delayed call to keep an entry alive.
+- Only the `actFor` owner orders. Pass your own id to `production.plan` and send what it returns with `production.orderIn`.
+
+See [CORE_USAGE.md](CORE_USAGE.md), Rule 6.5.
 
 ## Where to look for examples
 
