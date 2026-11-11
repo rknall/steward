@@ -385,7 +385,7 @@
             if (ctx.buffs >= BUFFS_PER_PLAN || stock <= 0) return;
         }
     }
-    function tryRefill(info, cfg, ctx)  { /* v2 — all types */ }
+    function tryRefill()  { /* v2 — all types; takes (info, cfg, ctx) like the others */ }
 
     function phase(name, info, cfg, ctx) {
         var override = S.modules.mining._phases && S.modules.mining._phases[name];
