@@ -351,3 +351,60 @@ t.test('own is an empty list for an empty vector', function () {
     assert.deepStrictEqual(plain(s.adv.own()), []);
     assert.deepStrictEqual(plain(s.adv.ownOpen()), []);
 });
+
+// ---- folders --------------------------------------------------------------------
+
+t.test('folderPath puts a typed adventure in its folder and a campaign in a sub-folder', function () {
+    var s = setup();
+    var a = s.adv;
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Mission' }), false)), ['Missions']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Mission', campaign: 'ArabianNights' }), false)),
+        ['Missions', a.campaignLabel('ArabianNights')]);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'MiniMission' }), false)), ['Mini-missions']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Coop' }), false)), ['Co-op missions']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Venture' }), false)), ['Ventures']);
+});
+
+t.test('folderPath sends event adventures to Events and unknown types to Other under the raw value', function () {
+    var s = setup();
+    var a = s.adv;
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Mission', requiresEvent: true }), false)), ['Events']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Weird' }), false)), ['Other', 'Weird']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: '' }), false)), ['Other', '(no type)']);
+    assert.deepStrictEqual(plain(a.folderPath(null, false)), ['Other']);
+});
+
+t.test('folderPath for a scenario is the Scenarios folder with an optional campaign', function () {
+    var s = setup();
+    var a = s.adv;
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Mission' }), true)), ['Scenarios']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ campaign: 'ArabianNights' }), true)),
+        ['Scenarios', a.campaignLabel('ArabianNights')]);
+    assert.deepStrictEqual(plain(a.folderPath(null, true)), ['Scenarios']);
+});
+
+t.test('campaignLabel uses the host label and falls back to the split raw value', function () {
+    var s = setup();
+    assert.strictEqual(s.adv.campaignLabel('ArabianNights'), 'Camp ArabianNights');
+    var u = setup({}, ['Campaign_ArabianNights', 'Campaign_1001Nights']);
+    assert.strictEqual(u.adv.campaignLabel('ArabianNights'), 'Arabian Nights');
+    assert.strictEqual(u.adv.campaignLabel('1001Nights'), '1001 Nights');
+});
+
+t.test('folderOrder lists the type folders, then Events, Other and Scenarios', function () {
+    var s = setup();
+    assert.deepStrictEqual(plain(s.adv.folderOrder()),
+        ['Missions', 'Mini-missions', 'Co-op missions', 'Ventures', 'Events', 'Other', 'Scenarios']);
+});
+
+t.test('definitions(true) is silent on a throwing or nameless host map', function () {
+    var s = setup({ adventureDefs: [{ mName_string: '' }] });
+    s.H.clearLogs();
+    assert.deepStrictEqual(plain(s.adv.definitions(true)), []);
+    var prev = s.H.host.game.def;
+    s.H.host.game.def = function () { throw new Error('boom'); };
+    assert.deepStrictEqual(plain(s.adv.definitions(true)), []);
+    s.H.host.game.def = prev;
+    var warns = s.H.logs().filter(function (l) { return l.level === 'warn'; });
+    assert.strictEqual(warns.length, 0);
+});

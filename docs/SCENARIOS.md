@@ -26,6 +26,11 @@ then repeats maps like a template series.
 - Override folder `<steward>/adventures/scenarios/<id>.json`. A user file with
   the id of a built-in replaces it. The folder is read when the menu is
   rebuilt, so a corrected file needs no new build.
+- Scenarios are listed in `~Steward~ > Adventures > Scenarios`, in a sub-folder
+  per host campaign when the adventure has one. A row with no map in the star
+  menu (x0) is greyed; a pass that cannot read the star menu (x?) keeps the
+  row's last state. Until the game's adventure list is readable the folder is
+  one greyed `Scenarios (loading...)` row.
 - A text that cannot be parsed is listed as a broken entry with its error, and a
   broken user file replaces the built-in of its id.
 - The autoTSO converter that produced the first files was a one-off and is not

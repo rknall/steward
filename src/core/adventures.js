@@ -5,6 +5,9 @@
  * own open adventures (with their zone ids), and builds the action def that
  * closes one. Starting a map lives in core/buffs.js. The list offers attack
  * adventures only, sorted by label, matching autoTSO's template maker.
+ * The folder rules (type, event, campaign, Other fallback) live here too, so
+ * the menu and the diagnostics dump share one answer to where an adventure
+ * belongs.
  */
 
 (function (S) {
@@ -38,7 +41,71 @@
         };
     }
 
-    function definitions() {
+    // Host type value -> menu folder label, in menu order. The keys are host
+    // GetType_string values taken from autoTSO ('Coop') and the wiki's
+    // data-type values, so they are provisional: 'Dump adventure and buff
+    // definitions' lists the real ones. Keyed by host enum string, never by
+    // adventure.
+    var TYPE_FOLDERS = [
+        { label: 'Missions',      types: ['Mission'] },
+        { label: 'Mini-missions', types: ['MiniMission'] },
+        { label: 'Co-op missions', types: ['Coop', 'CoopMission'] },
+        { label: 'Ventures',      types: ['Venture'] }
+    ];
+    var EVENTS_FOLDER = 'Events';
+    var OTHER_FOLDER = 'Other';
+    var SCENARIOS_FOLDER = 'Scenarios';
+
+    // Top-level folder order, derived so it is never written twice.
+    function folderOrder() {
+        var out = [];
+        for (var i = 0; i < TYPE_FOLDERS.length; i++) out.push(TYPE_FOLDERS[i].label);
+        out.push(EVENTS_FOLDER, OTHER_FOLDER, SCENARIOS_FOLDER);
+        return out;
+    }
+
+    function typeFolder(type) {
+        for (var i = 0; i < TYPE_FOLDERS.length; i++) {
+            if (TYPE_FOLDERS[i].types.indexOf(type) !== -1) return TYPE_FOLDERS[i].label;
+        }
+        return null;
+    }
+
+    // The host's localised campaign name; an unknown key comes back unchanged,
+    // so the raw value is split at case changes and digits instead.
+    function campaignLabel(raw) {
+        var key = 'Campaign_' + raw;
+        var text = S.core.locale.lab(key);
+        if (typeof text === 'string' && text !== '' && text !== key) return text;
+        return String(raw)
+            .replace(/_/g, ' ')
+            .replace(/([a-z])([A-Z0-9])/g, '$1 $2')
+            .replace(/([0-9])([A-Za-z])/g, '$1 $2');
+    }
+
+    // Folder labels from the top down for one adventure. A def of null is an
+    // adventure missing from the definitions.
+    function folderPath(def, scenario) {
+        var tail = (def && hasCampaign(def)) ? [campaignLabel(def.campaign)] : [];
+        if (scenario === true) return [SCENARIOS_FOLDER].concat(tail);
+        if (!def) return [OTHER_FOLDER];
+        if (def.requiresEvent) return [EVENTS_FOLDER].concat(tail);
+        var label = typeFolder(def.type);
+        if (label) return [label].concat(tail);
+        return [OTHER_FOLDER, def.type ? String(def.type) : '(no type)'].concat(tail);
+    }
+
+    function byName(defs) {
+        var out = {};
+        if (!defs) return out;
+        for (var i = 0; i < defs.length; i++) {
+            if (defs[i] && typeof defs[i].name === 'string') out[defs[i].name] = defs[i];
+        }
+        return out;
+    }
+
+    // quiet skips the warnings, for callers that probe on a periodic tick.
+    function definitions(quiet) {
         var out = [];
         var skipped = 0;
         try {
@@ -61,9 +128,9 @@
                 if (d) out.push(d);
                 else skipped++;
             }
-            if (skipped > 0) S.kernel.warn('adventures', 'skipped ' + skipped + ' adventure definition(s) without a name');
+            if (skipped > 0 && quiet !== true) S.kernel.warn('adventures', 'skipped ' + skipped + ' adventure definition(s) without a name');
         } catch (e) {
-            S.kernel.warn('adventures', 'definitions() threw:', e);
+            if (quiet !== true) S.kernel.warn('adventures', 'definitions() threw:', e);
             return [];
         }
         return out;
@@ -208,6 +275,15 @@
 
     S.core.adventures = {
         HIDDEN_TYPES: HIDDEN_TYPES,
+        TYPE_FOLDERS: TYPE_FOLDERS,
+        EVENTS_FOLDER: EVENTS_FOLDER,
+        OTHER_FOLDER: OTHER_FOLDER,
+        SCENARIOS_FOLDER: SCENARIOS_FOLDER,
+        folderOrder:  folderOrder,
+        campaignLabel: campaignLabel,
+        folderPath:   folderPath,
+        byName:       byName,
+        hasCampaign:  hasCampaign,
         definitions:  definitions,
         isSelectable: isSelectable,
         selectable:   selectable,

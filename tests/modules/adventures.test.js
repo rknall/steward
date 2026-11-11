@@ -75,11 +75,17 @@ t.test('menu lists templates in label order with their map counts', function () 
     var s = setup({ buffs: [
         { type: 'Adventure', resource: 'BlackKnights', amount: 2 },
         { type: 'Adventure', resource: 'BlackKnights', amount: 1, uid: 'b' }
-    ] });
+    ], adventureDefs: [A.adventureDef({ name: 'BlackKnights', type: 'Mission' }),
+        A.adventureDef({ name: 'Other', type: 'Mission' })] });
     s.tpl.save(record({}), 1000);
     s.tpl.save(record({ label: 'Alpha', adventure: 'Other' }), 2000);
-    var labels = menuLabels(s);
-    assert.deepStrictEqual(labels.slice(8), ['Alpha ×0', 'Black Knights ×3']);
+    var items = s.H.module('adventures').menu.items();
+    assert.strictEqual(items.length, 9);
+    assert.strictEqual(labelOf(items[8]), 'Missions');
+    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return labelOf(it); })),
+        ['Alpha ×0', 'Black Knights ×3']);
+    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return typeof it.enabled === 'function' ? it.enabled({}) : it.enabled; })),
+        [false, true]);
 });
 
 t.test('boot seeds lastDir only and ignores an old stored default horseshoe', function () {
@@ -780,10 +786,12 @@ t.test('available is null while the map stock is unreadable and reads it once pe
 });
 
 t.test('a menu label shows ×? while the map stock is unreadable', function () {
-    var s = setup({ buffs: [] });
+    var s = setup({ buffs: [], adventureDefs: [A.adventureDef({ name: 'BlackKnights', type: 'Mission' })] });
     s.tpl.save(record({}), 1000);
     s.S.core.buffs.mapCounts = function () { return null; };
-    assert.deepStrictEqual(menuLabels(s).slice(8), ['Black Knights ×?']);
+    var items = s.H.module('adventures').menu.items();
+    assert.strictEqual(labelOf(items[8]), 'Missions');
+    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return labelOf(it); })), ['Black Knights ×?']);
 });
 
 t.test('start refuses while the map stock is unreadable', function () {

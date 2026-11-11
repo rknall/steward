@@ -26,8 +26,8 @@
  * steps, and repeats trips on one map. At home it produces the trip's items,
  * on the island it applies them to their grids while the quests still want
  * them, then the quest watcher and the collect module finish the trip; the
- * last trip ends the map like a template run. Scenarios are listed after the
- * templates in the native ~Steward~ menu.
+ * last trip ends the map like a template run. Scenarios are listed in their own
+ * Scenarios folder of the native ~Steward~ menu, after the template folders.
  *
  * A run takes its next step as soon as the game allows: a pass that moved a
  * step or left queue work asks the scheduler for another at once, a short

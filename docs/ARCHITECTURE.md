@@ -142,7 +142,7 @@ shutdown (script reload: the next bundle calls it on the previous instance)
   └─ flush settings and log
 ```
 
-The native menu writes a label only when its text changes. Label writes on native items are observed to grow the AIR client's object count, so an unchanged label is skipped on each tick. A module's own submenu is rebuilt only on a user action (`S.kernel.ui.refreshModuleMenu`); everything else updates labels in place. A bar menu (`barMenu`, beside `~Steward~`) is not walked by the tick. It writes only when it opens, so the status interval never touches it. It can also leave the bar while its `visible` function is false; `showBarMenu` moves it without a rebuild. Submenu items nested inside a module or bar menu are built with their parent and refreshed with it, so they cost no extra rebuild.
+The native menu writes a label only when its text changes. Label writes on native items are observed to grow the AIR client's object count, so an unchanged label is skipped on each tick. A module's own submenu is rebuilt only on a user action (`S.kernel.ui.refreshModuleMenu`), apart from the adventures submenu's single guarded rebuild when the game's adventure list first becomes readable; everything else updates labels in place. A bar menu (`barMenu`, beside `~Steward~`) is not walked by the tick. It writes only when it opens, so the status interval never touches it. It can also leave the bar while its `visible` function is false; `showBarMenu` moves it without a rebuild. Submenu items nested inside a module or bar menu are built with their parent and refreshed with it, so they cost no extra rebuild.
 
 The tick interval defaults to **10 seconds** (configurable via `Steward.kernel.settings.read('scheduler').tickInterval`).
 
