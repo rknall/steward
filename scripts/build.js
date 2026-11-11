@@ -17,11 +17,13 @@
  * Usage:
  *   node scripts/build.js
  *   STEWARD_VERSION=0.1.0 node scripts/build.js
+ *
+ * Without STEWARD_VERSION the version comes from `git describe` (see
+ * scripts/version.js) and falls back to package.json when git is unavailable.
  */
 
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
 const { minify } = require("terser");
 const loadOrder = require("../tests/load-order");
 const version = require("./version");
@@ -40,16 +42,7 @@ function collectFiles(sectionName) {
 }
 
 function gitShortSha() {
-	try {
-		return execSync("git rev-parse --short HEAD", {
-			cwd: REPO_ROOT,
-			stdio: ["ignore", "pipe", "ignore"],
-		})
-			.toString()
-			.trim();
-	} catch (e) {
-		return "unknown";
-	}
+	return version.git(["rev-parse", "--short", "HEAD"], REPO_ROOT) || "unknown";
 }
 
 function isoDate() {

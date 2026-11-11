@@ -36,8 +36,10 @@ Sections:
      client menu (or restart `client64.exe`), open the Steward menu, take the
      concrete steps for this change, and watch
      `tso_portable/steward/logs/console.log` for the expected lines.
-6. **Suggested commit message**: short, topic-prefixed (`mining: ...`), ending
-   with `Assisted-by: Claude`.
+6. **Suggested commit message**: short, topic-prefixed (`mining: ...`), with no
+   version suffix, ending with `Assisted-by: Claude`. Add `Bump: minor` (new
+   module or redesign) or `Bump: major` above it when it applies. Never suggest
+   editing package.json `version`.
 
 Optional: when a visual explanation helps the user test or judge the change, write
 an explainer set `analysis/agents/<task>/design/<task>-explainer.html` from the

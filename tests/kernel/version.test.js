@@ -1,5 +1,7 @@
 'use strict';
 
+var fs = require('fs');
+var os = require('os');
 var path = require('path');
 var t = require('../runner');
 var harness = require('../harness');
@@ -39,10 +41,44 @@ t.test('read prefers STEWARD_VERSION env', function () {
     });
 });
 
-t.test('read falls back to package.json', function () {
+t.test('resolve order is env, describe, package version, 0.0.0', function () {
+    t.assert.strictEqual(version.resolve('1.0.0', '2.0.0', '3.0.0'), '1.0.0');
+    t.assert.strictEqual(version.resolve('', '2.0.0', '3.0.0'), '2.0.0');
+    t.assert.strictEqual(version.resolve(undefined, null, '3.0.0'), '3.0.0');
+    t.assert.strictEqual(version.resolve('', '', ''), '0.0.0');
+    t.assert.strictEqual(version.resolve(undefined, undefined, undefined), '0.0.0');
+});
+
+t.test('fromDescribe strips one leading v and rejects empty input', function () {
+    t.assert.strictEqual(version.fromDescribe('v0.10.2-12-gae97568-dirty'), '0.10.2-12-gae97568-dirty');
+    t.assert.strictEqual(version.fromDescribe('v0.10.14'), '0.10.14');
+    t.assert.strictEqual(version.fromDescribe(''), null);
+    t.assert.strictEqual(version.fromDescribe(null), null);
+});
+
+t.test('git returns output in a repo and null outside one', function () {
+    t.assert.strictEqual(typeof version.git(['--version'], REPO_ROOT), 'string');
+    var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'steward-version-'));
+    try {
+        t.assert.strictEqual(version.git(['describe'], dir), null);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+t.test('read without env resolves describe, then package.json', function () {
     withEnv(undefined, function () {
-        t.assert.strictEqual(version.read(REPO_ROOT), require('../../package.json').version);
+        var expected = version.resolve(
+            undefined,
+            version.describe(REPO_ROOT),
+            require('../../package.json').version
+        );
+        t.assert.strictEqual(version.read(REPO_ROOT), expected);
     });
+});
+
+t.test('describe is memoised per repo root', function () {
+    t.assert.strictEqual(version.describe(REPO_ROOT), version.describe(REPO_ROOT));
 });
 
 t.test('harness-loaded kernel carries the build version', function () {

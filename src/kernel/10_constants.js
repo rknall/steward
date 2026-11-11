@@ -8,8 +8,9 @@
 (function (S) {
 
     // Release version. The build (and the test harness) replace this literal
-    // with package.json's version; assigned unconditionally so a script reload
-    // shows the new bundle's version.
+    // with the version from scripts/version.js (git describe, or the release
+    // tag); assigned unconditionally so a script reload shows the new bundle's
+    // version.
     S.kernel.VERSION = '__STEWARD_VERSION__';
 
     S.kernel.TIMEOUTS = {

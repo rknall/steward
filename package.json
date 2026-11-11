@@ -20,6 +20,7 @@
     "lint": "node scripts/lint-air.js",
     "lint:fix": "node scripts/lint-air.js --fix",
     "test": "node tests/runner.js",
+    "release": "node scripts/release.js",
     "prepare": "husky install"
   },
   "lint-staged": {

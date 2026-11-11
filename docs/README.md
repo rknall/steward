@@ -18,6 +18,7 @@ Start here if you're new to the codebase.
 | [`COMPATIBILITY.md`](COMPATIBILITY.md) | Adobe AIR 32 JavaScript constraints. What's allowed, what crashes. |
 | [`TSO_API.md`](TSO_API.md) | TSO client globals: `game`, `swmmo`, `loca`, `air.*`, host UI helpers. |
 | [`LOGGING.md`](LOGGING.md) | `Steward.kernel.log` contract, file rotation, configuration. |
+| [`RELEASING.md`](RELEASING.md) | Version sources, the `Bump:` commit trailer, CI and manual releases. |
 
 ## Planning
 
