@@ -18,18 +18,25 @@
  * Apply sends the items of the trip one grid per round, and only while a
  * running quest wants the item (core/quests.js itemWant with opts.running):
  * a quest that is unread, not yet started or in any mode other than running
- * is never sent to, and the wait for it is logged once. Each grid has a persisted
- * send marker, so a reload never sends to it twice. The game takes at most
- * what a grid still needs, so the stock drop of a verified send tells a full
- * grid from one that may want more: a grid that took everything it was
- * offered while the offer was capped by stock stays open, and a seen 'part:'
- * marker remembers that it had a partial send. A later send to such a grid
- * that shows no drop at all means it was already full. Out of stock with
- * grids left, the run goes home for more and comes back to the same trip.
+ * is never sent to, and the wait for it is logged once. A quest also wants
+ * the item when its open type-1 trigger, not a click trigger, names the
+ * building standing at the grid: such a quest takes the item without naming
+ * it. Each grid has a persisted send marker, so a reload never sends to it
+ * twice. The game may take less than it is offered, so only the stock drop
+ * of a verified send counts: a seen 'part:' marker records what the grid has
+ * taken so far, and while that is short of the item's amount the grid stays
+ * open and the rest is offered to the same grid next, until the grid has
+ * taken the amount, the quest no longer wants the item, or a send shows no
+ * drop at all (the grid was already full). Out of stock with grids left,
+ * the run goes home for more and comes back to the same trip.
  *
- * Trip lets the quests update, waits for unread quests, claimable quests and
- * quest objects to clear, and leaves after TRIP_MAX_MS whatever is left: the
- * next trip or the end of the map deals with it, so this never pauses.
+ * Trip lets the quests update (READ_LAG_MS from the step entry and
+ * QUEST_SETTLE_MS from the last verified quest read or claim on the island),
+ * waits for unread and claimable quests, quest objects and the pick-ups a
+ * running quest still counts that are not on the map yet, leaves only once
+ * all of that has read clear for READ_LAG_MS, and leaves after TRIP_MAX_MS
+ * whatever is left: the next trip or the end of the map deals with it, so
+ * this never pauses.
  *
  * Apply and Trip act only while the run's island is viewed; the quest pool
  * read elsewhere is not the run's.
@@ -52,12 +59,13 @@
     var PRODUCE_RETRY_MS = 60000;    // a failed item order is tried again after this
     var APPLY_QUIET_MS   = 600000;   // quiet time a quest gets to want an item
     var TRIP_MAX_MS      = 300000;   // quiet time a trip waits for quests and objects
+    var QUEST_SETTLE_MS  = 20000;    // settle after a quest read or claim on the island
 
     var CATEGORY = 'adventures';
 
     // Mark name prefixes: one mark per item ordered, one per grid sent to,
-    // and one per grid that had a stock-capped send (written seen, never
-    // sent; only read as a flag).
+    // and one per grid that took less than the item's amount (written seen,
+    // never sent; its taken field is what the grid has taken so far).
     var MAKE  = 'make:';
     var APPLY = 'apply:';
     var PART  = 'part:';
@@ -97,13 +105,16 @@
     }
 
     // Logs a fact once per run, step, trip and key instead of on every pass.
-    // Memory only: after a reload it is logged once more.
+    // Memory only: after a reload it is logged once more. There is one slot,
+    // so a pass with several facts passes them as one list under one key;
+    // separate calls would overwrite each other and log on every pass.
     function noteOnce(r, key, text) {
         var rs = st().current();
         var tag = r.id + ':' + r.step + ':' + r.trip + ':' + key;
         if (rs.tripNote === tag) return;
         rs.tripNote = tag;
-        log(text);
+        var lines = typeof text === 'string' ? [text] : text;
+        for (var i = 0; i < lines.length; i++) log(lines[i]);
     }
 
     // ---- Marks --------------------------------------------------------------
@@ -332,18 +343,48 @@
         return islandViewed(r);
     }
 
-    // itemWant under the strict gate. held gets the quests that want the
-    // item but are not running yet.
-    function want(buff, held) {
-        return S.core.quests.itemWant(buff, S.core.buffs.targetsOf(buff), { running: true, held: held });
+    // The names of the building at grid: the one standing there now, plus the
+    // first one seen there on this run and trip when it differs. A quest that
+    // asks for items by the building may see it vanish or change after one of
+    // them (an explosive, say), and the remaining items must still find that
+    // quest's trigger instead of waiting for a quest that never names them.
+    // Memory only: after a reload the gone building is not known any more and
+    // the item waits as for any quest that does not want it.
+    function gridBuildings(r, grid) {
+        var cur = '';
+        try {
+            cur = S.core.buildings.name(S.core.buildings.byGrid(grid));
+        } catch (e) {
+            cur = '';
+        }
+        if (typeof cur !== 'string') cur = '';
+        var rs = st().current();
+        if (!rs.applyBuildings) rs.applyBuildings = {};
+        var key = r.id + ':' + r.trip + ':' + grid;
+        if (cur && !has(rs.applyBuildings, key)) rs.applyBuildings[key] = cur;
+        var first = has(rs.applyBuildings, key) ? rs.applyBuildings[key] : '';
+        var out = [];
+        if (cur) out.push(cur);
+        if (first && first !== cur) out.push(first);
+        return out;
+    }
+
+    // itemWant under the strict gate, for a send of buff to grid; the one place
+    // that composes the gate call. held gets the quests that want the item but
+    // are not running yet. Apply runs only while the run's island is viewed,
+    // so the building at grid is read in the viewed zone.
+    function want(r, buff, grid, held) {
+        return S.core.quests.itemWant(buff, S.core.buffs.targetsOf(buff),
+            { running: true, held: held, buildings: gridBuildings(r, grid) });
     }
 
     // The quest objects collect clicks on a scenario island (running quests
-    // only); held gets the ones whose quest is not running yet. null when
-    // the map or the quest pool cannot be read.
-    function islandObjects(held) {
+    // only); held gets the ones whose quest is not running yet, and awaited,
+    // when given, the names a running quest still counts that have no object
+    // on the map yet. null when the map or the quest pool cannot be read.
+    function islandObjects(held, awaited) {
         try {
-            return S.core.pickups.targets({ quests: true, running: true, held: held });
+            return S.core.pickups.targets({ quests: true, running: true, held: held, awaited: awaited });
         } catch (e) {
             S.kernel.warn(CATEGORY, 'quest objects read threw:', e);
             return null;
@@ -364,9 +405,11 @@
         return out.join('; ');
     }
 
-    // A top-up send to a grid that had a capped send and then shows no stock
-    // drop at all: the grid was already full. Counted done without a pause,
-    // and the round dropped so the stale wait and settleRound never see it.
+    // A top-up send to a grid that took less than the amount before (a
+    // stock-capped send, or a remainder after a short take) and then shows no
+    // stock drop at all: the grid was already full. Counted done without a
+    // pause, and the round dropped so the stale wait and settleRound never
+    // see it.
     function topUpNotTaken(r) {
         var round = ld().currentRound(r, S.RunStep.Apply);
         if (!round || !ld().complete(round)) return;
@@ -392,8 +435,12 @@
     // The onDone follow-up of a send, on the current run like seenOnVerified.
     // Only a verified send decides here; the step reads any other result.
     // took is the stock drop the send's check saw, plus the queued items that
-    // landed in the star menu during the send, which raised the stock.
-    function applied(name, part, b, grid, amount, bound, q0, def) {
+    // landed in the star menu during the send, which raised the stock. given
+    // is what the grid had taken before this send. A grid that has taken the
+    // amount (bound) is done; one that is still short stays open, with its
+    // total on the part mark, so the next round offers it the rest. A take of
+    // nothing ends the grid as before, so a grid is never offered forever.
+    function applied(name, part, b, grid, amount, bound, given, q0, def) {
         return function (result, cur) {
             if (!result || result.status !== S.ActionResult.Verified) return;
             var took = def.dropped();
@@ -401,14 +448,22 @@
             if (typeof took === 'number' && typeof q0 === 'number' && typeof q1 === 'number' && q1 < q0) {
                 took += q0 - q1;
             }
-            if (took === null || took < amount || amount >= bound) {
+            var total = typeof took === 'number' ? given + took : null;
+            if (took === null || !(took > 0) || total >= bound) {
                 ld().markSeen(cur, name);
                 log(b + ' -> ' + grid + ': took ' + took + ' of ' + amount + '; grid done');
                 return;
             }
             ld().dropMark(cur, name);
             ld().markSeen(cur, part);
-            log(b + ' -> ' + grid + ': took all ' + amount + ' offered (up to ' + bound + '); grid stays open');
+            ld().marked(cur, part).taken = total;
+            st().save();
+            if (took >= amount) {
+                log(b + ' -> ' + grid + ': took all ' + amount + ' offered (up to ' + bound + '); grid stays open');
+            } else {
+                log(b + ' -> ' + grid + ': took ' + took + ' of ' + amount + ', ' + total + ' of ' + bound +
+                    ' so far; sending the other ' + (bound - total));
+            }
         };
     }
 
@@ -461,7 +516,7 @@
             return;
         }
 
-        // A grid re-opened after a capped send has no apply mark, so it is
+        // A grid re-opened after a short or capped send has no apply mark, so it is
         // not pending and its round is dropped as shown, not counted.
         ld().dropShown(r, RS.Apply, pending);
         for (i = 0; i < pending.length; i++) {
@@ -469,7 +524,7 @@
             var s = ld().staleMark(r, pending[i], 'item ' + pp.buff + ' -> ' + pp.grid);
             if (s === 'wait') return;
             if (s === 'stale') {
-                var w = want(pp.buff, null);
+                var w = want(r, pp.buff, Number(pp.grid), null);
                 if (w === null) {
                     ld().waitRead(r, 'quests');
                     return;
@@ -497,7 +552,7 @@
         for (i = 0; i < items.length; i++) {
             if (!openOf[i].length) continue;
             var buff = items[i].buff;
-            var wants = want(buff, held);
+            var wants = want(r, buff, openOf[i][0], held);
             if (wants === null) {
                 ld().waitRead(r, 'quests');
                 return;
@@ -535,6 +590,19 @@
 
         var b = target.item.buff;
         var tg = target.grid;
+        var an = applyMark(r, b, tg);
+        var pn = partMark(r, b, tg);
+        // What the grid has taken of this item so far; the next send offers
+        // only the rest, so a grid never gets more than the item's amount.
+        var bound = sc().sendAmount(target.item);
+        var pm = ld().marked(r, pn);
+        var given = pm && typeof pm.taken === 'number' ? pm.taken : 0;
+        var remaining = bound - given;
+        if (remaining <= 0) {
+            ld().markSeen(r, an);
+            log(b + ' -> ' + tg + ': amount already taken; grid done');
+            return;
+        }
         var stock = S.core.buffs.stock(b, '');
         if (typeof stock !== 'number') {
             ld().waitRead(r, 'item stock');
@@ -550,17 +618,15 @@
             st().go(RS.JumpHome, 'out of ' + b);
             return;
         }
-        var bound = sc().sendAmount(target.item);
-        var amount = Math.min(bound, stock);
+        var amount = Math.min(remaining, stock);
         var q0 = S.core.production.queuedItems(b);
-        var an = applyMark(r, b, tg);
         log('apply ' + b + ' x' + amount + ' -> ' + tg + ' (stock ' + stock + ')');
         // A send is progress: the next item wait starts its quiet time afresh.
         st().current().applyClock = null;
         var def = S.core.buffs.adventureItem(b, tg, amount);
         var round = ld().startRound(r, RS.Apply, []);
         ld().attempt(round, an, ld().wrapSend(r, an, def),
-            applied(an, partMark(r, b, tg), b, tg, amount, bound, q0, def));
+            applied(an, pn, b, tg, amount, bound, given, q0, def));
     }
 
     // ---- Trip ---------------------------------------------------------------
@@ -570,6 +636,14 @@
         r.trip = done;
         newLeg(r);
         st().go(S.RunStep.JumpHome, 'trip ' + done + '/' + n + ' done');
+    }
+
+    // A quest read or claimed on the island shows its map objects and the
+    // next quest some seconds later, so an empty read right after it proves
+    // nothing yet.
+    function questSettling(r) {
+        var c = wt().changedAt(r.zoneId);
+        return typeof c === 'number' && now() - c < QUEST_SETTLE_MS;
     }
 
     // Trip (island). The last trip hands over to Clear, which waits for the
@@ -582,32 +656,60 @@
             return;
         }
         if (!islandViewed(r)) return;
-        if (now() - r.since < tripSettleMs()) {
+        if (now() - r.since < tripSettleMs() || questSettling(r)) {
             ld().waitBusy(r, null, 'letting the quests update');
             return;
         }
         var un = wt().unread();
         var pend = wt().pending();
         // Objects whose quest is not running are not clicked; they still
-        // count as left, since reading the quest makes them clickable.
+        // count as left, since reading the quest makes them clickable. A
+        // running quest's pick-up with no object on the map yet counts as
+        // left too: its objects show some time after the quest is read.
         var held = [];
-        var objs = wt().patterns() === null ? [] : islandObjects(held);
+        var awaited = [];
+        var objs = [];
+        if (wt().patterns() !== null) {
+            // A spawned object must show in this read, not in a cached list.
+            S.core.buildings.invalidate();
+            objs = islandObjects(held, awaited);
+        }
         if (un === null || pend === null || objs === null) {
             ld().waitRead(r, 'quests or quest objects');
             return;
         }
-        if (!un.length && !pend.length && !objs.length && !held.length) {
+        if (!un.length && !pend.length && !objs.length && !held.length && !awaited.length) {
+            // The map must read clear for a settle time: the finished quest
+            // may not be claimable yet, or a claim's next quest may not show
+            // yet, right after the last pick-up.
+            var seen = st().current().tripSeenAt;
+            if (typeof seen === 'number' && seen >= r.since && now() - seen < tripSettleMs()) {
+                ld().waitBusy(r, null, 'making sure no quest or object is left');
+                return;
+            }
             leave(r, n);
             return;
         }
-        if (held.length) noteOnce(r, 'held:' + heldText(held), wt().pickupText(held) + ': ' + heldText(held));
+        st().current().tripSeenAt = now();
+        var noteKey = [];
+        var notes = [];
+        if (held.length) {
+            noteKey.push('held:' + heldText(held));
+            notes.push(wt().pickupText(held) + ': ' + heldText(held));
+        }
+        if (awaited.length) {
+            noteKey.push('awaited:' + wt().pickupText(awaited));
+            notes.push(wt().pickupText(awaited) + ': waiting for it to appear on the map');
+        }
+        if (notes.length) noteOnce(r, noteKey.join('|'), notes);
         var parts = [];
         if (un.length) parts.push(un.length + ' unread');
         if (pend.length) parts.push(pend.length + ' to claim');
         if (objs.length) parts.push(wt().pickupText(objs));
         if (held.length) parts.push(held.length + ' waiting for a running quest');
+        if (awaited.length) parts.push(wt().pickupText(awaited) + ' not on the map yet');
         var text = parts.join(', ');
-        var p = S.modules.adventures.away.pickupClock(r, objs.concat(held));
+        var p = S.modules.adventures.away.pickupClock(r, objs.concat(held).concat(awaited));
         if (p.ms >= TRIP_MAX_MS) {
             log('leaving with: ' + text);
             leave(r, n);
@@ -621,6 +723,7 @@
         PRODUCE_RETRY_MS: PRODUCE_RETRY_MS,
         APPLY_QUIET_MS:   APPLY_QUIET_MS,
         TRIP_MAX_MS:      TRIP_MAX_MS,
+        QUEST_SETTLE_MS:  QUEST_SETTLE_MS,
         produce:          produce,
         apply:            apply,
         trip:             trip,

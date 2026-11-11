@@ -8,8 +8,12 @@
  *
  * Two views. The list shows every template file, broken ones included so
  * they can be deleted, with Edit and a two-step Delete. The edit view holds
- * the template card (label, adventure, loadout), the speed card (horseshoe)
- * and the wave list, which a drag or the arrow buttons reorder.
+ * the template card (label, adventure, loadout), the speed card (horseshoe),
+ * the arrival card (send all to the star) and the list of waves and steps,
+ * which a drag or the arrow buttons reorder. Steps (unload, send home,
+ * pause) are rows of the same list between the battle files; the Add-step
+ * card under the list builds one from the step registry. A step is changed
+ * by removing it and adding a new one: one way in keeps the window small.
  *
  * Edits are buffered in `state.draft` until Save; templates themselves are
  * files, so Save writes one and Delete removes one. `state.orig` is the
@@ -21,7 +25,13 @@
  * The footer is built once per view and only updated while the user types
  * or picks: the Save button is never replaced under a click. Save stays
  * disabled until the draft changed and has everything a template needs;
- * the footer names what is still missing.
+ * the footer names what is still missing, including a step row that does
+ * not fit the sequence (a wave using a general sent home before it).
+ *
+ * Battle files are read at most once per render (a per-render cache keyed by
+ * path): the row counts, the loadout names and the sequence check all read
+ * the same files, and a drag reuses them, because a path still names the
+ * same file after the list is reordered.
  *
  * The window registers an edit guard with the kernel UI, so the dashboard
  * and Settings screens refuse to open over a changed draft, and this window
@@ -53,6 +63,9 @@
     // ---- Small helpers --------------------------------------------------------
 
     function T() { return S.modules.adventures.templates; }
+    // The step registry is another file; a build without it shows a plain
+    // wave list, so every use goes through these guards.
+    function St() { return S.modules.adventures.steps || null; }
     function H() { return S.kernel.ui.helpers; }
 
     function notify(text) {
@@ -110,6 +123,80 @@
         return $b;
     }
 
+    function isItem(v) {
+        var st = St();
+        return !!(st && typeof st.isItem === 'function' && st.isItem(v));
+    }
+
+    // Waves count battle files only, so a step row never shifts a number.
+    // Without a registry no object survives normalize, so every entry is a wave.
+    function waveTotal(list) {
+        var st = St();
+        return st && typeof st.waveCount === 'function' ? st.waveCount(list) : list.length;
+    }
+
+    function waveNo(list, i) {
+        var st = St();
+        return st && typeof st.waveNumber === 'function' ? st.waveNumber(list, i) : i + 1;
+    }
+
+    function kindLabel(item) {
+        var st = St();
+        return st && item && typeof st.titleOf === 'function' ? st.titleOf(item) : 'step';
+    }
+
+    // A battle file read once per render; see the file header.
+    function loadFile(path) {
+        if (!state.files) state.files = {};
+        var k = 'f:' + path;
+        if (!Object.prototype.hasOwnProperty.call(state.files, k)) state.files[k] = S.core.battles.load(path);
+        return state.files[k];
+    }
+
+    // The loadout's general lines with their keys and plain names, or null
+    // while no loadout is chosen or it cannot be read.
+    function loadoutOf(draft) {
+        if (!draft.loadout) return null;
+        var ld = loadFile(draft.loadout);
+        if (!ld.ok) return null;
+        var st = St();
+        var gens = [];
+        for (var i = 0; i < ld.lines.length; i++) {
+            if (S.core.battles.isGeneralLine(ld.lines[i])) gens.push(ld.lines[i]);
+        }
+        return {
+            lines: gens,
+            keys:  S.core.battles.loadoutKeys(ld.lines),
+            names: st && typeof st.namesOf === 'function' ? st.namesOf(ld.lines) : {}
+        };
+    }
+
+    // The registry's start-check problems of the draft's sequence, so the
+    // window refuses what the run start would refuse.
+    function seqOf(draft) {
+        var st = St();
+        if (!st || typeof st.checkSequence !== 'function') return [];
+        var lo = loadoutOf(draft);
+        var ctx = {
+            loadoutKeys: lo ? lo.keys : null,
+            names:       lo ? lo.names : {},
+            // By the path at index i now, so a reordered list maps correctly.
+            waveKeys:    function (i) {
+                var p = draft.waves[i];
+                if (typeof p !== 'string' || !p) return null;
+                var f = loadFile(p);
+                return f.ok ? S.core.battles.loadoutKeys(f.lines) : null;
+            },
+            fileName:    function (p) { return T().fileName(p); }
+        };
+        try {
+            return st.checkSequence(draft.waves, ctx) || [];
+        } catch (e) {
+            S.kernel.error('adventures', 'step sequence check threw:', e);
+            return [];
+        }
+    }
+
     // ---- Draft state ----------------------------------------------------------
 
     function snapshot(draft) {
@@ -144,21 +231,32 @@
         speedBuff: 'a known horseshoe'
     };
 
+    function fixPhrase(list, i) {
+        if (typeof i !== 'number' || !(i >= 0 && i < list.length)) return 'a fix in the steps';
+        var what = typeof list[i] === 'string' ? 'wave ' + waveNo(list, i) : kindLabel(list[i]);
+        return 'a fix in row ' + (i + 1) + ' (' + what + ')';
+    }
+
     // Pure over the template store's own checks: what the draft still lacks
     // before it can be saved, as short phrases for the footer. `recs` is the
-    // template list the label is checked against.
-    function needs(draft, recs) {
+    // template list the label is checked against; `seq` holds the sequence
+    // problems of the draft (seqOf), each naming the row to fix.
+    function needs(draft, recs, seq) {
         var t = T();
         var rec = t.normalize(draft);
         var problems = t.validate(rec);
         var out = [];
+        var add = function (phrase) {
+            if (phrase && out.indexOf(phrase) === -1) out.push(phrase);
+        };
         for (var i = 0; i < problems.length; i++) {
             var f = problems[i].field;
-            var phrase = f === 'waves'
-                ? (rec.waves.length ? 'a file for every wave' : 'at least one wave')
-                : NEED_PHRASES[f];
-            if (phrase && out.indexOf(phrase) === -1) out.push(phrase);
+            if (f === 'waves') add(waveTotal(rec.waves) ? 'a file for every wave' : 'at least one wave');
+            else if (f === 'steps') add(fixPhrase(rec.waves, problems[i].index));
+            else add(NEED_PHRASES[f]);
         }
+        seq = seq || [];
+        for (var j = 0; j < seq.length; j++) add(fixPhrase(draft.waves, seq[j].index));
         if (t.labelTaken(rec.label, rec.id, recs || [])) out.push('a label no other template uses');
         return out;
     }
@@ -172,6 +270,8 @@
         state.problems = null;
         state.lastBuff = null;
         state.moved = -1;
+        state.adding = null;
+        state.seqProblems = [];
         state.view = 'edit';
         render();
     }
@@ -184,6 +284,8 @@
         state.orig = null;
         state.recs = null;
         state.problems = null;
+        state.adding = null;
+        state.seqProblems = [];
         state.view = 'list';
     }
 
@@ -194,6 +296,10 @@
         var $body = modal.Body();
         if (!$body || !$body.length) return;
         state.labelInput = null;
+        state.$addStep = null;
+        state.$addNote = null;
+        // Read every file afresh per render: one may have changed on disk.
+        state.files = {};
         // Build detached: the old view stays until the new one is complete, so
         // a throw part-way never leaves an emptied, half-built body. The
         // window has no fill sizing, so its panel scrolls.
@@ -222,6 +328,7 @@
         state.draft = null;
         state.orig = null;
         state.problems = null;
+        state.adding = null;
         state.view = 'list';
         render();
     }
@@ -274,13 +381,13 @@
     }
 
     function canSaveDraft() {
-        return isDirty() && needs(state.draft, state.recs).length === 0;
+        return isDirty() && needs(state.draft, state.recs, state.seqProblems).length === 0;
     }
 
     // Text, classes and disabled state only, on the existing elements.
     function updateFooter() {
         if (!state || !state.$save || !state.$mid || state.view !== 'edit' || !state.draft) return;
-        var missing = needs(state.draft, state.recs);
+        var missing = needs(state.draft, state.recs, state.seqProblems);
         var dirty = isDirty();
         var ok = dirty && missing.length === 0;
         state.$save.prop('disabled', !ok);
@@ -312,7 +419,8 @@
         state = {
             view: 'list', draft: null, orig: null, title: null, recs: null, problems: null,
             confirmDelete: null, error: null, labelInput: null, lastBuff: null, moved: -1,
-            footKind: null, $save: null, $mid: null
+            footKind: null, $save: null, $mid: null,
+            adding: null, $addStep: null, $addNote: null, seqProblems: [], files: {}
         };
         try {
             modal = new Modal(MODAL_ID, TITLE, true);
@@ -395,7 +503,7 @@
         return [
             { $: $('<b>').text(rec.label), title: rec.label },
             adventure,
-            String(rec.waves.length),
+            String(waveTotal(rec.waves)),
             horseshoeCell(rec, buffs),
             actionsCell(rec, rec.id + T().EXT, true)
         ];
@@ -501,7 +609,7 @@
 
     // The loadout's general lines, troops and problems as one line of text.
     function loadoutSummary(path) {
-        var ld = S.core.battles.load(path);
+        var ld = loadFile(path);
         var generals = 0;
         var units = {};
         for (var i = 0; i < ld.lines.length; i++) {
@@ -557,7 +665,7 @@
 
     // Attack and move lines of a wave file, or null when it cannot be read.
     function waveCounts(path) {
-        var ld = S.core.battles.load(path);
+        var ld = loadFile(path);
         if (!ld.ok) return null;
         var attack = 0;
         var move = 0;
@@ -568,16 +676,50 @@
         return plural(attack, 'attack') + ' · ' + plural(move, 'move');
     }
 
-    // Number and arrow states of every row from its current position.
-    function renumber(rows) {
+    // Number and arrow states of every row from its current position in
+    // `list`: battle files carry their wave number, step rows a bullet.
+    function renumber(rows, list) {
         var n = rows.length;
         for (var i = 0; i < n; i++) {
             var r = rows[i];
             r.$li.attr('data-idx', String(i));
-            r.$n.text(String(i + 1));
+            r.$n.text(typeof list[i] === 'string' ? String(waveNo(list, i)) : '•');
             r.$up.prop('disabled', i === 0);
             r.$down.prop('disabled', i === n - 1);
         }
+    }
+
+    // The first sequence problem filed against row i, or null.
+    function rowProblem(i) {
+        var seq = state.seqProblems || [];
+        for (var k = 0; k < seq.length; k++) {
+            if (seq[k].index === i) return seq[k].message;
+        }
+        return null;
+    }
+
+    // Name slot of a step row: the kind label in bold, then the rest of the
+    // registry's row text; a sequence problem replaces the help line.
+    function itemSlot(entry, idx, names) {
+        var st = St();
+        var $f = $('<span>', { 'class': 'steward-wave-f' });
+        if (!isItem(entry)) {
+            $f.append(textEl('b', null, 'Unknown step'));
+            $f.append(textEl('small', 'steward-bad', 'this build cannot run it; remove it'));
+            return $f;
+        }
+        var txt = st.itemText(entry, names) || { name: kindLabel(entry), small: '' };
+        var name = String(txt.name || '');
+        var label = kindLabel(entry);
+        if (name.indexOf(label) === 0) {
+            $f.append(textEl('b', null, label));
+            if (name.length > label.length) $f.append(textEl('span', null, name.substring(label.length)));
+        } else {
+            $f.append(textEl('b', null, name));
+        }
+        var bad = rowProblem(idx);
+        $f.append(bad !== null ? textEl('small', 'steward-bad', bad) : textEl('small', null, txt.small || ''));
+        return $f;
     }
 
     function waveList(draft) {
@@ -587,19 +729,26 @@
         // A drag renumbers rows in place, so every button reads its row's
         // index at click time rather than the one it was built with.
         var at = function ($li) { return parseInt($li.attr('data-idx'), 10); };
+        var lo = loadoutOf(draft);
+        var names = lo ? lo.names : {};
         for (var i = 0; i < draft.waves.length; i++) {
             (function (idx) {
-                var path = draft.waves[idx];
+                var entry = draft.waves[idx];
+                var file = typeof entry === 'string';
                 var last = draft.waves.length - 1;
                 var $li = $('<li>', { 'data-idx': String(idx) });
                 if (state.moved === idx) $li.addClass('steward-moved');
                 if (sortable) $li.append(textEl('span', 'steward-handle', '⋮⋮'));
-                var $n = textEl('span', 'steward-wave-n', String(idx + 1));
+                var $n = textEl('span', 'steward-wave-n', file ? String(waveNo(draft.waves, idx)) : '•');
                 $li.append($n);
-                var counts = waveCounts(path);
-                var $f = $('<span>', { 'class': 'steward-wave-f', title: path }).text(T().fileName(path));
-                $f.append(counts === null ? textEl('small', 'steward-bad', 'unreadable') : textEl('small', null, counts));
-                $li.append($f);
+                if (file) {
+                    var counts = waveCounts(entry);
+                    var $f = $('<span>', { 'class': 'steward-wave-f', title: entry }).text(T().fileName(entry));
+                    $f.append(counts === null ? textEl('small', 'steward-bad', 'unreadable') : textEl('small', null, counts));
+                    $li.append($f);
+                } else {
+                    $li.append(itemSlot(entry, idx, names));
+                }
                 var $up = iconBtn('↑', 'Move up', idx === 0, function () { moveWave(at($li), -1); });
                 var $down = iconBtn('↓', 'Move down', idx === last, function () { moveWave(at($li), 1); });
                 var $rm = iconBtn('×', 'Remove', false, function () {
@@ -616,7 +765,9 @@
         }
         // The update handler runs inside the sortable's own mouse-stop, so it
         // must not re-render (that would destroy the sortable under it): it
-        // reorders the draft and renumbers the rows in place.
+        // reorders the draft, renumbers the rows in place and checks the new
+        // sequence, so the footer and Save follow the drag at once. The row
+        // problem texts keep their old rows until the next render.
         if (sortable && draft.waves.length > 1) {
             $ol.sortable({
                 update: function () {
@@ -634,7 +785,8 @@
                     var byOld = [];
                     for (var k = 0; k < order.length; k++) byOld.push(rows[order[k]]);
                     rows = byOld;
-                    renumber(rows);
+                    renumber(rows, draft.waves);
+                    state.seqProblems = seqOf(draft);
                     updateFooter();
                 }
             });
@@ -722,16 +874,258 @@
         return $card;
     }
 
+    function arrivalCard(draft) {
+        var h = H();
+        var $card = h.card({ title: 'On arrival' });
+        $card.append(h.field('Send all to the star on arrival',
+            'Every general walks to the star first, then each wave sends him to his grid', h.toggle({
+                checked:  draft.starAll !== false,
+                label:    'Send all to the star on arrival',
+                onChange: function (on) {
+                    draft.starAll = !!on;
+                    render();
+                }
+            })));
+        return $card;
+    }
+
     function wavesCard(draft) {
         var h = H();
-        var $card = h.card({ title: 'Waves', meta: draft.waves.length + ' · in the order they run' });
+        var waves = waveTotal(draft.waves);
+        var steps = draft.waves.length - waves;
+        var meta = plural(waves, 'wave') + (steps ? ' · ' + plural(steps, 'step') : '') + ' · in the order they run';
+        var $card = h.card({ title: 'Waves and steps', meta: meta });
         if (!draft.waves.length) {
             $card.append(h.empty('No waves yet.', 'Add the wave files of this adventure, in the order they run.'));
         } else {
             $card.append(waveList(draft));
         }
-        $card.append(h.field('', 'Drag a wave or use the arrows to change the order.',
-            btn('Add waves…', act(pickWaves))));
+        var $btns = $('<span>').append(btn('Add waves…', act(pickWaves)));
+        if (stepKinds().length) {
+            $btns.append(' ').append(h.button('Add step…', {
+                size: 'sm', primary: !!state.adding, onClick: act(openAdding)
+            }));
+        }
+        $card.append(h.field('', 'Drag a row or use the arrows to change the order.', $btns, { wide: true }));
+        return $card;
+    }
+
+    // ---- Add-step card --------------------------------------------------------
+    //
+    // `state.adding` holds the open card's choices ({ kind, generals, message,
+    // minutes, place }) or null while it is closed. Kinds, labels, help and
+    // the checks all come from the step registry.
+
+    function stepKinds() {
+        var st = St();
+        return st && typeof st.kinds === 'function' ? st.kinds() : [];
+    }
+
+    function kindRow(kind) {
+        var st = St();
+        return st && typeof st.byKind === 'function' ? st.byKind(kind) : null;
+    }
+
+    function minutesOf(text) {
+        var s = String(text || '').replace(/^\s+|\s+$/g, '');
+        if (s === '') return null;
+        var n = Number(s);
+        return isNaN(n) ? null : n;
+    }
+
+    // A widget per kind of input, never per kind of step: the step's registry
+    // row names the input it takes, and the card draws that one.
+    var INPUTS = {
+        generals: {
+            blank: function () { return []; },
+            value: function (a) { return a.generals.slice(0); },
+            render: function ($card, draft, a, at) { generalFields($card, draft, a, at); }
+        },
+        message: {
+            blank: function () { return ''; },
+            value: function (a) { return a.message; },
+            render: function ($card, draft, a) {
+                var $msg = H().input({ value: a.message, placeholder: 'Optional', title: 'Message' });
+                $msg.on('input', function () {
+                    a.message = $msg.val();
+                    updateAdding();
+                });
+                $card.append(H().field('Message', 'Shown in the run menu and the game alert', $msg, { wide: true }));
+            }
+        },
+        minutes: {
+            blank: function () { return ''; },
+            value: function (a) { return minutesOf(a.minutes); },
+            render: function ($card, draft, a) {
+                var st = St();
+                var $min = H().input({ value: a.minutes, placeholder: 'Minutes', title: 'Minutes', width: '80px' });
+                $min.on('input', function () {
+                    a.minutes = $min.val();
+                    updateAdding();
+                });
+                $card.append(H().field('Minutes',
+                    'Whole minutes from ' + st.MIN_MINUTES + ' to ' + st.MAX_MINUTES + '; the run then goes on by itself',
+                    $min));
+            }
+        }
+    };
+
+    function openAdding() {
+        var ks = stepKinds();
+        if (!ks.length) return;
+        if (!state.adding) {
+            state.adding = { kind: ks[0].kind, place: 'end' };
+            for (var name in INPUTS) {
+                if (Object.prototype.hasOwnProperty.call(INPUTS, name)) state.adding[name] = INPUTS[name].blank();
+            }
+        }
+        render();
+    }
+
+    function cancelAdding() {
+        state.adding = null;
+        render();
+    }
+
+    // Where the new row goes: 'end', or after wave N and the step rows
+    // directly after it, which is right before wave N + 1.
+    function placeIndex(list, place) {
+        if (place === 'end') return list.length;
+        var n = parseInt(place, 10);
+        var st = St();
+        var at = st && typeof st.indexOfWave === 'function' ? st.indexOfWave(list, n + 1) : -1;
+        return at === -1 ? list.length : at;
+    }
+
+    // The item the card would add, through the registry's own parser.
+    function addingItem(a) {
+        var st = St();
+        if (!st || typeof st.normItem !== 'function') return null;
+        var row = kindRow(a.kind);
+        if (!row || !INPUTS[row.input]) return null;
+        var raw = { step: a.kind };
+        raw[row.input] = INPUTS[row.input].value(a);
+        return st.normItem(raw);
+    }
+
+    function addingProblems(a) {
+        var item = addingItem(a);
+        if (!item) return ['unknown step'];
+        var st = St();
+        var ps = typeof st.itemProblems === 'function' ? (st.itemProblems(item) || []) : [];
+        return ps.slice(0);
+    }
+
+    // Text and disabled state only, so typing keeps the focus.
+    function updateAdding() {
+        if (!state.adding || !state.$addStep) return;
+        var ps = addingProblems(state.adding);
+        state.$addStep.prop('disabled', ps.length > 0);
+        state.$addStep.toggleClass('steward-primary', ps.length === 0);
+        if (state.$addNote) state.$addNote.text(ps.length ? ps[0] : '');
+    }
+
+    function addStep() {
+        var a = state.adding;
+        if (!a || addingProblems(a).length) return;
+        var item = addingItem(a);
+        var at = placeIndex(state.draft.waves, a.place);
+        state.draft.waves.splice(at, 0, item);
+        state.adding = null;
+        state.moved = at;
+        render();
+    }
+
+    function generalFields($card, draft, a, at) {
+        var h = H();
+        var lo = loadoutOf(draft);
+        if (!lo) {
+            $card.append(textEl('div', 'steward-muted', 'Choose a readable loadout first: the generals come from it'));
+            return;
+        }
+        // The same rule the start check applies to Unload and Send home rows,
+        // from the one function. It maps a key to its row index, and a row at
+        // index 0 has value 0, so membership is tested, never truthiness.
+        var sent = (St() && typeof St().sentBefore === 'function') ? St().sentBefore(draft.waves, at) : {};
+        function isSent(key) { return Object.prototype.hasOwnProperty.call(sent, key); }
+        var keys = [];
+        for (var i = 0; i < lo.lines.length; i++) {
+            var key = lo.lines[i].key;
+            if (key && keys.indexOf(key) === -1) keys.push(key);
+        }
+        // A general that cannot be chosen at this place is never kept chosen.
+        var kept = [];
+        for (var g = 0; g < a.generals.length; g++) {
+            if (keys.indexOf(a.generals[g]) !== -1 && !isSent(a.generals[g])) kept.push(a.generals[g]);
+        }
+        a.generals = kept;
+        $card.append(h.subHead('Generals', 'from the loadout · ' + keys.length));
+        var seen = {};
+        for (var j = 0; j < lo.lines.length; j++) {
+            (function (line) {
+                if (!line.key || seen[line.key]) return;
+                seen[line.key] = true;
+                var name = lo.names[line.key] || line.name || line.key;
+                var off = isSent(line.key);
+                var help = off ? 'Sent home at an earlier row' : 'Loadout: ' + S.core.army.text(line.army);
+                $card.append(h.field(name, help, h.toggle({
+                    checked:  a.generals.indexOf(line.key) !== -1,
+                    disabled: off,
+                    label:    name,
+                    onChange: function (on) {
+                        // Rebuilt in loadout order, so the row reads like the loadout.
+                        var next = [];
+                        for (var k = 0; k < keys.length; k++) {
+                            var chosen = keys[k] === line.key ? on : a.generals.indexOf(keys[k]) !== -1;
+                            if (chosen) next.push(keys[k]);
+                        }
+                        a.generals = next;
+                        updateAdding();
+                    }
+                }), { disabled: off }));
+            }(lo.lines[j]));
+        }
+    }
+
+    function addStepCard(draft) {
+        var h = H();
+        var a = state.adding;
+        var row = kindRow(a.kind) || kindRow(stepKinds()[0].kind);
+        a.kind = row.kind;
+        var $card = h.card({ title: 'Add a step' });
+
+        var ks = stepKinds();
+        var opts = [];
+        for (var i = 0; i < ks.length; i++) opts.push({ label: ks[i].addLabel, value: ks[i].kind });
+        $card.append(h.field('Step', row.help, h.dropdown(opts, {
+            selected: a.kind,
+            onChange: function (v) {
+                a.kind = v;
+                render();
+            }
+        }), { wide: true }));
+
+        var at = placeIndex(draft.waves, a.place);
+        if (INPUTS[row.input]) INPUTS[row.input].render($card, draft, a, at);
+
+        var places = [{ label: 'At the end', value: 'end' }];
+        var count = waveTotal(draft.waves);
+        for (var n = 1; n < count; n++) places.push({ label: 'After wave ' + n, value: String(n) });
+        $card.append(h.field('Place', 'Where the new row goes', h.dropdown(places, {
+            selected: a.place,
+            onChange: function (v) {
+                a.place = v;
+                render();
+            }
+        }), { wide: true }));
+
+        var $foot = $('<div>', { 'class': 'steward-card-foot' });
+        state.$addStep = h.button('Add step', { size: 'sm', onClick: act(addStep) });
+        state.$addNote = textEl('span', 'steward-muted', '');
+        $foot.append(state.$addStep).append(' ').append(h.link('Cancel', act(cancelAdding)))
+            .append(' ').append(state.$addNote);
+        $card.append($foot);
+        updateAdding();
         return $card;
     }
 
@@ -755,8 +1149,11 @@
         var $cols = $('<div>', { 'class': 'steward-cols' });
         var $side = $('<div>', { 'class': 'steward-side steward-edit' });
         var $main = $('<div>', { 'class': 'steward-main' });
-        $side.append(templateCard(draft)).append(speedCard(draft));
+        // Once per render, before the rows that show its problems.
+        state.seqProblems = seqOf(draft);
+        $side.append(templateCard(draft)).append(speedCard(draft)).append(arrivalCard(draft));
         $main.append(wavesCard(draft));
+        if (state.adding && stepKinds().length) $main.append(addStepCard(draft));
         $cols.append($side).append($main);
         $c.append($cols);
     }

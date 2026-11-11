@@ -280,21 +280,6 @@ var SITES = [
         seen: { reason: 'NotObserved', text: /departure of 1\.1 sent but not seen/, resends: true }
     },
     {
-        name: 'Recall', mark: 'recall:1.1', step: 'Recall', next: 'JumpHome', wait: 'return of Anna (1.1)',
-        reason: 'NotObserved', text: /return of Anna \(1\.1\) sent but not seen/,
-        failure: 'DepartFailed', fail: /send 1\.1 home failed/,
-        core: function (S) { return [S.core.specialists.orders, 'sendToZone']; },
-        make: function () {
-            var w = homeWorld();
-            onIsland(w, [w.g1]);
-            w.auto.travel = false;
-            series(w, { step: w.S.RunStep.Recall, zoneId: ZONE });
-            return w;
-        },
-        sends: function (w) { return w.zoneSends.length; },
-        effect: travel
-    },
-    {
         name: 'Claim', mark: 'lastQuest', step: 'LastQuest', next: 'Close', wait: 'last quest claim',
         reason: 'NotObserved', text: /last quest claim sent but not seen/, failure: 'QuestFailed', fail: /claim last quest failed/,
         core: function (S) { return [S.core.quests, 'claim']; },
@@ -310,7 +295,7 @@ var SITES = [
         effect: function (w) { w.adventures = []; }
     },
     {
-        name: 'Close', mark: 'close', step: 'Close', next: 'Recall', wait: 'close',
+        name: 'Close', mark: 'close', step: 'Close', next: 'JumpHome', wait: 'close',
         reason: 'NotObserved', text: /close sent but the adventure is still listed/, failure: 'CloseFailed', fail: /close failed/,
         core: function (S) { return [S.core.adventures, 'close']; },
         make: function () {

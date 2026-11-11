@@ -5,9 +5,11 @@
  * S.core.pickups.targets(): on the home island the collectibles whose name
  * matches the pattern list, on an adventure zone also the quest objects an
  * open quest still waits to have clicked. Every other zone is left alone.
- * On the island of a scenario run only the quest objects of running quests
- * are clicked and no collectibles, because the scenario's quests count each
- * pick-up and one taken early is lost to them.
+ * On the island of a scenario run only what a running quest names is clicked:
+ * its click-trigger objects and the host collectibles its end conditions
+ * count, as S.core.pickups.targets() lists them. Pattern collectibles are not
+ * clicked, because the scenario's quests count each pick-up and one taken
+ * early is lost to them.
  *
  * Each click runs as S.core.pickups.click(target) through
  * S.core.actions.attempt, so it counts only once the object is seen gone
@@ -140,8 +142,10 @@
         var s = readSettings();
         var patterns = S.core.pickups.patterns(s.namePatterns || []);
         var adventure = !!(ctx && ctx.zone && ctx.zone.isAdventure);
-        // A scenario's quests count every pick-up, so there only objects a
-        // running quest asks for are clicked, and no collectibles.
+        // A scenario's quests count every pick-up, so there only what a
+        // running quest names is clicked: its click-trigger objects and the
+        // host collectibles its end conditions count. Pattern collectibles
+        // are not clicked.
         var scenario = adventure && scenarioIsland();
         S.core.buildings.invalidate();
         var list = S.core.pickups.targets(scenario

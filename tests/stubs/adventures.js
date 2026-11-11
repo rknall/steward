@@ -20,6 +20,12 @@
  * the viewed zone (null: the map cannot be read); the world's pickups.click
  * removes the object that was clicked.
  *
+ * Set w.awaited to a list of { name, zoneId } to name pick-ups a running quest
+ * still counts that are not on the map yet; the world's pickups.targets lists
+ * them (as collectibles) when asked with opts.awaited. Set w.held to a list of
+ * { name, quest, mode, zoneId } for pick-ups whose quest is not running yet;
+ * they are listed when asked with opts.held.
+ *
  * Set w.campsUnreadable = true to make the building list of the viewed zone
  * read as unreadable (core.buildings.readable() false), so no camp counts as
  * gone.
@@ -40,6 +46,15 @@
  *     open until every grid of grids has a need of 0, then the quest is met
  *     and finished (stayOpen: met but not finished). An unread quest is in
  *     mode 2 (not started), others in mode 3;
+ *   - a quest { key, name, building, items, grids } names no item: it has no
+ *     end condition and one type-1 trigger (condition 12, triggerIdx 0) on the
+ *     building name, the way a quest asks for items by the building they go
+ *     to. It is met once every item of items has a need of 0 on every grid;
+ *   - w.gridBuildings[grid] (o.gridBuildings) names the building standing at
+ *     grid: core.buildings.byGrid returns an object whose name reads it (a
+ *     camp grid may carry a name too). Delete the entry and the grid is empty;
+ *   - w.sendCap[buff] (o.sendCap, default none) caps what one send of that
+ *     item takes, the way the game may take less than offered per send;
  *   - w.produceableUnreadable = true makes the definition list unreadable.
  *
  * Nothing here edits the shared stubs; host fakes are installed on the booted
@@ -91,8 +106,11 @@ function writeJson(fs, path, data) { fs.disk[path] = JSON.stringify(data); }
 function patchCore(w) {
     var S = w.S;
     S.core.buildings.byGrid = function (grid) {
-        if (!w.camps[grid]) return null;
-        return { grid: grid, GetStreetGridEntry: function () { return grid + 1000; } };
+        var named = Object.prototype.hasOwnProperty.call(w.gridBuildings, grid);
+        if (!w.camps[grid] && !named) return null;
+        var b = { grid: grid, GetStreetGridEntry: function () { return grid + 1000; } };
+        if (named) b.GetBuildingName_string = function () { return w.gridBuildings[grid]; };
+        return b;
     };
     S.core.buildings.isEnemy = function (b) { return !!b && w.camps[b.grid] === true; };
     S.core.buildings.readable = function () { return w.campsUnreadable !== true; };
@@ -108,13 +126,24 @@ function patchCore(w) {
     };
 
     // Map objects of the viewed zone: w.pickups is null (unreadable) or a
-    // list of { grid, name, kind, zoneId }. Like the real read, an ask with no
-    // patterns lists quest objects only.
+    // list of { grid, name, kind, zoneId, named }. Like the real read, an ask with no
+    // patterns lists quest objects and the collectibles a quest names
     S.core.pickups.targets = function (opts) {
         if (w.pickups === null) return null;
         var withPatterns = !!(opts && opts.patterns && opts.patterns.length);
-        return w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest'; })
+        var list = w.pickups.filter(function (p) { return withPatterns || p.kind === 'quest' || p.named === true; })
             .map(function (p) { return { grid: p.grid, name: p.name, kind: p.kind, zoneId: p.zoneId }; });
+        if (opts && Array.isArray(opts.awaited) && Array.isArray(w.awaited)) {
+            w.awaited.forEach(function (a) {
+                opts.awaited.push({ name: a.name, kind: 'collectible', zoneId: a.zoneId });
+            });
+        }
+        if (opts && Array.isArray(opts.held) && Array.isArray(w.held)) {
+            w.held.forEach(function (h) {
+                opts.held.push({ name: h.name, kind: 'collectible', zoneId: h.zoneId, quest: h.quest, mode: h.mode });
+            });
+        }
+        return list;
     };
     S.core.pickups.click = function (target) {
         var done = false;
@@ -221,7 +250,8 @@ function homeStock(o, popName) {
 //   - a star keeps the general listed at grid 0 and moves its army into the
 //     free pool;
 //   - o.mapOpen lists the adventure from the start; a map buff (o.maps in
-//     stock) opens it; the manager's removeAdventure closes it;
+//     stock) opens it; the manager's removeAdventure closes it and returns the
+//     island's generals home;
 //   - production queues 0 and 8 fill from order messages; w.produce() moves
 //     them into the home free pool;
 //   - free population is w.pop (o.pop, default 100); a population buff
@@ -289,6 +319,8 @@ function world(o) {
             map: true, visit: true, travel: true, close: true, walk: false, starKeep: false, taken: false },
         blocked: {},
         pickups: [],
+        awaited: [],
+        held: [],
         orders: [], raises: [], unloads: [], buffs: [], claims: [], reads: [],
         zoneSends: [], buffActions: [], productionOrders: [], closes: [],
         pending: [], entries: [], ghosts: [],
@@ -298,6 +330,8 @@ function world(o) {
         frees: {},
         items: o.items || {},
         gridNeed: o.gridNeed || {},
+        gridBuildings: o.gridBuildings || {},
+        sendCap: o.sendCap || {},
         itemSends: []
     };
     w.lists[home ? HOME : ZONE] = fighters;
@@ -441,17 +475,22 @@ function world(o) {
     }
 
     // An item applied to a grid: the game takes at most what the grid still
-    // needs, and a quest whose grids are all met finishes.
+    // needs (and at most w.sendCap of the item per send), and a quest whose
+    // items are met on all its grids finishes.
     function itemAction(e, grid, amount) {
         var k = needKey(e.type, grid);
         var left = k === null ? amount : Math.max(0, w.gridNeed[k]);
         var took = Math.min(amount, left, e.amount);
+        if (typeof w.sendCap[e.type] === 'number') took = Math.min(took, w.sendCap[e.type]);
         e.amount -= took;
         if (k !== null) w.gridNeed[k] -= took;
         w.itemSends.push({ buff: e.type, grid: grid, amount: amount, took: took, t: w.t });
         (w.quests || []).forEach(function (q) {
-            if (q.item !== e.type || !q.grids || q.met) return;
-            if (!q.grids.every(function (g) { return gridMet(q.item, g); })) return;
+            var wanted = q.items || (q.item ? [q.item] : []);
+            if (wanted.indexOf(e.type) < 0 || !q.grids || q.met) return;
+            if (!wanted.every(function (b) {
+                return q.grids.every(function (g) { return gridMet(b, g); });
+            })) return;
             q.met = true;
             if (!q.stayOpen) q.finished = true;
         });
@@ -557,6 +596,10 @@ function world(o) {
                     w.closes.push({ zoneId: zoneId, t: w.t });
                     if (!w.auto.close) return;
                     w.adventures = w.adventures.filter(function (a) { return a.zoneID !== zoneId; });
+                    // Closing the map returns every general still on it.
+                    if (w.lists && w.lists[zoneId]) {
+                        w.lists[zoneId].slice().forEach(function (spec) { moveTo(w, spec, HOME); });
+                    }
                 }
             };
         }
@@ -576,6 +619,17 @@ function world(o) {
     patchCore(w);
 
     return w;
+}
+
+// Moves a general to another zone's list and puts him on the travel task, the
+// way both a send and a closing map do.
+function moveTo(w, spec, zoneId) {
+    var from = w.lists[w.zoneOf(spec)];
+    if (from) from.splice(from.indexOf(spec), 1);
+    if (!w.lists[zoneId]) w.lists[zoneId] = [];
+    w.lists[zoneId].push(spec);
+    spec.state.task = { type: w.code.travel, remaining: w.travelMs };
+    spec.state.travelling = true;
 }
 
 // The second zone, travel, map, population and production of the home world.
@@ -658,12 +712,7 @@ function installHome(w, o, gi, units) {
                         var key = keyOf(spec);
                         w.zoneSends.push({ key: key, zoneId: zoneId, t: w.t });
                         if (!w.auto.travel) return;
-                        var from = w.lists[w.zoneOf(spec)];
-                        if (from) from.splice(from.indexOf(spec), 1);
-                        if (!w.lists[zoneId]) w.lists[zoneId] = [];
-                        w.lists[zoneId].push(spec);
-                        spec.state.task = { type: w.code.travel, remaining: w.travelMs };
-                        spec.state.travelling = true;
+                        moveTo(w, spec, zoneId);
                     }
                 }
             };
@@ -748,6 +797,7 @@ function installItems(w) {
 
     function hostQuest(q) {
         var ends = q.item ? [{ action_string: 'buffappliedonadventure', item_string: q.item, triggerIdx: 0 }] : [];
+        var triggers = q.building ? [{ type: 1, condition: 12, name_string: q.building, amount: 1, triggerIdx: 0 }] : [];
         return {
             isFinished: function () { return !!q.finished; },
             getQuestName_string: function () { return q.name || ''; },
@@ -755,7 +805,7 @@ function installItems(w) {
             IsActive: function () { return true; },
             IsQuestActive: function () { return true; },
             GetUniqueId: function () { return { toKeyString: function () { return q.key; } }; },
-            GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: [] }; },
+            GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: triggers }; },
             mQuestTriggersFinished_vector: [{ status: q.met ? 1 : 0 }]
         };
     }

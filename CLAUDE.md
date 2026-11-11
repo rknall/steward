@@ -50,6 +50,11 @@ Every change to source, build or docs goes through the **so-pipeline** skill
 (`.claude/skills/so-pipeline/`) automatically: it dispatches the `so-*` agents
 and keeps a ledger under the git-excluded `analysis/`. Answer read-only questions
 and git housekeeping directly, without the pipeline.
+Human-facing mockups and explainers are review sets built from
+`.claude/skills/so-pipeline/review-shell/` (see its README). A considerable UI/UX
+change needs a mockup set approved by the user before any UI is implemented. The
+orchestrator shows sets locally in the user's Chrome and verdicts come back via
+Copy feedback pasted into the chat (a published private link is optional).
 
 Agents never `git add`, commit or push; the user commits. Commit messages are
 short, topic-prefixed (`mining: ...`) and end with `Assisted-by: Claude`.

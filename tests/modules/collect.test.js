@@ -228,6 +228,50 @@ t.test('a scenario island clicks no collectible and no object of a quest that is
     t.assert.strictEqual(queuedAttempts(w).length, 0);
 });
 
+// A quest whose end conditions count the named objects as destroyed.
+function destroyQuest(names, mode) {
+    var q = quest([]);
+    q.GetQuestDefinition = function () {
+        return {
+            questTriggers_vector: [],
+            endConditions_vector: names.map(function (n, i) {
+                return { action_string: 'buildingdestroyed', item_string: n, triggerIdx: i };
+            })
+        };
+    };
+    q.mQuestMode = mode;
+    return q;
+}
+
+// A flagged egg and a flagged bucket that a buildingdestroyed condition names.
+function bucketIsland(mode) {
+    var w = boot({
+        adventure: true,
+        quests: [destroyQuest(['BuildingBucket'], mode)],
+        objects: [egg(1), { name: 'BuildingBucket', grid: 8, selectable: false, attackable: false, playerId: ZONE }],
+        collectibles: ['BuildingStripedEggs', 'BuildingBucket']
+    });
+    settings(w, { adventureZones: true });
+    return w;
+}
+
+t.test('a scenario island clicks a collectible a running quest counts and still no pattern collectible', function () {
+    var w = bucketIsland(3);
+    scenarioRun(w);
+    w.mod.plan(ADVENTURE);
+    t.assert.strictEqual(queuedAttempts(w).length, 1);
+    AC.drive(w.H, { onStep: function () { remove(w, w.made[1]); } });
+    t.assert.strictEqual(w.selected.length, 1);
+    t.assert.strictEqual(w.selected[0], w.made[1]);
+});
+
+t.test('a scenario island does not click a named collectible of an unread quest', function () {
+    var w = bucketIsland(2);
+    scenarioRun(w);
+    w.mod.plan(ADVENTURE);
+    t.assert.strictEqual(queuedAttempts(w).length, 0);
+});
+
 t.test('a scenario island clicks a quest object once its quest is running (mode 3)', function () {
     var w = scenarioIsland();
     scenarioRun(w, { status: w.S.RunStatus.Paused });

@@ -29,6 +29,10 @@
  * them again. Measuring never throws: an
  * element that cannot be measured keeps its stylesheet height.
  *
+ * A tab draw is one read pass (S.kernel.hostRead.pass): the parts of one draw
+ * (strip, side, main, tiles) share core reads and a module's memoized status.
+ * Handlers attached during the draw run later, outside the pass.
+ *
  * Chrome (header text, tab marks) is updated in place by chrome(), never
  * rebuilt: a Save click first blurs an input whose change refreshes the
  * chrome, and an element replaced at that moment would swallow the click.
@@ -297,8 +301,13 @@
     function drawTab() {
         var tabId = state().tab;
         dom.$panel.empty();
-        if (tabId === 'overview') renderOverview(dom.$panel);
-        else renderModuleTab(dom.$panel, tabId);
+        // One pass per draw: the strip, side, main column and tiles of a tab
+        // share core reads, so a status never differs between two parts.
+        // Handlers attached here run later, outside the pass.
+        S.kernel.hostRead.pass(function () {
+            if (tabId === 'overview') renderOverview(dom.$panel);
+            else renderModuleTab(dom.$panel, tabId);
+        });
         fit();
     }
 

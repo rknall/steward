@@ -629,6 +629,21 @@
         }
     }
 
+    // Run fn once, ms from now, to redraw a holder whose content was not ready
+    // (a portrait the host had not decoded yet). The data flag makes it one
+    // redraw per holder, and a detached holder (the tab was switched, which
+    // empties the panel) is not redrawn. True when a redraw was scheduled.
+    function redrawOnce($holder, fn, ms) {
+        if (!$holder || !$holder.length) return false;
+        if ($holder.data('stewardRedrawOnce')) return false;
+        $holder.data('stewardRedrawOnce', true);
+        setTimeout(guarded('redrawOnce', function () {
+            if ($holder.parent().length === 0) return;
+            fn();
+        }), ms);
+        return true;
+    }
+
     // ---------------------------------------------------------------
 
     if (!S.kernel.ui) S.kernel.ui = {};
@@ -657,6 +672,7 @@
         clock:     clock,
         statusBadge: statusBadge,
         fit:       fit,
+        redrawOnce: redrawOnce,
         set:       set,
         get:       get,
         settings:  settings,

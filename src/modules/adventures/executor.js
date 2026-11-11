@@ -41,9 +41,17 @@
  * After the last wave is confirmed the run hands over to the end of the
  * map (RunStep.PackStar); the series steps run elsewhere.
  *
+ * Template steps (Unload, Send home, Pause, Pause x min) are entries of the
+ * run's wave list between the battle files. They are no waves: plan() hands
+ * such an entry to the shared step driver (loader.runStep) with the contract
+ * of its kind from the steps registry, and the kind's next hook moves on
+ * through advance(), the same tail a confirmed wave takes. The start check
+ * counts only the battle files as waves and has the registry check the step
+ * rows in their place in the list.
+ *
  * Bundle slot: module file; top level assigns S.modules.adventures.executor
- * and registers the pacer queue action; state, loader, watcher and every
- * core are read at call time.
+ * and registers the pacer queue action; state, loader, steps, templates,
+ * watcher and every core are read at call time.
  */
 
 (function (S) {
@@ -75,6 +83,12 @@
     // loader.js loads after this file in name order.
     function ld() {
         return S.modules.adventures.loader;
+    }
+
+    // steps.js loads after this file in name order. Null when the registry
+    // is missing; every entry is then read as a battle file, as before.
+    function sp() {
+        return S.modules.adventures.steps || null;
     }
 
     function stepName(step) {
@@ -783,15 +797,23 @@
             }
         }
         S.kernel.log(CATEGORY, st().waveLabel() + ' confirmed');
+        advance(r, 'next wave', 'last wave confirmed');
+    }
+
+    // Moves the run past its current entry, a confirmed wave or a finished
+    // template step: the next entry starts at Gate with a clean wave record,
+    // and after the last entry the run hands over to the end of the map.
+    // nextWhy and lastWhy are the logged reasons of the two cases.
+    function advance(r, nextWhy, lastWhy) {
         r.waveIndex++;
         r.lines = {};
         r.cycles = 0;
         r.donors = [];
         if (r.waveIndex >= r.paths.length) {
-            st().go(S.RunStep.PackStar, 'last wave confirmed');
+            st().go(S.RunStep.PackStar, lastWhy);
             return;
         }
-        st().go(S.WaveStep.Gate, 'next wave');
+        st().go(S.WaveStep.Gate, nextWhy);
     }
 
     // Built at call time: state.js fills S.WaveStep and loads after this
@@ -827,6 +849,24 @@
         }
         var step = r.step;
         try {
+            // A template step entry has no battle file, so it branches off
+            // before the file is read. It runs on the step driver on whatever
+            // wave step the run stands (Gate after advance or after Resume).
+            var steps = sp();
+            var item = steps ? steps.itemAt(r) : null;
+            if (item) {
+                var def = steps.defOf(item);
+                if (!def) {
+                    st().pause(S.RunPause.WaveFile, 'unknown template step at row ' + (r.waveIndex + 1));
+                    return;
+                }
+                // Only kinds that act on generals read the list, and only
+                // they must hold while it lost entries.
+                var stepInv = def.inventory ? S.core.army.inventory() : null;
+                if (stepInv && ld().listHold(r, stepInv)) return;
+                ld().runStep(r, step, def, item, stepInv);
+                return;
+            }
             var file = linesFor(r);
             if (!file.ok) {
                 st().pause(S.RunPause.WaveFile, file.message);
@@ -973,10 +1013,19 @@
         }
     }
 
+    // File name of a battle file path, for the start check messages.
+    function fileNameOf(path) {
+        var t = S.modules.adventures.templates;
+        return t && t.fileName ? t.fileName(path) : String(path);
+    }
+
     // Reads the template's loadout and waves fresh and checks them against
     // the island as it is now. Returns { ok, problems (fatal), warnings,
-    // loadoutKeys, listOk }; loadoutKeys is null when the loadout cannot be
-    // read. listOk false means the specialist list lost entries or could not
+    // loadoutKeys, loadoutNames, listOk }; loadoutKeys and loadoutNames
+    // ({ key: name } of the loadout generals, for display) are null when the
+    // loadout cannot be read. Template step entries are no files: the steps
+    // registry checks them in their place in the list, against the loadout
+    // and the generals each later wave names. listOk false means the specialist list lost entries or could not
     // be read, so the general problems of this check are not facts.
     // opts (optional): camps === false leaves out the camp checks (the map
     // is not viewed); fighters === false also skips the general checks (the
@@ -985,7 +1034,7 @@
         var o = opts || {};
         var fighters = o.fighters !== false;
         var camps = fighters && o.camps !== false;
-        var out = { ok: false, problems: [], warnings: [], loadoutKeys: null, listOk: true };
+        var out = { ok: false, problems: [], warnings: [], loadoutKeys: null, loadoutNames: null, listOk: true };
         var inv = S.core.army.inventory();
         // A list that cannot be read at all sets listOk false. The fighter read
         // can also work while the final sweep fails, which leaves only listRead
@@ -1001,23 +1050,46 @@
             out.loadoutKeys = S.core.battles.loadoutKeys(lo.lines);
         }
 
+        var steps = sp();
+        if (lo.ok && steps) out.loadoutNames = steps.namesOf(lo.lines);
         var waves = rec.waves || [];
-        if (!waves.length) {
+        var count = steps ? steps.waveCount(waves) : waves.length;
+        if (!count) {
             out.problems.push({ code: S.BattleProblem.Empty, fatal: true, key: null, file: 'template',
                 message: 'template: no wave files' });
         }
+        // General keys of each battle file by entry index, so a Send home
+        // row can be checked against the waves after it.
+        var keysAt = {};
         for (var w = 0; w < waves.length; w++) {
-            var label = 'wave ' + (w + 1);
+            if (typeof waves[w] !== 'string') {
+                if (!steps) {
+                    out.problems.push({ code: S.BattleProblem.BadLine, fatal: true, key: null, file: 'template',
+                        message: 'template: row ' + (w + 1) + ' is a template step this build cannot run' });
+                }
+                continue;
+            }
+            var label = steps ? steps.rowLabel(waves, w) : 'wave ' + (w + 1);
             var file = S.core.battles.load(waves[w]);
             sortProblems(out, label, file.problems);
             if (!file.ok) continue;
+            keysAt[w] = S.core.battles.loadoutKeys(file.lines);
             if (fighters) sortProblems(out, label, S.core.battles.validate(file.lines, ctx));
             if (out.loadoutKeys) sortProblems(out, label, S.core.battles.notInLoadout(file.lines, out.loadoutKeys));
+        }
+        if (steps) {
+            var seq = steps.checkSequence(waves, {
+                loadoutKeys: out.loadoutKeys,
+                names:       out.loadoutNames || {},
+                waveKeys:    function (i) { return has(keysAt, i) ? keysAt[i] : null; },
+                fileName:    fileNameOf
+            });
+            for (var q = 0; q < seq.length; q++) sortProblems(out, steps.rowLabel(waves, seq[q].index), [seq[q]]);
         }
 
         out.ok = out.problems.length === 0 && out.loadoutKeys !== null;
         var mode = !fighters ? 'files only' : (camps ? 'generals and camps' : 'generals, no camps');
-        S.kernel.log(CATEGORY, 'start check "' + rec.label + '" (' + mode + '): ' + (waves.length + 1) +
+        S.kernel.log(CATEGORY, 'start check "' + rec.label + '" (' + mode + '): ' + (count + 1) +
             ' files, ' + out.problems.length + ' fatal, ' + out.warnings.length + ' warnings');
         return out;
     }
@@ -1030,6 +1102,7 @@
         PACE_MS:           PACE_MS,
         check:             check,
         plan:              plan,
+        advance:           advance,
         pace:              pace,
         linesFor:          linesFor,
         attackCount:       attackCount

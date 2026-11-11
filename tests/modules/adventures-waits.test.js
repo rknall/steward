@@ -147,10 +147,6 @@ function sends(w) {
         w.zoneSends.length + w.buffActions.length + w.productionOrders.length + w.closes.length;
 }
 
-function sentTo(w) {
-    return w.zoneSends.map(function (s) { return s.key; }).sort();
-}
-
 function busy(w) { return w.st.current().busy; }
 
 // ---- 1. Named waits stay Running, log once a minute, end by themselves --------
@@ -205,22 +201,6 @@ var ROWS = [
         end: function (w) { w.quests = [{ key: 'q9', name: 'Final', finished: true, last: true }]; }, next: 'LastQuest'
     },
     {
-        name: 'Recall: a general busy on the adventure', step: 'Recall', text: /Bert \(1\.2\) busy on the adventure/,
-        setup: function (w) { onIsland(w); w.g2.state.task = { type: w.code.attack }; },
-        end: function (w) { w.g2.state.task = null; }, sent: ['1.1', '1.2']
-    },
-    {
-        name: 'Recall: the specialist list is not readable', step: 'Recall', text: /specialist list not readable/,
-        setup: function (w) {
-            onIsland(w);
-            w.gi.mCurrentPlayerZone.GetSpecialists_vector = function () { return null; };
-        },
-        end: function (w) {
-            w.gi.mCurrentPlayerZone.GetSpecialists_vector = function () { return w.lists[w.gi.mCurrentViewedZoneID] || []; };
-        },
-        sent: ['1.1', '1.2']
-    },
-    {
         name: 'Muster: a general not here yet', step: 'Muster', text: /Bert \(1\.2\) not here yet|1\.2 not here yet/,
         setup: function (w) { w.lists[HOME].splice(w.lists[HOME].indexOf(w.g2), 1); w.place(w.g2, ZONE); },
         end: function (w) { w.lists[ZONE].splice(w.lists[ZONE].indexOf(w.g2), 1); w.place(w.g2, HOME); }, next: 'Validate'
@@ -245,13 +225,8 @@ ROWS.forEach(function (row) {
         assert.ok(lines.length >= 25 && lines.length <= 31, 'log lines ' + lines.length);
         assert.strictEqual(w.st.run().pause, null);
         row.end(w);
-        if (row.next) {
-            tick(w);
-            assertStep(w, row.next);
-        } else {
-            pass(w);
-            assert.deepStrictEqual(sentTo(w), row.sent);
-        }
+        tick(w);
+        assertStep(w, row.next);
     });
 
     t.test('wait: ' + row.name + ' lets Pause, End repetition, Resume and Stop work', function () {
@@ -369,78 +344,7 @@ t.test('read: a read that is bad from the start waits with no pause, its first l
     assertStep(w, 'Clear');
 });
 
-// ---- 3. Recall --------------------------------------------------------------
-
-function recallWorld() {
-    var w = homeWorld({ mapOpen: true });
-    onIsland(w);
-    series(w, 'Recall');
-    return w;
-}
-
-t.test('Recall: a null list holds and nobody is left behind', function () {
-    var w = recallWorld();
-    var list = w.gi.mCurrentPlayerZone.GetSpecialists_vector;
-    w.gi.mCurrentPlayerZone.GetSpecialists_vector = function () { return null; };
-    span(w, 10 * MIN);
-    assertStep(w, 'Recall');
-    assert.strictEqual(w.zoneSends.length, 0);
-    w.gi.mCurrentPlayerZone.GetSpecialists_vector = list;
-    pass(w);
-    assert.deepStrictEqual(sentTo(w), ['1.1', '1.2']);
-});
-
-t.test('Recall: the zone moved goes to JumpHome with nothing sent', function () {
-    var w = recallWorld();
-    w.gi.visitZone(HOME);
-    pass(w);
-    assertStep(w, 'JumpHome');
-    assert.strictEqual(w.zoneSends.length, 0);
-});
-
-t.test('Recall: an undefined zone id holds, then the clean read sends both', function () {
-    var w = recallWorld();
-    var id = w.S.core.zone.id;
-    w.S.core.zone.id = function () { return undefined; };
-    try {
-        span(w, 5 * MIN);
-        assertStep(w, 'Recall');
-        assert.ok(/zone id not readable/.test(busy(w).text), busy(w).text);
-        assert.strictEqual(w.zoneSends.length, 0);
-    } finally {
-        w.S.core.zone.id = id;
-    }
-    pass(w);
-    assert.deepStrictEqual(sentTo(w), ['1.1', '1.2']);
-});
-
-t.test('Recall: a general absent with no mark waits the grace, then counts as gone with no pause', function () {
-    var w = recallWorld();
-    var grace = ld(w).MISSING_GRACE_MS;
-    w.lists[ZONE].splice(w.lists[ZONE].indexOf(w.g2), 1);
-    span(w, grace - 2 * TICK_MS);
-    assertStep(w, 'Recall');
-    assert.ok(/1\.2 not listed/.test(busy(w).text), busy(w).text);
-    span(w, 4 * TICK_MS);
-    assertStep(w, 'JumpHome');
-    assert.deepStrictEqual(sentTo(w), ['1.1']);
-    assert.strictEqual(w.st.run().pause, null);
-});
-
-t.test('Recall: a general absent with a mark is gone at once', function () {
-    var w = recallWorld();
-    var r = w.st.run();
-    r.marks['recall:1.2'] = { sentAt: w.t - 1000, seen: false, sentOnce: true };
-    w.lists[ZONE].splice(w.lists[ZONE].indexOf(w.g2), 1);
-    pass(w);
-    assert.deepStrictEqual(sentTo(w), ['1.1']);
-    w.t += TICK_MS;
-    pass(w);
-    assertStep(w, 'JumpHome');
-    assert.ok(w.t - r.since < ld(w).MISSING_GRACE_MS);
-});
-
-// ---- 4. Jump ----------------------------------------------------------------
+// ---- 3. Jump ----------------------------------------------------------------
 
 function jumpWorld(open) {
     var w = homeWorld({ mapOpen: open !== false });
@@ -507,7 +411,7 @@ t.test('Jump: an adventure that is listed never pauses, however long the zone ta
     assert.strictEqual(w.st.run().pause, null);
 });
 
-// ---- 5. Clear ----------------------------------------------------------------
+// ---- 4. Clear ----------------------------------------------------------------
 
 function quietWorld(quests) {
     var w = homeWorld({ mapOpen: true });
@@ -591,7 +495,7 @@ t.test('Clear: a quest finished with a general busy waits with no limit', functi
     assertStep(w, 'LastQuest');
 });
 
-// ---- 6. PackStar --------------------------------------------------------------
+// ---- 5. PackStar --------------------------------------------------------------
 
 // A carrier (1.5) on its grid and two generals at the star, with one landing
 // field for the two of them.
@@ -662,7 +566,7 @@ t.test('PackStar: no false rounds pause while the holder waits for a field', fun
     assert.strictEqual(w.raises.length >= 3, true, 'raises ' + w.raises.length);
 });
 
-// ---- 7. Settle with quest objects -----------------------------------------------
+// ---- 6. Settle with quest objects -----------------------------------------------
 
 // A wave line with no path to its camp: Reach hands over to Settle, which
 // pauses only once nothing on the island could still clear the blocker.

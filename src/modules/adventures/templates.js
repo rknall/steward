@@ -13,9 +13,19 @@
  * ignored. Any file in the folder whose base name matches ID_RE and ends in
  * EXT is a template, so a file shared by someone else can simply be dropped
  * in. File format: JSON.stringify of
- *   { version, label, adventure, loadout, waves, speedBuff, saved }
+ *   { version, label, adventure, loadout, waves, speedBuff, starAll, saved }
  * indented, so it stays readable and shareable. An older file may carry a
  * `retrain` key; it is ignored, because retraining is a module setting.
+ *
+ * `waves` lists, in run order, battle-file paths (strings) mixed with step
+ * entries (plain objects such as { step: 'unload', generals: [...] }) that
+ * run between waves. The step kinds, their parsing and their problems come
+ * from the step registry (S.modules.adventures.steps); an entry of an unknown
+ * kind is dropped on load, as a build without steps drops every object.
+ * Waves keep their numbers counting battle files only. `starAll` switches
+ * the send-all-to-the-star step on arrival; a file without it reads as on,
+ * so templates written before the switch keep their behaviour. The format
+ * stays version 1 because both additions are additive.
  *
  * A file that cannot be read or parsed is listed as a broken entry
  * { id, path, error } instead of being skipped, so the user sees it and can
@@ -118,12 +128,52 @@
 
     // ---- Records --------------------------------------------------------------
 
+    // The step registry, read at call time because it may load after this
+    // file; null when the build has none.
+    function stepsApi() {
+        return S.modules.adventures.steps || null;
+    }
+
+    // A step entry's canonical item, or null to drop it: unknown kinds, and
+    // every object when there is no step registry.
+    function normEntry(raw) {
+        var st = stepsApi();
+        return st && st.normItem ? st.normItem(raw) : null;
+    }
+
+    // The short name of a step entry, the same text the run menu shows. Without
+    // a step registry the raw kind is the only name there is.
+    function stepLabel(item) {
+        var st = stepsApi();
+        return st && st.titleOf ? st.titleOf(item) : String(item.step);
+    }
+
+    // The wave number of battle-file entry i. Without a step registry no
+    // object survives normalize, so every entry is a wave and i + 1 is right.
+    function waveNumberAt(list, i) {
+        var st = stepsApi();
+        return st && st.waveNumber ? st.waveNumber(list, i) : i + 1;
+    }
+
+    // How many entries are battle files. Without a step registry no object
+    // survives normalize, so every entry is a file and the list length is right.
+    function waveCountOf(list) {
+        var st = stepsApi();
+        return st && st.waveCount ? st.waveCount(list) : list.length;
+    }
+
     function normalize(rec) {
         rec = rec || {};
         var waves = [];
         if (isArray(rec.waves)) {
             for (var i = 0; i < rec.waves.length; i++) {
-                if (typeof rec.waves[i] === 'string') waves.push(rec.waves[i]);
+                var w = rec.waves[i];
+                if (typeof w === 'string') {
+                    waves.push(w);
+                } else {
+                    var item = normEntry(w);
+                    if (item) waves.push(item);
+                }
             }
         }
         return {
@@ -133,6 +183,7 @@
             loadout:   str(rec.loadout),
             waves:     waves,
             speedBuff: speedBuffChoice(rec),
+            starAll:   rec.starAll !== false,
             saved:     typeof rec.saved === 'number' ? rec.saved : null
         };
     }
@@ -156,6 +207,7 @@
             loadout:   data.loadout,
             waves:     data.waves,
             speedBuff: data.speedBuff,
+            starAll:   data.starAll,
             saved:     data.saved
         });
         rec.id = id;
@@ -171,6 +223,7 @@
             loadout:   rec.loadout,
             waves:     rec.waves,
             speedBuff: rec.speedBuff,
+            starAll:   rec.starAll,
             saved:     rec.saved
         }, null, 2);
     }
@@ -253,22 +306,44 @@
         if (!rec.label) out.push({ field: 'label', message: 'Label is empty' });
         if (!rec.adventure) out.push({ field: 'adventure', message: 'No adventure chosen' });
         if (!rec.loadout) out.push({ field: 'loadout', message: 'No loadout file chosen' });
-        if (!isArray(rec.waves) || rec.waves.length === 0) {
+        var list = isArray(rec.waves) ? rec.waves : [];
+        // Steps alone make no run: they only act between waves.
+        if (waveCountOf(list) === 0) {
             out.push({ field: 'waves', message: 'No wave files' });
         } else {
             // Duplicates are valid: the same wave file may run more than once.
-            for (var i = 0; i < rec.waves.length; i++) {
-                if (typeof rec.waves[i] !== 'string' || rec.waves[i] === '') {
-                    out.push({ field: 'waves', message: 'Wave ' + (i + 1) + ' has no file' });
+            for (var i = 0; i < list.length; i++) {
+                if (list[i] === '') {
+                    out.push({ field: 'waves', message: 'Wave ' + waveNumberAt(list, i) + ' has no file' });
                 }
             }
         }
+        stepProblems(list, out);
         var sb = rec.speedBuff;
         if (sb !== S.SpeedBuffChoice.Default && sb !== S.SpeedBuffChoice.None &&
             !S.core.buffs.isSpeedBuff(sb)) {
             out.push({ field: 'speedBuff', message: 'Unknown horseshoe ' + sb });
         }
         return out;
+    }
+
+    // Problems of the step entries, one per message, under field 'steps' with
+    // the 1-based row of the mixed list so the editor can point at the row.
+    function stepProblems(list, out) {
+        var st = stepsApi();
+        for (var i = 0; i < list.length; i++) {
+            var v = list[i];
+            if (typeof v === 'string') continue;
+            var row = 'Row ' + (i + 1);
+            if (!st || !st.isItem || !st.isItem(v)) {
+                out.push({ field: 'steps', index: i, message: row + ': unknown step' });
+                continue;
+            }
+            var ps = st.itemProblems ? st.itemProblems(v) : [];
+            for (var k = 0; ps && k < ps.length; k++) {
+                out.push({ field: 'steps', index: i, message: row + ' (' + stepLabel(v) + '): ' + ps[k] });
+            }
+        }
     }
 
     // Pure. 't' + timestamp, suffixed -2, -3, ... while taken.
@@ -392,10 +467,14 @@
         return null;
     }
 
+    // An amount that is not a number means the star menu could not be read.
+    // It shows as (?) and is not warned about: "none in stock" would be a
+    // claim the host never made.
     function buffOption(b) {
-        var amount = typeof b.amount === 'number' ? b.amount : 0;
-        var label = (b.label || b.name) + ' (' + amount + ')' + (b.effect ? ': ' + b.effect : '');
-        var warn = amount === 0;
+        var known = typeof b.amount === 'number';
+        var amount = known ? b.amount : null;
+        var label = (b.label || b.name) + ' (' + (known ? amount : '?') + ')' + (b.effect ? ': ' + b.effect : '');
+        var warn = known && amount === 0;
         if (warn) label += ' — none in stock';
         return { value: b.name, label: label, amount: amount, warn: warn };
     }

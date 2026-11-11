@@ -627,3 +627,54 @@ t.test('the settings column shows the queue and licence counts', function () {
     t.assert.strictEqual($side.find('.steward-stat').length, 4);
     t.assert.ok(/of 100$/.test($side.find('.steward-stat').eq(1).text()), $side.find('.steward-stat').eq(1).text());
 });
+
+// Wraps the star menu so each read is counted; `mutate` may edit the entries.
+function countMenu(H, mutate) {
+    var pl = H.host.game.gi.mCurrentPlayer;
+    var orig = pl.getAvailableBuffs_vector;
+    var c = { n: 0 };
+    pl.getAvailableBuffs_vector = function () {
+        c.n++;
+        var out = orig.call(pl);
+        if (mutate) mutate(out);
+        return out;
+    };
+    return c;
+}
+
+t.test('a mining draw in a read pass reads the star menu once', function () {
+    var H = withBuffs({ settings: withBuff({ IronOre: 'MineBuff', Granite: 'MineBuff' }) });
+    var c = countMenu(H);
+    H.Steward.kernel.hostRead.pass(function () { build(H, 'render'); });
+    t.assert.strictEqual(c.n, 1);
+});
+
+t.test('an unreadable stock shows ? in every option and the status says unreadable', function () {
+    var H = withBuffs({ settings: withBuff({ IronOre: 'MineBuff' }) });
+    // An entry whose type cannot be read makes every stock unreadable.
+    countMenu(H, function (out) {
+        out.push({ amount: 1, GetType: function () { throw new Error('boom'); } });
+    });
+    var $main;
+    H.Steward.kernel.hostRead.pass(function () { $main = build(H, 'render'); });
+    var $r = rowFor($main, 'IronOre');
+    var labels = optionLabels($r);
+    t.assert.ok(labels.length > 1);
+    for (var i = 1; i < labels.length; i++) {
+        t.assert.ok(/\(\?\)$/.test(labels[i]), labels[i]);
+    }
+    t.assert.strictEqual(statusOf($r).text(), 'stock unreadable');
+});
+
+t.test('plan runs inside a read pass', function () {
+    var H = withBuffs();
+    var hr = H.Steward.kernel.hostRead;
+    var seen = [];
+    H.Steward.modules.mining._phases = {
+        tryBuff: function () { seen.push(hr.inPass()); }
+    };
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.ok(seen.length > 0);
+    t.assert.strictEqual(seen[0], true);
+    t.assert.strictEqual(hr.inPass(), false);
+});

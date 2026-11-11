@@ -61,11 +61,6 @@
           "amount": 10
         },
         {
-          "buff": "BattleBuffHurt_BuffAd_WaterSplash",
-          "grids": [2631],
-          "amount": 10
-        },
-        {
           "buff": "BattleBuffHurt_BuffAd_Explosive",
           "grids": [2631]
         },

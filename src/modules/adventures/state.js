@@ -25,6 +25,13 @@
  * scenarioId, its normalised trips (copied at start) and the index of the
  * current trip.
  *
+ * A template's wave list may hold template step entries (unload, send home,
+ * pause, timed wait) between its battle files; the run keeps them in
+ * run.paths in run order and runs each under the wave steps. The step
+ * registry (steps.js, read at call time) normalises them on load, names them
+ * in the labels and says whether one waits long. Every pause the run raises,
+ * except the user's own, plays the pause sound (S.core.sound).
+ *
  * Storage: one file, <steward folder>/adventures/run.json, written whole
  * with S.kernel.files.writeText (temp file, then move). The file replaces
  * the previous one, so a field that is dropped from the run never lingers;
@@ -48,7 +55,10 @@
  * watched-wait clock of the zone trip, in the shape of quiet), pickupClock
  * (the clock of the wait for map objects, in the shape of quiet plus count,
  * the number of objects last seen, so a pick-up restarts it), zoneWait
- * (whether the "waiting for zone" line was logged) and deployProbe (run id
+ * (whether the "waiting for zone" line was logged), questAt (zone id and time
+ * of the last verified quest read or claim, which the trip end settles from),
+ * tripSeenAt (when the trip end last saw a quest or object left, so the map
+ * must stay clear for a settle time before it leaves) and deployProbe (run id
  * and key of the star-menu probe lines already logged). They describe callbacks and reads of this client session, which do not
  * exist after a restart.
  * resetMemory() is the one place that resets them for a new or loaded run.
@@ -109,12 +119,14 @@
     var ANY = 3;        // any zone; the step itself handles where it is
 
     // The options that switch a row off, as named in the table below. A
-    // template switches off the horseshoe and retraining. The run kind
-    // switches off the rest: a scenario run sends no generals, so it skips
-    // the OPT_GENERALS rows (and the horseshoe and retraining, which need
-    // generals), and a template run skips the OPT_SCENARIO rows.
+    // template switches off the horseshoe, retraining and sending all to the
+    // star on arrival (its starAll switch). The run kind switches off the
+    // rest: a scenario run sends no generals, so it skips the OPT_GENERALS
+    // rows (and the horseshoe, the star and retraining, which need generals),
+    // and a template run skips the OPT_SCENARIO rows.
     var OPT_HORSESHOE = 'horseshoe';
     var OPT_RETRAIN = 'retrain';
+    var OPT_STARALL = 'starAll';
     var OPT_GENERALS = 'generals';
     var OPT_SCENARIO = 'scenario';
 
@@ -153,7 +165,7 @@
         ['Arrive',     'RunArrive',     ADVENTURE, 'Travel',     'Wait for all generals',      OPT_GENERALS,  true],
         ['Apply',      'RunApply',      ADVENTURE, 'Travel',     'Apply items',                OPT_SCENARIO],
         ['Pickups',    'RunPickups',    ADVENTURE, 'Travel',     'Pick up items',              OPT_GENERALS],
-        ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       OPT_GENERALS],
+        ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       OPT_STARALL],
         ['Trip',       'RunTrip',       ADVENTURE, 'Travel',     'Quests and pick-ups',        OPT_SCENARIO],
         ['Horseshoe',  'RunHorseshoe',  ADVENTURE, 'Travel',     'Horseshoe',                  OPT_HORSESHOE],
         ['PackStar',   'RunPackStar',   ADVENTURE, 'End of map', 'Place carriers',             OPT_GENERALS],
@@ -161,7 +173,6 @@
         ['Clear',      'RunClear',      ADVENTURE, 'End of map', 'Wait for last quest',        '',            true],
         ['LastQuest',  'RunLastQuest',  ANY,       'End of map', 'Claim last quest and close', ''],
         ['Close',      'RunClose',      ANY,       'End of map', 'Claim last quest and close', ''],
-        ['Recall',     'RunRecall',     ANY,       'Back home',  'Send generals home',         OPT_GENERALS],
         ['JumpHome',   'RunJumpHome',   ANY,       'Back home',  'Return home',                ''],
         ['ArriveHome', 'RunArriveHome', HOME,      'Back home',  'Return home',                '',            true],
         ['Account',    'RunAccount',    HOME,      'Back home',  'Count lost troops',          OPT_RETRAIN],
@@ -173,6 +184,12 @@
     (function () {
         for (var i = 0; i < RUN_STEPS.length; i++) S.RunStep[RUN_STEPS[i][0]] = RUN_STEPS[i][1];
     }());
+
+    // Series step values an older run file may hold that the table no longer
+    // has, each with the S.RunStep key a loaded run takes instead. Recall sent
+    // the generals home after Close; closing the map returns them itself, so a
+    // run saved there goes on at JumpHome.
+    var RETIRED_STEPS = { RunRecall: 'JumpHome' };
 
     S.RunStatus.Running = 'RunRunning';
     S.RunStatus.Paused  = 'RunPaused';
@@ -205,6 +222,7 @@
     S.RunPause.RetrainFailed     = 'PauseRetrainFailed';
     S.RunPause.ItemShort         = 'PauseItemShort';
     S.RunPause.Stuck             = 'PauseStuck';
+    S.RunPause.Planned           = 'PausePlanned';
 
     // The phases of the zone trip, persisted in run.json as run.resolve.phase.
     var ResolvePhase = { Home: 'home', Wait: 'wait', Back: 'back' };
@@ -246,6 +264,20 @@
         return typeof v === 'number' && isFinite(v) && v >= 0 ? Math.floor(v) : 0;
     }
 
+    // The template step registry, read at call time: steps.js loads after
+    // this file, and a bundle without it still runs string-only wave lists.
+    function stepsOf() {
+        return S.modules.adventures.steps || null;
+    }
+
+    // The template step entry the run is on, or null. Only a wave step runs
+    // an entry of r.paths; a series step leaves waveIndex where it is.
+    function itemOf(r) {
+        var st = stepsOf();
+        if (!r || !isWaveStep(r.step) || !st || !st.itemAt) return null;
+        return st.itemAt(r);
+    }
+
     function isValue(enumObj, value) {
         for (var k in enumObj) {
             if (has(enumObj, k) && enumObj[k] === value) return true;
@@ -272,6 +304,12 @@
 
     function isStep(v) {
         return isWaveStep(v) || isValue(S.RunStep, v);
+    }
+
+    // The live step for a stored step value: a retired value maps to its
+    // successor, anything else is returned as it is.
+    function liveStep(v) {
+        return typeof v === 'string' && has(RETIRED_STEPS, v) ? S.RunStep[RETIRED_STEPS[v]] : v;
     }
 
     // The table index of a series step, or -1 for anything else.
@@ -305,11 +343,16 @@
     // enough to see it end. A blocker covers Settle and the wait for production
     // at home, which are no long steps by themselves, and so does a busy
     // general once his wait has outlasted BUSY_FAST_MS on any step. The busy
-    // record may be absent after a script reload.
+    // record may be absent after a script reload. A template step entry
+    // answers by its own longWait column: a minutes wait is long, the others
+    // wait for the game as briefly as any wave step.
     function waitsLong(r) {
         if (r.blocker) return true;
         var b = busyOf(r);
         if (b && clock() - b.since >= BUSY_FAST_MS) return true;
+        var st = stepsOf();
+        var d = itemOf(r) && st.defAt ? st.defAt(r) : null;
+        if (d) return d.longWait === true;
         return isLongStep(r.step);
     }
 
@@ -434,22 +477,27 @@
     }
 
     // Whether the run kind switches off a row option. A scenario run sends no
-    // generals, so the general rows, the horseshoe and retraining are off; a
-    // template run has no items to produce or apply.
+    // generals, so the general rows, the horseshoe, the star and retraining
+    // are off; a template run has no items to produce or apply.
     function kindOff(r, option) {
         if (!r) return false;
-        if (isScenario(r)) return option === OPT_GENERALS || option === OPT_HORSESHOE || option === OPT_RETRAIN;
+        if (isScenario(r)) {
+            return option === OPT_GENERALS || option === OPT_STARALL ||
+                option === OPT_HORSESHOE || option === OPT_RETRAIN;
+        }
         return option === OPT_SCENARIO;
     }
 
     // Whether this run skips the stage of an option: first the run kind, then
-    // the template's choices. Retraining follows the module setting, read now
+    // the template's choices. StarAll is off when the template's switch is
+    // off; a run without the field sends to the star. Retraining follows the module setting, read now
     // so a change shows at once; a bundle without the settings reader reads as
     // off. A run started on an open map took no snapshot once it is past that
     // step, so it retrains nothing.
     function optionOff(r, option) {
         if (kindOff(r, option)) return true;
         if (option === OPT_HORSESHOE) return r.speedBuff === S.SpeedBuffChoice.None;
+        if (option === OPT_STARALL) return r.starAll === false;
         if (option === OPT_RETRAIN) {
             var a = S.modules.adventures;
             return !(a.retrainOn && a.retrainOn()) ||
@@ -499,17 +547,43 @@
 
     // ---- Labels -----------------------------------------------------------
 
+    // Waves count the battle files of the list only, so the template step
+    // entries between them do not shift the wave numbers. Without the step
+    // registry every entry is a battle file.
     function waveLabel() {
         var r = run();
         if (!r) return '';
+        var st = stepsOf();
+        if (st && st.waveNumber && st.waveCount && isArray(r.paths)) {
+            return 'wave ' + st.waveNumber(r.paths, r.waveIndex) + '/' + st.waveCount(r.paths);
+        }
         var n = r.paths ? r.paths.length : 0;
         return 'wave ' + Math.min(r.waveIndex + 1, n) + '/' + n;
     }
 
+    // What the run is doing: on a template step entry its row label with the
+    // wave count ('Pause after wave 4/7'), else the step name. The entry runs
+    // under the wave Gate, which would otherwise show as "WaveGate".
+    function stepText(r) {
+        var st = stepsOf();
+        if (itemOf(r) && st.rowLabel && st.waveCount) {
+            return st.rowLabel(r.paths, r.waveIndex) + '/' + st.waveCount(r.paths);
+        }
+        return r ? stepName(r.step) : '';
+    }
+
     // Where the run is, for log, pause and notify texts: the wave during the
-    // waves, else the series step.
+    // waves (or the template step entry being run), else the series step.
     function labelOf(step) {
-        return isWaveStep(step) ? waveLabel() : stepName(step);
+        if (!isWaveStep(step)) return stepName(step);
+        var r = run();
+        return itemOf(r) ? stepText(r) : waveLabel();
+    }
+
+    // The place named in pause texts: a template step entry by its row label
+    // alone, any other step by its label and step name.
+    function pausePlace(r) {
+        return itemOf(r) ? stepText(r) : label() + ' (' + stepName(r.step) + ')';
     }
 
     function label() {
@@ -559,7 +633,8 @@
             if (r.stopReason) return 'Stopped: ' + r.label + ', ' + finishedRuns() + ' run(s): ' + r.stopReason;
             return 'Done: ' + r.label + ', ' + finishedRuns() + ' run(s)';
         }
-        var where = runPart(r) + ', ' + (isWaveStep(r.step) ? waveLabel() + ', ' : '') + stepName(r.step);
+        var where = runPart(r) + ', ' + (itemOf(r) ? stepText(r) :
+            (isWaveStep(r.step) ? waveLabel() + ', ' : '') + stepName(r.step));
         if (r.status === S.RunStatus.Paused) {
             return 'Paused: ' + where + ': ' + (r.pause ? r.pause.message : '');
         }
@@ -673,17 +748,26 @@
         rs.stuckClock = null;
         rs.pickupClock = null;
         rs.zoneWait = false;
+        rs.questAt = null;
+        rs.tripSeenAt = null;
         rs.deployProbe = {};
     }
 
     // The only literal of the run object. start holds the facts fixed at
     // start: { id, templateId, label, adventure, zoneId, paths, loadoutPath,
-    // loadoutKeys, waveIndex, speedBuff } and optionally the first step
-    // (Gate when it is no step); every progress field takes its start value.
-    // start may be omitted for the default shape.
+    // loadoutKeys, loadoutNames, waveIndex, speedBuff, starAll } and
+    // optionally the first step (Gate when it is no step); every progress
+    // field takes its start value. start may be omitted for the default shape.
     //
-    // speedBuff is the template's choice as written and is resolved when it
-    // is used. snapshot is the army counted at home before loading (null:
+    // paths is the template's wave list in run order: battle file paths and
+    // template step entries (plain objects, see steps.js) mixed, and
+    // waveIndex indexes that mixed list. speedBuff is the template's choice
+    // as written and is resolved when it is used. starAll is the template's
+    // switch for sending all generals to the star on arrival; only an explicit
+    // false turns it off, so a template or run file without it keeps the old
+    // behaviour, and every later run of the series copies it on. loadoutNames
+    // maps a loadout key to the general's plain name, for display only: the
+    // keys stay what the run sends by. snapshot is the army counted at home before loading (null:
     // none). marks are the send markers of the series steps, in the shape of
     // lines. waitUntil is the deadline of the step that is waiting. popBase
     // is the free population read before the last population buff, so the
@@ -720,8 +804,10 @@
             paths:       isArray(s.paths) ? s.paths.slice(0) : [],
             loadoutPath: str(s.loadoutPath),
             loadoutKeys: isPlainObject(s.loadoutKeys) ? s.loadoutKeys : {},
+            loadoutNames: normNames(s.loadoutNames),
             waveIndex:   count(s.waveIndex),
             speedBuff:   str(s.speedBuff),
+            starAll:     s.starAll !== false,
             scenarioId:  str(s.scenarioId),
             trips:       isArray(s.trips) ? s.trips.slice(0) : [],
             trip:        count(s.trip),
@@ -775,6 +861,38 @@
         return out;
     }
 
+    // The display names of the loadout generals: string values only.
+    function normNames(v) {
+        var out = {};
+        if (!isPlainObject(v)) return out;
+        for (var k in v) {
+            if (has(v, k) && typeof v[k] === 'string') out[k] = v[k];
+        }
+        return out;
+    }
+
+    // The wave list of a run file: battle file paths kept as they are, every
+    // other entry through the step registry's normaliser. An entry it refuses,
+    // or any entry when the bundle has no registry, cannot be run; it is left
+    // out and bad is set, so the run pauses instead of running a list whose
+    // indexes no longer match the one validated at start.
+    function normPaths(v) {
+        var out = [];
+        var bad = false;
+        if (!isArray(v)) return { paths: out, bad: false };
+        var st = stepsOf();
+        for (var i = 0; i < v.length; i++) {
+            if (typeof v[i] === 'string') {
+                out.push(v[i]);
+                continue;
+            }
+            var item = st && st.normItem ? st.normItem(v[i]) : null;
+            if (item) out.push(item);
+            else bad = true;
+        }
+        return { paths: out, bad: bad };
+    }
+
     function normKeys(v) {
         if (!isPlainObject(v)) return null;
         var out = {};
@@ -784,6 +902,8 @@
         return out;
     }
 
+    // A "part:" mark also carries `taken`, what its grid has taken of the item so
+    // far; it is kept only when numeric so every other line keeps its shape.
     function normLines(v) {
         var out = {};
         if (!isPlainObject(v)) return out;
@@ -794,6 +914,8 @@
                 seen:     v[k].seen === true,
                 sentOnce: v[k].sentOnce === true
             };
+            var tk = num(v[k].taken);
+            if (tk !== null) out[k].taken = tk;
         }
         return out;
     }
@@ -810,10 +932,11 @@
 
     function normPause(p) {
         if (!isPlainObject(p)) return null;
+        var step = liveStep(p.step);
         return {
             reason:  isValue(S.RunPause, p.reason) ? p.reason : S.RunPause.NotObserved,
             message: str(p.message),
-            step:    isStep(p.step) ? p.step : null,
+            step:    isStep(step) ? step : null,
             wave:    num(p.wave),
             general: scalar(p.general),
             target:  scalar(p.target),
@@ -854,7 +977,9 @@
     //
     // The trips of a scenario run go through the scenario file's own
     // normaliser, read at call time. Trips it refuses (or a bundle without it)
-    // cannot be run, so the run pauses until the user starts it again.
+    // cannot be run, so the run pauses until the user starts it again. The
+    // template step entries of paths go through the step registry the same
+    // way (normPaths).
     function normRun(v) {
         if (!isPlainObject(v)) return { run: null, repaired: [] };
         var repaired = [];
@@ -867,17 +992,20 @@
             if (isArray(norm)) trips = norm;
             else badTrips = true;
         }
+        var paths = normPaths(v.paths);
         var facts = {
             id:          num(v.id) !== null ? v.id : 0,
             templateId:  str(v.templateId),
             label:       str(v.label),
             adventure:   str(v.adventure),
             zoneId:      num(v.zoneId),
-            paths:       strings(v.paths),
+            paths:       paths.paths,
             loadoutPath: str(v.loadoutPath),
             loadoutKeys: normKeys(v.loadoutKeys),
+            loadoutNames: normNames(v.loadoutNames),
             waveIndex:   count(v.waveIndex),
             speedBuff:   str(v.speedBuff),
+            starAll:     v.starAll !== false,
             scenarioId:  scenarioId,
             trips:       trips,
             trip:        count(v.trip)
@@ -912,6 +1040,10 @@
         for (k in facts) {
             if (has(facts, k)) r[k] = facts[k];
         }
+        if (liveStep(r.step) !== r.step) {
+            repaired.push('retired step ' + r.step + ' -> ' + RETIRED_STEPS[r.step]);
+            r.step = liveStep(r.step);
+        }
         if (!isStep(r.step)) {
             repaired.push('unknown step ' + String(r.step) + ' -> Gate');
             r.step = S.WaveStep.Gate;
@@ -930,6 +1062,11 @@
         if (badTrips) {
             repaired.push('bad scenario trips -> Paused');
             filePause(r, S.RunPause.WaveFile, 'state file has no valid scenario trips; Stop and start the run again');
+        }
+        if (paths.bad) {
+            repaired.push('bad template steps -> Paused');
+            filePause(r, S.RunPause.WaveFile,
+                'state file has a template step this build cannot run; Stop and start the run again');
         }
         if (r.status === S.RunStatus.Paused && !r.pause) {
             repaired.push('paused without a reason');
@@ -1032,8 +1169,30 @@
         return true;
     }
 
+    // Plays the pause sound. The sound core is read at call time and may be
+    // missing from a bundle; a sound is a nicety, so nothing it throws may
+    // stop the pause itself.
+    function playSound() {
+        var snd = S.core.sound;
+        if (!snd || !snd.alert) return;
+        try {
+            snd.alert();
+        } catch (e) {
+            S.kernel.log('adventures', 'pause sound failed:', e);
+        }
+    }
+
     // info: { general, target }, both optional. Dropping the round makes any
     // callback still in flight a no-op.
+    //
+    // Every pause the run raises, a problem or a planned Pause step, plays
+    // the pause sound, so the user hears that the run needs him. The user's
+    // own Pause plays none: he is at the screen. A paused run loaded from the
+    // file or repaired on load does not come through here and stays silent.
+    //
+    // pause.wave holds the entry index + 1. It equals the wave number only
+    // for a list without template step entries; nothing reads it, and it
+    // stays in the file format as it was.
     function pause(reason, message, info) {
         var rs = current();
         var r = rs.run;
@@ -1054,10 +1213,11 @@
         var who = '';
         if (r.pause.general !== null) who += ' general ' + r.pause.general;
         if (r.pause.target !== null) who += ' target ' + r.pause.target;
-        S.kernel.warn('adventures', 'run paused at ' + label() + ' (' + stepName(r.step) + '): ' +
+        S.kernel.warn('adventures', 'run paused at ' + pausePlace(r) + ': ' +
             nameOf(S.RunPause, reason) + ': ' + r.pause.message + who);
         save();
-        notify('Adventure run paused at ' + label() + ' (' + stepName(r.step) + '): ' + r.pause.message);
+        notify('Adventure run paused at ' + pausePlace(r) + ': ' + r.pause.message);
+        if (reason !== S.RunPause.User) playSound();
         refresh();
         return true;
     }
@@ -1360,6 +1520,7 @@
         waveLabel:     waveLabel,
         label:         label,
         stepName:      stepName,
+        stepText:      stepText,
         position:      position,
         stepRows:      stepRows,
         optionOff:     optionOff,

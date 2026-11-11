@@ -37,7 +37,17 @@ function setup(opts) {
     fs.dirs['C:/client/steward'] = true;
     fs.dirs[DIR] = true;
     var hs = hostStubs.makeSettingsHost();
-    var H = harness.boot({ sections: ['kernel'], host: { air: fs.air, settings: hs } });
+    // Without air.Introspector the host debug() is the console sink.
+    if (opts.noIntrospector) delete fs.air.Introspector;
+    var consoleLines = [];
+    var host = { air: fs.air, settings: hs };
+    if (opts.hostDebug) {
+        host.debug = function (msg) {
+            consoleLines.push(String(msg));
+            if (s.onConsole) s.onConsole(msg);
+        };
+    }
+    var H = harness.boot({ sections: ['kernel'], host: host });
 
     var RealDate = Date;
     var clock = { nowMs: opts.now || D1_NOON };
@@ -72,8 +82,65 @@ function setup(opts) {
         }).map(function (p) { return p.substr(DIR.length + 1); }).sort();
     };
     s.retryMs = K.TIMEOUTS.LOG_ROTATE_RETRY_MS;
+    s.consoleLines = consoleLines;
+    s.onConsole = null;
+    // Opening the log file emits a one-off console note; take it here so the
+    // counts in the tests are exact.
+    if (opts.hostDebug) {
+        K.log.filePath();
+        consoleLines.length = 0;
+    }
     return s;
 }
+
+// ---- Console sink without Introspector --------------------------------------
+
+t.test('host debug() gets one line per debug call with debug lines enabled', function () {
+    var s = setup({ noIntrospector: true, hostDebug: true });
+    s.configure({ debugEnabled: true });
+    s.K.debug.raw('x', 'y');
+    assert.strictEqual(s.consoleLines.length, 1);
+    assert.ok(/^\[DEBUG\] \[[^\]]+\] \[x\] y$/.test(s.consoleLines[0]));
+    var file = s.read('console.log');
+    assert.strictEqual(count(file, '[DEBUG]'), 1);
+    assert.strictEqual(count(file, '[[DEBUG]'), 0);
+});
+
+t.test('host debug() gets log, warn and error lines once each', function () {
+    var s = setup({ noIntrospector: true, hostDebug: true });
+    s.configure({ debugEnabled: true });
+    s.K.log.raw('a', '1');
+    s.K.warn.raw('b', '2');
+    s.K.error.raw('c', '3');
+    assert.strictEqual(s.consoleLines.length, 3);
+    assert.ok(/^\[LOG\]/.test(s.consoleLines[0]) && s.consoleLines[0].indexOf('[a] 1') > 0);
+    assert.ok(/^\[WARN\]/.test(s.consoleLines[1]) && s.consoleLines[1].indexOf('[b] 2') > 0);
+    assert.ok(/^\[ERROR\]/.test(s.consoleLines[2]) && s.consoleLines[2].indexOf('[c] 3') > 0);
+    var lines = s.read('console.log').split(/\r?\n/).filter(function (l) { return l.length > 0; });
+    assert.strictEqual(lines.length, 3);
+});
+
+t.test('debug lines off: host debug() still gets log lines, debug lines go nowhere', function () {
+    var s = setup({ noIntrospector: true, hostDebug: true });
+    s.K.log.raw('x', 'y');
+    assert.strictEqual(s.consoleLines.length, 1);
+    assert.ok(/^\[LOG\] .*\[x\] y$/.test(s.consoleLines[0]));
+    s.K.debug.raw('x', 'z');
+    assert.strictEqual(s.consoleLines.length, 1);
+    var file = s.read('console.log');
+    assert.ok(!/ z$/m.test(file));
+});
+
+t.test('a console sink that re-enters the logger does not loop', function () {
+    var s = setup({ noIntrospector: true, hostDebug: true });
+    s.configure({ debugEnabled: true });
+    s.onConsole = function () { s.K.log.raw('inner', 'again'); };
+    s.K.log.raw('x', 'y');
+    assert.strictEqual(s.consoleLines.length, 1);
+    var file = s.read('console.log');
+    assert.strictEqual(count(file, '[x] y'), 1);
+    assert.strictEqual(count(file, '[inner] again'), 1);
+});
 
 // ---- Size trigger -----------------------------------------------------------
 

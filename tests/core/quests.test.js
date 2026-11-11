@@ -743,6 +743,62 @@ t.test('itemWant running: held beats done, met held quests and finished quests a
     t.assert.strictEqual(bootClick([main]).Q.itemWant('Shovel', null, { running: true }), 'none');
 });
 
+// ---- itemWant opts.buildings ----------------------------------------------------
+
+function buildingQuest(extra, statuses, mode) {
+    return itemQuest({
+        triggers: [trig('buffad_sabotage', 0, extra || { condition: 12 })],
+        statuses: statuses || [{ status: 0 }], mode: mode === undefined ? 3 : mode
+    });
+}
+
+function runWant(q, opts) {
+    var o = { running: true };
+    for (var k in (opts || {})) o[k] = opts[k];
+    return bootClick([q]).Q.itemWant('Glue', null, o);
+}
+
+t.test('itemWant running: an open non-click type-1 trigger on the given building makes any item open', function () {
+    var q = buildingQuest();
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'open');
+    t.assert.strictEqual(runWant(q, { buildings: ['other', 'buffad_sabotage'] }), 'open');
+});
+
+t.test('itemWant running: no building, another building or an empty name leaves the item unwanted', function () {
+    var q = buildingQuest();
+    t.assert.strictEqual(runWant(q), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: ['other'] }), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: [''] }), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: 'buffad_sabotage' }), 'none');
+});
+
+t.test('itemWant running: a building match on a mode-2 quest is held', function () {
+    var held = [];
+    var q = buildingQuest(null, null, 2);
+    q.getQuestName_string = function () { return 'Sabotage'; };
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'], held: held }), 'held');
+    t.assert.strictEqual(JSON.stringify(held), JSON.stringify([{ quest: 'Sabotage', mode: 2 }]));
+});
+
+t.test('itemWant running: a closed building trigger is done', function () {
+    var q = buildingQuest(null, [{ status: 1 }]);
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'done');
+});
+
+t.test('itemWant running: a click trigger on the building never matches', function () {
+    var q = buildingQuest({ condition: 9 });
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'none');
+});
+
+t.test('itemWant running: a buff-named end condition wins over a closed building trigger', function () {
+    var q = itemQuest({
+        ends: [endCond('Glue', 1)],
+        triggers: [trig('buffad_sabotage', 0, { condition: 12 })],
+        statuses: [{ status: 1 }, { status: 0 }], mode: 3
+    });
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'open');
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };
@@ -763,4 +819,133 @@ t.test('definition falls back from getter to field to none', function () {
     r = b.Q.definition({ GetQuestDefinition: function () { return null; } });
     t.assert.strictEqual(r.source, 'none');
     t.assert.strictEqual(r.def, null);
+});
+
+// ---- destroyNames ---------------------------------------------------------------
+
+// A quest with buildingdestroyed end conditions for the given items. opts:
+// items (names), name, finished, active, mode, statuses, ends (full override).
+function destroyQuest(opts) {
+    var ends = opts.ends;
+    if (!ends) {
+        ends = [];
+        for (var i = 0; i < (opts.items || []).length; i++) {
+            ends.push(endCond(opts.items[i], i, 'buildingdestroyed'));
+        }
+    }
+    var q = itemQuest({
+        name: opts.name, ends: ends, statuses: opts.statuses || [], finished: opts.finished
+    });
+    if (opts.active === false) q.IsQuestActive = function () { return false; };
+    if (opts.mode !== undefined) q.mQuestMode = opts.mode;
+    return q;
+}
+
+function destroyList(list, opts) {
+    var n = bootClick(list).Q.destroyNames(opts);
+    return n === null ? null : Object.keys(n).sort().join(',');
+}
+
+t.test('destroyNames lists buildingdestroyed items of an open quest', function () {
+    var q = destroyQuest({
+        ends: [
+            endCond('BuildingBucket', 0, 'buildingdestroyed'),
+            endCond('Ore', 1, 'onmap'),
+            endCond('Shovel', 2),
+            endCond('', 3, 'buildingdestroyed'),
+            { action_string: 'buildingdestroyed', triggerIdx: 4 },
+            endCond('Fire wood', 5, 'buildingdestroyed')
+        ]
+    });
+    var noVector = destroyQuest({ items: [] });
+    delete noVector.GetQuestDefinition().endConditions_vector;
+    t.assert.strictEqual(destroyList([q, noVector]), 'BuildingBucket,Fire wood');
+});
+
+t.test('destroyNames skips the main quest', function () {
+    var main = destroyQuest({ name: 'Main quest', items: ['BuildingBucket'] });
+    var sub = destroyQuest({ name: 'Sabotage', items: ['Ore'] });
+    t.assert.strictEqual(destroyList([main, sub]), 'Ore');
+});
+
+t.test('destroyNames ignores trigger status', function () {
+    var q = destroyQuest({ items: ['BuildingBucket'], statuses: [{ status: 1 }] });
+    t.assert.strictEqual(destroyList([q]), 'BuildingBucket');
+});
+
+t.test('destroyNames is null when the pool cannot be read', function () {
+    var b = boot([]);
+    b.H.host.game.quests = {
+        GetQuestPool: function () { throw new Error('pool failed'); }
+    };
+    t.assert.strictEqual(b.Q.destroyNames(), null);
+    b.H.host.game.quests = undefined;
+    t.assert.strictEqual(b.Q.destroyNames(), null);
+});
+
+t.test('destroyNames running lists mode-3 quests and holds the others with their mode', function () {
+    var modes = [2, 1, 0, undefined, 3];
+    var list = [];
+    for (var i = 0; i < modes.length; i++) {
+        list.push(destroyQuest({ name: 'Q' + i, items: ['obj' + i], mode: modes[i] }));
+    }
+    var held = {};
+    var n = bootClick(list).Q.destroyNames({ running: true, held: held });
+    t.assert.deepStrictEqual(Object.keys(n), ['obj4']);
+    t.assert.deepStrictEqual(Object.keys(held).sort(), ['obj0', 'obj1', 'obj2', 'obj3']);
+    t.assert.strictEqual(JSON.stringify(held.obj0), JSON.stringify({ quest: 'Q0', mode: 2 }));
+    t.assert.strictEqual(JSON.stringify(held.obj3), JSON.stringify({ quest: 'Q3', mode: null }));
+    // The loose gate lists everything but the unread quest.
+    t.assert.strictEqual(destroyList(list), 'obj1,obj2,obj3,obj4');
+});
+
+t.test('destroyNames skips finished and inactive quests', function () {
+    var fin = destroyQuest({ items: ['a'], finished: true, mode: 3 });
+    var inactive = destroyQuest({ items: ['b'], active: false, mode: 3 });
+    var ok = destroyQuest({ items: ['c'], mode: 3 });
+    t.assert.strictEqual(destroyList([fin, inactive, ok]), 'c');
+    t.assert.strictEqual(destroyList([fin, inactive, ok], { running: true }), 'c');
+});
+
+function openList(list, opts) {
+    var n = bootClick(list).Q.openDestroyNames(opts);
+    return n === null ? null : Object.keys(n).sort().join(',');
+}
+
+t.test('openDestroyNames lists an open buildingdestroyed item of a running quest', function () {
+    var q = destroyQuest({ items: ['BuildingBucket'], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'BuildingBucket');
+});
+
+t.test('openDestroyNames drops a condition whose trigger is closed', function () {
+    var q = destroyQuest({ items: ['BuildingBucket', 'Ore'], statuses: [{ status: 1 }, { status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'Ore');
+});
+
+t.test('openDestroyNames keeps a condition whose trigger status is missing', function () {
+    var q = destroyQuest({ items: ['BuildingBucket', 'Ore'], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(openList([q], { running: true }), 'BuildingBucket,Ore');
+});
+
+t.test('openDestroyNames skips the main quest and non-running quests under running', function () {
+    var main = destroyQuest({ name: 'Main quest', items: ['a'], mode: 3 });
+    var waiting = destroyQuest({ name: 'Waiting', items: ['b'], mode: 2 });
+    var sub = destroyQuest({ name: 'Sabotage', items: ['c'], mode: 3 });
+    t.assert.strictEqual(openList([main, waiting, sub], { running: true }), 'c');
+});
+
+t.test('openDestroyNames is null when the pool cannot be read', function () {
+    var b = boot([]);
+    b.H.host.game.quests = {
+        GetQuestPool: function () { throw new Error('pool failed'); }
+    };
+    t.assert.strictEqual(b.Q.openDestroyNames({ running: true }), null);
+    b.H.host.game.quests = undefined;
+    t.assert.strictEqual(b.Q.openDestroyNames({ running: true }), null);
+});
+
+t.test('destroyNames still lists a closed-trigger item', function () {
+    var q = destroyQuest({ items: ['BuildingBucket'], statuses: [{ status: 1 }], mode: 3 });
+    t.assert.strictEqual(destroyList([q], { running: true }), 'BuildingBucket');
+    t.assert.strictEqual(openList([q], { running: true }), '');
 });

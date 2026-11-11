@@ -112,6 +112,7 @@ Host calls behind the core write actions (each is wrapped by `Steward.core.packe
 | `mMouseCursor.CheckIfGarrisonIsPlacableInGame(grid, true)` in cursor edit mode 86; `mPathFinder.CalculatePath` | `orders.placeCode` (the raw code), `orders.isPlaceable` (code 0 is placeable), `orders.hasPath` (prechecks). On an adventure a general with no garrison (at the star) is placeable only on a free landing field of the player's own landing zone; a general with a garrison goes through the normal rules. |
 | `general.GetTask().GetOriginalType()` (4, 5, 6 recovering, 7, 12), `.GetNewGarrisonGridIdx()` | `orders.rawTaskType`, `.taskKind`, `.newGrid` (verification) |
 | `general.GetTask().GetRemainingTime()` (unit assumed to be ms, not yet confirmed in steward logs; the raw value is logged) | `specialists.orders.remaining` (returns a number or null) |
+| `new air.Sound(new air.URLRequest('images/drop.mp3')).play()`; if `air.Sound` is missing or throws, `game.def('Sound::cSoundManager').getInstance().playEffect('QuestComplete')` (a missing file reports through `IOErrorEvent.IO_ERROR`, not a throw; not yet confirmed in steward logs) | `sound.alert` |
 
 ### Class lookup
 
@@ -160,6 +161,7 @@ zone.mStreetDataMap.getDeposits_vectorByType('IronOre');
 // logs; the cause (host garbage collection) is not established.
 // A member can read as a function and then as undefined on the next read, so a
 // typeof guard does not make the call safe; it can still throw "is not a function".
+// Read the member once into a local, as Steward.kernel.hostRead.call(o, 'Member') does.
 ```
 
 ### Building accessors
@@ -245,6 +247,8 @@ createSwitch('id', true, function () { /* on change */ });
 getImageTag('Coin', '24px');
 assets.GetResourceIcon('Coin');
 ```
+
+The host answers synchronously, with no load event. It returns a grey `<span>` placeholder when the bitmap is not decoded yet and a Base64 `<img>` otherwise. Steward caches only the `<img>` and redraws a table view once a second later when it got a placeholder.
 
 ## Star menu and adventures
 

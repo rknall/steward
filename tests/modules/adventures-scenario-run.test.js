@@ -29,12 +29,16 @@ var BRIDGE = 'ChangeSkin_BuffAd_Bridge';
 var SHEET = 'ChangeSkin_BuffAd_Broadsheet';
 var RESCUE = 'ChangeSkin_BuffAd_Rescueparty';
 var DYN = 'BattleBuffHurt_BuffAd_SmallDynamite';
+var GLUE = 'BattleBuffHurt_BuffAd_Glue';
+var SPLASH = 'BattleBuffHurt_BuffAd_WaterSplash';
+var BLAST = 'BattleBuffHurt_BuffAd_Explosive';
+var EXPERT = 'BattleBuffHurt_BuffAd_Specialist';
 
 var COST = [{ name_string: 'Wood', amount: 2 }];
 
 function items() {
     var out = {};
-    [BRIDGE, SHEET, RESCUE, DYN].forEach(function (b) { out[b] = { group: '0', yield: 1, costs: COST }; });
+    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT].forEach(function (b) { out[b] = { group: '0', yield: 1, costs: COST }; });
     return out;
 }
 
@@ -232,8 +236,8 @@ t.test('go(): a scenario run skips the general rows, without why only the skip i
     assert.strictEqual(r.step, w.S.RunStep.Apply);
     w.st.go(w.S.RunStep.Pickups);
     assert.strictEqual(r.step, w.S.RunStep.Trip, 'Pickups and StarAll skipped');
-    w.st.go(w.S.RunStep.Recall, 'map closed');
-    assert.strictEqual(r.step, w.S.RunStep.JumpHome);
+    w.st.go(w.S.RunStep.PackStar, 'waves done');
+    assert.strictEqual(r.step, w.S.RunStep.Clear, 'PackStar and Pack skipped');
     w.st.go(w.S.RunStep.Account, 'generals home');
     assert.strictEqual(r.step, w.S.RunStep.Next);
     assert.ok(logged(w, /-> Next \(generals home; skipped Account, Population, Retrain\)$/), logLines(w).join('\n'));
@@ -255,10 +259,11 @@ t.test('stepRows: neighbours fold only on equal group, label and option', functi
     assert.strictEqual(labels[0], 'Wait between maps');
     assert.strictEqual(labels[1], 'Produce items');
     assert.strictEqual(labels[2], 'Check generals and files');
-    var send = labels.indexOf('Send generals home');
-    assert.ok(send > 0, 'Recall has its own row');
-    assert.strictEqual(labels[send + 1], 'Return home');
-    var ret = rows[send + 1];
+    var close = labels.indexOf('Claim last quest and close');
+    assert.ok(close > 0, 'Close has its own row');
+    assert.ok(labels.indexOf('Send generals home') < 0, 'closing the map returns the generals');
+    assert.strictEqual(labels[close + 1], 'Return home');
+    var ret = rows[close + 1];
     assert.strictEqual(ret.last - ret.first, 1, 'JumpHome and ArriveHome fold');
     var load = rows[labels.indexOf('Load generals')];
     assert.strictEqual(load.last - load.first, 5, 'the six load steps fold');
@@ -355,7 +360,7 @@ t.test('chain: a 3-trip run from home passes every scenario step and no general 
     ];
     assert.deepStrictEqual(names, want, names.join(' '));
     var general = ['Validate', 'Deploy', 'Snapshot', 'Supply', 'Unload', 'Load', 'Verify', 'Depart', 'Arrive',
-        'Pickups', 'StarAll', 'Horseshoe', 'PackStar', 'Pack', 'Recall', 'Account', 'Population', 'Retrain'];
+        'Pickups', 'StarAll', 'Horseshoe', 'PackStar', 'Pack', 'Account', 'Population', 'Retrain'];
     transitions(w).forEach(function (x) {
         assert.ok(!x.wave, 'no wave step: ' + x.text);
         assert.ok(general.indexOf(x.to) < 0, 'no general step entered: ' + x.text);
@@ -431,6 +436,184 @@ t.test('Apply: a quest that no longer wants the item skips its grids', function 
     assert.ok(logged(w, /quest no longer wants ChangeSkin_BuffAd_Bridge; 2 grid\(s\) skipped/), logLines(w).join('\n'));
 });
 
+t.test('Trip: a collectible a running quest counts holds the trip; JumpHome once it is picked up', function () {
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12], met: true,
+        stayOpen: true }, { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 5);
+    // The trip counts map objects only where collect picks up on adventures.
+    w.H.settings.write('collect', { enabled: true, namePatterns: [], adventureZones: true });
+    onIsland(w, record(w, ONE), 0);
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    w.pickups = [{ grid: 31, name: 'BuildingBucket', kind: 'collectible', named: true, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    assert.ok(!logged(w, /leaving with/), logLines(w).join('\n'));
+    w.pickups = [];
+    drive(w, { until: at('JumpHome') });
+    assertStep(w, 'JumpHome');
+});
+
+// ---- trip end: settle, awaited pick-ups ------------------------------------------
+
+var COLLECT_ON = { enabled: true, namePatterns: [], adventureZones: true };
+var HAMMER = 'buffad_collectible_UsedHammer';
+
+// The run at the Trip step of trip 0 on the island, collect picking up there.
+function atTrip() {
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12], met: true,
+        stayOpen: true }, { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 5);
+    w.H.settings.write('collect', COLLECT_ON);
+    onIsland(w, record(w, ONE), 0);
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    return w;
+}
+
+function onePass(w) {
+    W.ticksFor(w, PASS_MS);
+    play(w);
+}
+
+// A look soon after the last one, inside READ_LAG_MS of it.
+function shortPass(w) {
+    W.ticksFor(w, 3000);
+    play(w);
+}
+
+// Passes until the step is `name` or ms ran out; returns whether it was reached.
+function passesUntil(w, name, ms) {
+    var end = w.t + ms;
+    while (w.t < end) {
+        if (stepName(w) === name) return true;
+        onePass(w);
+    }
+    return stepName(w) === name;
+}
+
+function settleMs(w) {
+    return w.S.modules.adventures.trips.QUEST_SETTLE_MS;
+}
+
+function readLag(w) {
+    return w.S.modules.adventures.loader.READ_LAG_MS;
+}
+
+// Passes until `have()` holds; returns the verified quest stamp of that pass.
+function passUntilStamped(w, have, ms) {
+    var end = w.t + ms;
+    while (w.t < end && !have()) onePass(w);
+    assert.ok(have(), 'the event happened');
+    var q = w.st.current().questAt;
+    assert.ok(q && typeof q.at === 'number', 'a verified stamp');
+    return q.at;
+}
+
+t.test('Trip: a quest read during Trip restarts the settle; no leave within QUEST_SETTLE_MS of the read', function () {
+    var w = atTrip();
+    w.quests.push({ key: 'qn', name: 'Next', item: BRIDGE, grids: [11], unread: true, stayOpen: true });
+    var tr = passUntilStamped(w, function () { return w.reads.length > 0; }, 60000);
+    var limit = tr + settleMs(w);
+    while (w.t < limit) {
+        assertStep(w, 'Trip');
+        onePass(w);
+        if (w.t < limit) assertStep(w, 'Trip');
+    }
+    assert.ok(passesUntil(w, 'JumpHome', 4 * PASS_MS), 'left after the settle: ' + stepName(w));
+    assert.ok(w.t >= limit, 'not before the settle ran out');
+});
+
+t.test('Trip: a running quest\'s pick-up not on the map yet holds the trip', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    assert.ok(!logged(w, /leaving with/), logLines(w).join('\n'));
+    assert.ok(logged(w, /not on the map yet|waiting for it to appear/), logLines(w).join('\n'));
+    // It shows on the map: still held, now as an object.
+    w.awaited = [];
+    w.pickups = [{ grid: 31, name: HAMMER, kind: 'collectible', named: true, zoneId: ZONE }];
+    onePass(w);
+    assertStep(w, 'Trip');
+    // Collect picked it up: the map must read clear once more before leaving.
+    w.pickups = [];
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(passesUntil(w, 'JumpHome', 60000), 'then it leaves: ' + stepName(w));
+});
+
+t.test('Trip: held and awaited pick-ups are each noted once across repeated passes', function () {
+    var w = atTrip();
+    w.held = [{ name: 'buffad_collectible_Other', quest: 'qx', mode: 2, zoneId: ZONE }];
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 60000);
+    assertStep(w, 'Trip');
+    function count(re) {
+        return logLines(w).filter(function (l) { return re.test(l); }).length;
+    }
+    assert.strictEqual(count(/waiting for quest qx to be running/), 1, logLines(w).join('\n'));
+    assert.strictEqual(count(/waiting for it to appear on the map/), 1, logLines(w).join('\n'));
+});
+
+t.test('Trip: leaves once the awaited condition is met', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, 20000);
+    assertStep(w, 'Trip');
+    w.awaited = [];
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(passesUntil(w, 'JumpHome', readLag(w) + 3 * PASS_MS), 'left: ' + stepName(w));
+});
+
+t.test('Trip: an awaited pick-up that never appears leaves after TRIP_MAX_MS, no pause', function () {
+    var w = atTrip();
+    w.awaited = [{ name: HAMMER, zoneId: ZONE }];
+    passesFor(w, w.S.modules.adventures.trips.TRIP_MAX_MS + 30000);
+    assert.ok(logged(w, /leaving with: .*not on the map yet/), logLines(w).join('\n'));
+    assert.notStrictEqual(stepName(w), 'Trip');
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running);
+});
+
+t.test('Trip: a quest claimed during Trip restarts the settle; a late next quest is read before JumpHome', function () {
+    var w = atTrip();
+    w.quests.push({ key: 'qf', name: 'Done', item: BRIDGE, grids: [11], finished: true });
+    var tc = passUntilStamped(w, function () { return w.claims.length > 0; }, 60000);
+    var late = false;
+    var limit = tc + settleMs(w);
+    var lateAt = null;
+    while (w.t < limit + 3 * PASS_MS && stepName(w) === 'Trip') {
+        if (!late && w.t >= tc + 5000) {
+            w.quests.push({ key: 'qn', name: 'Next', item: BRIDGE, grids: [11], unread: true, stayOpen: true });
+            late = true;
+        }
+        onePass(w);
+        if (w.t < limit) assertStep(w, 'Trip');
+        if (lateAt === null && w.reads.length > 0) lateAt = w.st.current().questAt.at;
+    }
+    assert.ok(late, 'the late quest appeared');
+    assert.ok(w.reads.length > 0, 'the late quest was read before the step left Trip');
+    assert.ok(lateAt !== null && lateAt > tc);
+    assert.ok(passesUntil(w, 'JumpHome', settleMs(w) + 4 * PASS_MS), 'left: ' + stepName(w));
+    assert.ok(w.t >= lateAt + settleMs(w), 'the settle counts from the late read');
+});
+
+t.test('Trip: after the last object is picked the map must stay clear for READ_LAG_MS', function () {
+    var w = atTrip();
+    w.pickups = [{ grid: 31, name: HAMMER, kind: 'collectible', named: true, zoneId: ZONE }];
+    onePass(w);
+    assertStep(w, 'Trip');
+    w.pickups = [];
+    var seen = w.st.current().tripSeenAt;
+    assert.strictEqual(typeof seen, 'number', 'the last look that saw the object is stamped');
+    shortPass(w);
+    assertStep(w, 'Trip');
+    assert.ok(/making sure no quest or object is left/.test(w.st.current().busy.text), w.st.current().busy.text);
+    assert.ok(passesUntil(w, 'JumpHome', readLag(w) + 4 * PASS_MS), 'left: ' + stepName(w));
+    assert.ok(w.t >= seen + readLag(w), 'not before READ_LAG_MS after the last look that saw it');
+});
+
 // ---- amounts and stock --------------------------------------------------------------
 
 t.test('Apply: a send offers min(amount, stock); a full-bound send taken whole is done', function () {
@@ -485,9 +668,13 @@ function dynSends(w) {
 t.test('grid-done rule: a capped grid stays open, the trip home orders for it, and the top-up fills it', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 6, 4], [43, 2, 2], [43, 10, 2], [44, 8, 4]]);
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [41, 6, 0], [42, 6, 4], [42, 2, 0], [43, 2, 2], [43, 8, 2],
+        [43, 6, 0], [44, 8, 4]], JSON.stringify(dynSends(w)));
+    // The last grid met the quest, so its remainder is skipped, not sent.
+    assert.ok(logged(w, /quest no longer wants BattleBuffHurt_BuffAd_SmallDynamite; 1 grid\(s\) skipped/), logLines(w).join('\n'));
     assert.ok(logged(w, /SmallDynamite -> 43: took all 2 offered \(up to 10\); grid stays open/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took 4 of 6; grid done/));
+    assert.ok(logged(w, /SmallDynamite -> 42: took 4 of 6, 4 of 10 so far; sending the other 6/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/));
     var made = w.productionOrders.filter(function (o) { return o.unit === DYN; });
     assert.deepStrictEqual(plain(made.map(function (o) { return o.amount; })), [10], 'the trip total, not per grid');
     var q = w.quests.filter(function (x) { return x.key === 'qd'; })[0];
@@ -498,11 +685,13 @@ t.test('grid-done rule: a capped grid stays open, the trip home orders for it, a
 t.test('grid-done rule: a capped grid that was already full takes nothing on the top-up and is done, no pause', function () {
     var w = storm({ need: { 43: 2 } });
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 6, 4], [43, 2, 2], [43, 10, 0], [44, 10, 4]]);
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [41, 6, 0], [42, 6, 4], [42, 2, 0], [43, 2, 2], [43, 8, 0],
+        [44, 10, 4]], JSON.stringify(dynSends(w)));
     assert.ok(logged(w, /SmallDynamite -> 43: took nothing more; grid done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /run paused/), 'no pause');
+    // The top-up after the trip home shows no drop; the next grid's send waits for its result.
     var s = sendsTo(w, DYN);
-    var gap = s[4].t - s[3].t;
+    var gap = s[6].t - s[5].t;
     assert.ok(gap >= 15000, 'the top-up result came in first: ' + gap);
     assert.ok(gap < w.S.modules.adventures.loader.ORDER_WAIT_MS, 'no order-wait stale wait: ' + gap);
 });
@@ -510,7 +699,7 @@ t.test('grid-done rule: a capped grid that was already full takes nothing on the
 t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2, name) {
-        return name === 'Apply' && sendsTo(w2, DYN).length === 3 && w2.stockOf(DYN) > 0;
+        return name === 'Apply' && sendsTo(w2, DYN).length === 5 && w2.stockOf(DYN) > 0;
     } });
     assertStep(w, 'Apply');
     // The top-up is planned, then the stock is gone before its precheck runs.
@@ -519,7 +708,7 @@ t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', fun
     play(w);
     passesFor(w, 30000);
     assertPaused(w, w.S.RunPause.BuffFailed, /apply BattleBuffHurt_BuffAd_SmallDynamite to 43 failed/);
-    assert.strictEqual(sendsTo(w, DYN).length, 3);
+    assert.strictEqual(sendsTo(w, DYN).length, 5);
 });
 
 t.test('grid-done rule: a run landing in the stock during a capped send still leaves the grid open', function () {
@@ -549,6 +738,125 @@ t.test('grid-done rule: a run landing in the stock during a capped send still le
     assert.ok(!(m && m.seen), 'the grid is open');
     var part = r.marks['part:0:' + DYN + ':43'];
     assert.ok(part && part.seen, 'the part mark is set');
+    assert.strictEqual(part.taken, 2, 'the part mark keeps what the grid took');
+});
+
+// ---- items asked for by the building at the grid ------------------------------------
+
+// Riches-like sabotage: four items to the building at 2631, whose quest names
+// none of them, only a trigger on the building. One WaterSplash send takes at
+// most 9 (o.cap), so 10 needs a second send.
+var SABOTAGE_GRID = 2631;
+var SABOTAGE = {
+    id: 'sabotage_test', label: 'Sabotage (test)',
+    trips: [{ items: [{ buff: GLUE, grids: [SABOTAGE_GRID] }, { buff: SPLASH, grids: [SABOTAGE_GRID], amount: 10 },
+        { buff: BLAST, grids: [SABOTAGE_GRID] }, { buff: EXPERT, grids: [SABOTAGE_GRID] }] }, {}]
+};
+
+function sabotage(o) {
+    o = o || {};
+    var need = {};
+    need[GLUE + ':' + SABOTAGE_GRID] = 1;
+    need[SPLASH + ':' + SABOTAGE_GRID] = typeof o.splash === 'number' ? o.splash : 10;
+    need[BLAST + ':' + SABOTAGE_GRID] = 1;
+    need[EXPERT + ':' + SABOTAGE_GRID] = 1;
+    var buildings = {};
+    if (o.noBuilding !== true) buildings[SABOTAGE_GRID] = 'buffad_sabotage';
+    var cap = {};
+    cap[SPLASH] = typeof o.cap === 'number' ? o.cap : 9;
+    var w = scenWorld({
+        quests: [{ key: 'q6', name: 'BuffAd4_Sabotage_Sub6', building: 'buffad_sabotage',
+            items: [GLUE, SPLASH, BLAST, EXPERT], grids: [SABOTAGE_GRID] }, { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need, world: { gridBuildings: buildings, sendCap: cap }
+    });
+    [GLUE, BLAST, EXPERT].forEach(function (b) { w.setStock(b, 2); });
+    w.setStock(SPLASH, 20);
+    onIsland(w, record(w, SABOTAGE), 0);
+    return w;
+}
+
+function itemSends(w) {
+    return plain(w.itemSends.map(function (s) { return [s.buff, s.amount, s.took]; }));
+}
+
+function sabotageQuest(w) {
+    return w.quests.filter(function (q) { return q.key === 'q6'; })[0];
+}
+
+t.test('Apply: a quest whose trigger names the building at the grid takes the items in file order, the short WaterSplash send gets its remainder', function () {
+    var w = sabotage();
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 1], [BLAST, 1, 1], [EXPERT, 1, 1]],
+        JSON.stringify(itemSends(w)));
+    assert.ok(logged(w, /WaterSplash -> 2631: took 9 of 10, 9 of 10 so far; sending the other 1/), logLines(w).join('\n'));
+    assert.ok(logged(w, /Apply -> Trip \(items applied\)/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /waiting for a quest that wants/), 'no item wait');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a building-trigger remainder that takes nothing ends the grid without a pause', function () {
+    var w = sabotage({ splash: 9 });
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 0], [BLAST, 1, 1], [EXPERT, 1, 1]],
+        JSON.stringify(itemSends(w)));
+    assert.ok(logged(w, /WaterSplash -> 2631: took nothing more; grid done/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: the building gone after Explosive still lets Specialist go to its trigger', function () {
+    var w = sabotage();
+    drive(w, { until: at('Trip'), on: function (w2) {
+        if (sendsTo(w2, BLAST).length) delete w2.gridBuildings[SABOTAGE_GRID];
+    } });
+    assertStep(w, 'Trip');
+    assert.strictEqual(w.S.core.buildings.byGrid(SABOTAGE_GRID), null, 'the building is gone');
+    assert.deepStrictEqual(plain(sendsTo(w, EXPERT).map(function (s) { return s.took; })), [1]);
+    assert.ok(!logged(w, /waiting for a quest that wants/), 'no item wait');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: the building trigger closed before the last item skips it', function () {
+    var w = sabotage();
+    drive(w, { until: at('Trip'), on: function (w2) {
+        if (sendsTo(w2, BLAST).length) sabotageQuest(w2).met = true;
+    } });
+    assertStep(w, 'Trip');
+    assert.strictEqual(sendsTo(w, EXPERT).length, 0, 'nothing sent to a closed trigger');
+    assert.ok(logged(w, /quest no longer wants BattleBuffHurt_BuffAd_Specialist; 1 grid\(s\) skipped/),
+        logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: no building name at the grid waits for a quest that wants the item, as before', function () {
+    var w = sabotage({ noBuilding: true });
+    passesFor(w, 120000);
+    assertStep(w, 'Apply');
+    assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
+    assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_Glue/), logLines(w).join('\n'));
+});
+
+t.test('Apply: a client restart between the short take and the remainder offers only the remainder', function () {
+    var w = sabotage();
+    var pn = 'part:0:' + SPLASH + ':' + SABOTAGE_GRID;
+    drive(w, { until: function (w2) {
+        var m = w2.st.run().marks[pn];
+        return !!(m && m.taken === 9);
+    } });
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9]], JSON.stringify(itemSends(w)));
+    var w2 = restart(w);
+    w2.gridBuildings = w.gridBuildings;
+    w2.sendCap = w.sendCap;
+    var part = w2.st.run().marks[pn];
+    assert.ok(part && part.seen, 'the part mark came back');
+    assert.strictEqual(part.taken, 9, 'what the grid took came back from the file');
+    drive(w2, { until: at('Trip') });
+    assertStep(w2, 'Trip');
+    var splash = sendsTo(w2, SPLASH);
+    assert.deepStrictEqual(plain(splash.map(function (s) { return [s.amount, s.took]; })), [[10, 9], [1, 1]],
+        JSON.stringify(itemSends(w2)));
+    assert.strictEqual(sendsTo(w2, EXPERT).length, 1);
 });
 
 // ---- production -----------------------------------------------------------------

@@ -12,7 +12,7 @@
  * executor takes every wave file (position, supply, load, verify, reach, attack,
  * confirm) while a quest watcher claims finished quests except the last;
  * after the last wave the end of map packs the free troops into carriers,
- * claims the last quest, closes the map and recalls whoever is left; back
+ * claims the last quest, closes the map, which returns the generals; back
  * home the lost troops are counted and retrained, and the next repetition
  * starts. Any failed check pauses the run with where it stands and why;
  * Resume re-enters that step (a wave step re-enters the gate of its wave),

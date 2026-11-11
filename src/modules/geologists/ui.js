@@ -404,7 +404,7 @@
         return snap.busy ? head + ' · ' + snap.busy + ' busy' : head + ' · all idle';
     }
 
-    function liveCard(h, redraw) {
+    function liveCard(h, redraw, pass) {
         var snap = snapshot();
         var $tools = $('<span>')
             .append(h.now())
@@ -438,7 +438,7 @@
             if (!shows(g)) continue;
             rows.push([
                 {
-                    html:  S.core.specialists.portraitTag(g.spec) + '<span>' + h.escape(g.name) + '</span>',
+                    html:  S.core.specialists.portraitTag(g.spec, null, pass) + '<span>' + h.escape(g.name) + '</span>',
                     title: g.name,
                     cls:   'steward-who'
                 },
@@ -469,9 +469,12 @@
         $main.append($holder);
         var drawn = false;
         function redraw() {
-            $holder.empty().append(liveCard(h, redraw));
+            // A portrait the host had not decoded yet is asked for once more a second later.
+            var pass = {};
+            $holder.empty().append(liveCard(h, redraw, pass));
             if (drawn) h.fit();
             drawn = true;
+            if (pass.portraitMissed) h.redrawOnce($holder, redraw, S.kernel.TIMEOUTS.PORTRAIT_RETRY_MS);
         }
         redraw();
     }

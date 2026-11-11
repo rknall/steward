@@ -3,8 +3,14 @@
  *
  * Jump -> Arrive -> Pickups -> StarAll -> Horseshoe hand the run to the
  * wave executor at Gate of wave 1; after the last wave the executor hands it
- * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> Recall ->
- * JumpHome, and the home steps take over at ArriveHome. A holder of free
+ * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> JumpHome, and
+ * the home steps take over at ArriveHome. Closing the map returns the generals
+ * home by itself, so no step sends them; ArriveHome waits until each is listed
+ * home and idle. StarAll is a template switch (default on) and runs on the
+ * shared step driver, loader.runStep, like the template steps between the
+ * waves. A general a Send home step sent off the map is left out of the
+ * island steps (Arrive, StarAll, PackStar, Pack, Clear) through
+ * loader.fieldKeys; ArriveHome still waits for him. A holder of free
  * troops is placed on a map grid before its raise, because the client has no
  * garrison for a general at the star; Clear goes back to PackStar while free
  * troops are left to pack. plan() does one step per call. The scheduler only calls it while no adventures queue entry is
@@ -12,7 +18,7 @@
  * callback having fired.
  *
  * A scenario run has no generals, so its run kind skips Depart, Arrive,
- * Pickups, StarAll, the waves, PackStar, Pack and Recall. It passes Jump ->
+ * Pickups, StarAll, the waves, PackStar and Pack. It passes Jump ->
  * Apply -> Trip and then joins the template chain: at JumpHome while trips
  * are left, at Clear after its last trip. Apply and Trip live with the other
  * scenario steps; Jump and Close still hand over to their table successors,
@@ -23,8 +29,8 @@
  * for its effect, then pause, never send it again on its own); the last
  * action round (a failure pauses, a last round without the effect waits
  * for it, then pauses); and only then a new round. Each order that must not
- * go out twice (claiming the last quest, closing the adventure, each recall,
- * the horseshoe) goes through a persisted marker written before the packet.
+ * go out twice (claiming the last quest, closing the adventure, the
+ * horseshoe) goes through a persisted marker written before the packet.
  *
  * A zone change has no event, so a jump polls for the zone to load, with no
  * limit: it visits once more after JUMP_MS and then every JUMP_RETRY_MS. Only
@@ -86,12 +92,6 @@
 
     function warn(text) {
         S.kernel.warn(CATEGORY, st().label() + ': ' + text);
-    }
-
-    // The key part of a marker name like 'recall:<key>'.
-    function keyOfMark(name) {
-        var i = name.indexOf(':');
-        return i >= 0 ? name.slice(i + 1) : name;
     }
 
     // Whether the own adventure list (read, not null) no longer holds the
@@ -209,7 +209,7 @@
     // no limit can be built on it, and a general not listed yet is on his way
     // or has to be looked at by the user, who sees the named wait.
     function arrive(r, inv) {
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var missing = null;
         var busy = null;
         for (var i = 0; i < keys.length; i++) {
@@ -278,50 +278,59 @@
         return typeof g.grid === 'number' && g.grid <= 0 && g.armyOk === true && S.core.army.total(g.army) === 0;
     }
 
-    // A round of star orders for keys; a refusal or failure pauses StarFailed.
-    function starRound(r, step, keys) {
-        var next = ld().settleRound(r, step, function (f) {
-            st().pause(S.RunPause.StarFailed, 'star ' + f.key + ' failed: ' + f.reason, { general: f.key });
-        }, 'star');
-        if (next !== 'new') return;
-        var round = ld().startRound(r, step, []);
-        for (var i = 0; i < keys.length; i++) ld().attempt(round, keys[i], S.core.specialists.orders.star(keys[i]));
+    // The step contract of StarAll for the shared step driver. Built per call
+    // because loader is read at call time. A general that left the list
+    // counts as starred only on a positive read of the list and every army
+    // (absentDone); a busy general is still sent (sendBusy), as the star
+    // order takes him from anywhere on the map. A refusal or failure pauses
+    // StarFailed with the general's key in the text.
+    function starDef() {
+        return ld().orderEach({
+            keys: function (r) { return ld().fieldKeys(r); },
+            isDone: atStar,
+            absentDone: true,
+            sendBusy: true,
+            def: function (key) { return S.core.specialists.orders.star(key); },
+            fail: {
+                reason: S.RunPause.StarFailed,
+                what: 'star',
+                text: function (f, key) { return 'star ' + key + ' failed: ' + f.reason; }
+            },
+            next: function () { st().go(S.RunStep.Horseshoe, 'every general at the star'); }
+        });
     }
 
     // Every general goes to the star empty before the waves, so each wave
-    // loads it from a known state. A general that left the list counts as
-    // starred only on a positive read of the list and every army.
+    // loads it from a known state. The template can switch this off; the
+    // generals then walk from wherever they arrived to their wave grids.
     function starAll(r, inv) {
-        var keys = ld().keysOf(r);
-        var todo = [];
-        var unread = false;
-        for (var i = 0; i < keys.length; i++) {
-            var g = ld().gen(inv, keys[i]);
-            if (g) {
-                if (!atStar(g)) todo.push(keys[i]);
-            } else if (!inv.ok) {
-                unread = true;
-            }
-        }
-        if (!todo.length && !unread) {
-            st().go(S.RunStep.Horseshoe, 'every general at the star');
+        if (r.starAll === false) {
+            st().go(S.RunStep.Horseshoe, 'send all to the star not used');
             return;
         }
-        if (!todo.length) {
-            ld().waitRead(r, 'generals');
-            return;
-        }
-        starRound(r, S.RunStep.StarAll, todo);
+        ld().runStep(r, S.RunStep.StarAll, starDef(), null, inv);
     }
 
     // ---- Horseshoe ----------------------------------------------------------
+
+    // The wave the run reaches next: template steps share the list with the
+    // battle files, so the number counts the files before waveIndex, plus
+    // the first file at or after it. A list of files only gives
+    // waveIndex + 1.
+    function firstWaveFrom(r) {
+        var sp = S.modules.adventures.steps;
+        if (sp && typeof sp.waveNumber === 'function' && r.paths && r.waveIndex > 0) {
+            return sp.waveNumber(r.paths, r.waveIndex - 1) + 1;
+        }
+        return r.waveIndex > 0 ? r.waveIndex + 1 : 1;
+    }
 
     // Optional: a missing horseshoe or a refused one only warns, and a run
     // without one logs that and moves on. It is sent at most once per run; a
     // marker that went out (sentOnce survives a Resume) or was seen moves on
     // without a second send.
     function horseshoe(r) {
-        var gate = 'to wave ' + (r.waveIndex + 1);
+        var gate = 'to wave ' + firstWaveFrom(r);
         var round = ld().currentRound(r, S.RunStep.Horseshoe);
         if (round && ld().complete(round)) {
             var res = ld().resultOf(round, 'speed');
@@ -376,7 +385,7 @@
     // capacity. Sharing it keeps the three steps from disagreeing on what is
     // left to pack, so the Pack -> Clear -> PackStar cycle ends.
     function packPlan(r, inv) {
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var carriers = [];
         var generals = [];
         for (var i = 0; i < keys.length; i++) {
@@ -426,7 +435,7 @@
         var list = S.core.quests.list();
         var last = list ? lastQuestOf(list) : null;
         var questDone = !!(last && last.finished);
-        var keys = ld().keysOf(r);
+        var keys = ld().fieldKeys(r);
         var firstKey = null;
         var resting = [];
         for (var i = 0; i < keys.length; i++) {
@@ -738,7 +747,7 @@
             if (q) q.closedAt = now();
             st().save();
             log('adventure closed');
-            st().go(S.RunStep.Recall, 'adventure closed');
+            st().go(S.RunStep.JumpHome, 'adventure closed');
             return;
         }
         var rec = ld().marked(r, 'lastQuest');
@@ -765,94 +774,6 @@
         }
         var round = ld().startRound(r, S.RunStep.Close, []);
         ld().attempt(round, 'close', ld().wrapSend(r, 'close', S.core.adventures.close(r.adventure)));
-    }
-
-    // Sends home every loadout general still on the island, each as he gets
-    // ready, with no limit on a busy one. Once the island is no longer viewed
-    // (closing it may move the view) the generals are taken to return on their
-    // own, which is assumed, not proven. A zone id that cannot be read says
-    // nothing about the view, so it holds. A general the list lacks is gone at
-    // once when his return went out. With no mark he may only be a skipped
-    // entry, so he gets the grace, and after it he counts as gone with no pause.
-    // A general recovering after a lost battle takes no order, so he is not
-    // sent or waited on; he returns home with the map.
-    function recall(r, inv) {
-        var id = S.core.zone.id();
-        if (typeof id !== 'number') {
-            ld().waitRead(r, 'zone id');
-            return;
-        }
-        if (id !== r.zoneId) {
-            log('adventure no longer viewed; generals return on their own');
-            st().go(S.RunStep.JumpHome, 'island left');
-            return;
-        }
-        var homeId = S.core.zone.homeId();
-        if (typeof homeId !== 'number') {
-            ld().waitRead(r, 'home zone id');
-            return;
-        }
-        var keys = ld().keysOf(r);
-        var need = [];
-        var open = [];
-        var busy = null;
-        var absent = null;
-        var resting = 0;
-        for (var i = 0; i < keys.length; i++) {
-            var name = 'recall:' + keys[i];
-            var g = ld().gen(inv, keys[i]);
-            var rec = ld().marked(r, name);
-            if (!g) {
-                if (rec && (rec.seen || rec.sentOnce)) continue;
-                // Runs for every such key on every pass, or its grace stops.
-                if (!ld().missingLong(r, keys[i]) && absent === null) absent = keys[i];
-                continue;
-            }
-            if (rec && rec.seen) continue;
-            // A recall that went out and shows as travel is seen, even when
-            // its round's result was lost.
-            if (rec && rec.sentOnce && ld().leaving(g, keys[i])) {
-                ld().markSeen(r, name);
-                continue;
-            }
-            if (!ld().ready(g) && ld().recovering(keys[i])) {
-                resting++;
-                continue;
-            }
-            open.push(name);
-            if (ld().ready(g)) need.push(keys[i]);
-            else if (busy === null) busy = keys[i];
-        }
-        if (busy !== null) ld().waitBusy(r, busy, ld().who(inv, busy) + ' busy on the adventure');
-        else if (absent !== null) ld().waitBusy(r, absent, ld().who(inv, absent) + ' not listed');
-        if (!need.length) {
-            if (busy === null && absent === null) {
-                st().go(S.RunStep.JumpHome, 'generals sent home' +
-                    (resting > 0 ? ', ' + resting + ' recovering return with the map' : ''));
-            }
-            return;
-        }
-        for (i = 0; i < need.length; i++) {
-            var s = ld().staleMark(r, 'recall:' + need[i], 'return of ' + ld().who(inv, need[i]));
-            if (s === 'wait') return;
-            if (s === 'stale') {
-                st().pause(S.RunPause.NotObserved, 'return of ' + ld().who(inv, need[i]) + ' sent but not seen; check the ' +
-                    'general, then Resume', { general: need[i] });
-                return;
-            }
-        }
-        ld().dropShown(r, S.RunStep.Recall, open);
-        var next = ld().settleRound(r, S.RunStep.Recall, function (f) {
-            var k = keyOfMark(f.key);
-            st().pause(S.RunPause.DepartFailed, 'send ' + k + ' home failed: ' + f.reason, { general: k });
-        }, 'return home');
-        if (next !== 'new') return;
-        var round = ld().startRound(r, S.RunStep.Recall, []);
-        for (i = 0; i < need.length; i++) {
-            name = 'recall:' + need[i];
-            ld().attempt(round, name, ld().wrapSend(r, name, S.core.specialists.orders.sendToZone(need[i], homeId)),
-                ld().seenOnVerified(name));
-        }
     }
 
     // ---- Scenario steps -----------------------------------------------------
@@ -888,7 +809,6 @@
             [R.Pack,      pack,      true],
             [R.LastQuest, lastQuest, false],
             [R.Close,     close,     false],
-            [R.Recall,    recall,    true],
             [R.JumpHome,  jumpHome,  false]
         ];
         for (var i = 0; i < rows.length; i++) {
