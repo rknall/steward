@@ -10,11 +10,17 @@
  * check() enforces what the artifact host and the shell rely on, so a bad set
  * fails here and not after publishing.
  *
+ * serve() shows a set from 127.0.0.1 only and takes the page's Submit: a POST of
+ * the feedback JSON is written next to the set as <set>-feedback.json, so the
+ * session reads the verdicts from disk instead of a paste into the chat.
+ *
  *   node scripts/review-set.js css [file]    rewrite the steward block, or print it
  *   node scripts/review-set.js check <file...>
+ *   node scripts/review-set.js serve <file> [--port N] [--once]
  */
 
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
 
 const BEGIN = "/* steward-css:begin */";
@@ -30,6 +36,27 @@ const RESERVED_IDS = ["settings", "sidebar", "customize", "upgrade", "downloads"
 const HASH_SAFE = /^[A-Za-z0-9-]+$/;
 const ID_SAFE = /^[A-Za-z0-9_-]+$/;
 const TITLE_LIMIT = 8192;
+
+// Shell chrome every set must carry: the sidebar's general comment and Submit.
+const REQUIRED_IDS = ["rv-general-toggle", "rv-general-comment", "rv-submit", "rv-submit-msg", "rv-copy"];
+
+const SUBMIT_PATH = "/__review/feedback";
+const DEFAULT_PORT = 8765;
+const BODY_LIMIT = 1024 * 1024;
+const LOCAL_HOSTS = ["127.0.0.1", "localhost"];
+const TYPES = {
+	".html": "text/html; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".json": "application/json; charset=utf-8",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".txt": "text/plain; charset=utf-8"
+};
 
 const SCRIPT_HOSTS = [
 	"https://cdnjs.cloudflare.com/",
@@ -152,6 +179,9 @@ function checkChrome(html, errors) {
 	Object.keys(ids).forEach(function (id) {
 		if (ids[id] > 1) errors.push("duplicate id=\"" + id + "\" (" + ids[id] + " times)");
 	});
+	REQUIRED_IDS.forEach(function (id) {
+		if (!ids[id]) errors.push("missing id=\"" + id + "\": rebuild the set on the current shell.html");
+	});
 	let shells = 0;
 	const cre = /\bclass\s*=\s*"([^"]*)"/gi;
 	while ((m = cre.exec(html))) {
@@ -250,6 +280,124 @@ function check(html) {
 	return errors;
 }
 
+// The feedback the page posts; returns an error string or null.
+function checkFeedback(fb) {
+	if (!fb || typeof fb !== "object" || Array.isArray(fb)) return "feedback is not an object";
+	if (typeof fb.set !== "string" || !HASH_SAFE.test(fb.set)) return "set missing or not hash-safe";
+	if (typeof fb.rev !== "number" || Math.floor(fb.rev) !== fb.rev) return "rev must be an integer";
+	if (typeof fb.general !== "string") return "general must be a string";
+	if (!Array.isArray(fb.verdicts)) return "verdicts must be a list";
+	return null;
+}
+
+function hostOk(host, port) {
+	return LOCAL_HOSTS.some(function (h) { return host === h + ":" + port; });
+}
+
+function reply(res, code, type, body) {
+	res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+	res.end(body);
+}
+
+// Serves the set's folder on 127.0.0.1 and writes Submit's POST next to the set.
+// Host and Origin must name this server, so another site open in the browser
+// can neither read the set nor post feedback (DNS rebinding, cross-site POST).
+// onFeedback(file) runs after each write.
+function serve(file, port, onFeedback) {
+	const root = path.dirname(path.resolve(file));
+	const server = http.createServer(function (req, res) {
+		const host = req.headers.host || "";
+		if (!hostOk(host, server.address().port)) return reply(res, 403, "text/plain", "forbidden host\n");
+		const url = new URL(req.url, "http://" + host);
+		if (url.pathname === SUBMIT_PATH) {
+			if (req.method !== "POST") return reply(res, 405, "text/plain", "POST only\n");
+			if (req.headers.origin !== "http://" + host) return reply(res, 403, "text/plain", "forbidden origin\n");
+			if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) {
+				return reply(res, 415, "text/plain", "JSON only\n");
+			}
+			const chunks = [];
+			let size = 0;
+			let dropped = false;
+			req.on("data", function (c) {
+				size += c.length;
+				if (size > BODY_LIMIT) {
+					dropped = true;
+					reply(res, 413, "text/plain", "too large\n");
+					req.destroy();
+				} else chunks.push(c);
+			});
+			req.on("end", function () {
+				if (dropped) return;
+				let fb;
+				try {
+					fb = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+				} catch (e) {
+					reply(res, 400, "text/plain", "bad JSON\n");
+					return;
+				}
+				const bad = checkFeedback(fb);
+				if (bad) {
+					reply(res, 400, "text/plain", bad + "\n");
+					return;
+				}
+				const out = path.join(root, fb.set + "-feedback.json");
+				fs.writeFileSync(out, JSON.stringify(fb, null, 2) + "\n", "utf8");
+				reply(res, 200, TYPES[".json"], JSON.stringify({ ok: true, file: path.basename(out) }));
+				if (onFeedback) onFeedback(out);
+			});
+			return undefined;
+		}
+		if (req.method !== "GET" && req.method !== "HEAD") return reply(res, 405, "text/plain", "GET only\n");
+		let rel;
+		try {
+			rel = decodeURIComponent(url.pathname);
+		} catch (e) {
+			return reply(res, 400, "text/plain", "bad path\n");
+		}
+		const target = path.resolve(root, "." + rel);
+		if (target.indexOf(root + path.sep) !== 0) return reply(res, 404, "text/plain", "not found\n");
+		fs.readFile(target, function (err, data) {
+			if (err) return reply(res, 404, "text/plain", "not found\n");
+			const type = TYPES[path.extname(target).toLowerCase()] || "application/octet-stream";
+			return reply(res, 200, type, req.method === "HEAD" ? "" : data);
+		});
+		return undefined;
+	});
+	server.listen(port, "127.0.0.1");
+	return server;
+}
+
+// Returns null while the server runs; the process then exits on its own.
+function serveMain(args) {
+	const pi = args.indexOf("--port");
+	const file = args.filter(function (a, i) { return a.indexOf("--") !== 0 && (pi < 0 || i !== pi + 1); })[0];
+	const port = pi >= 0 ? Number(args[pi + 1]) : DEFAULT_PORT;
+	const once = args.indexOf("--once") >= 0;
+	if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+		console.error("serve: pass the set's .html file");
+		return 2;
+	}
+	if (!(port >= 0 && port < 65536 && Math.floor(port) === port)) {
+		console.error("serve: --port must be 0-65535");
+		return 2;
+	}
+	const server = serve(file, port, function (out) {
+		console.log("feedback " + out);
+		if (once) server.close(function () { process.exit(0); });
+	});
+	server.on("listening", function () {
+		const p = server.address().port;
+		console.log("serving http://127.0.0.1:" + p + "/" + encodeURIComponent(path.basename(file)));
+		console.log("feedback goes to " + path.join(path.dirname(path.resolve(file)), "<set>-feedback.json") +
+			(once ? " (the server stops after the first submit)" : ""));
+	});
+	server.on("error", function (e) {
+		console.error("serve: " + e.message);
+		process.exit(1);
+	});
+	return null;
+}
+
 function main(argv) {
 	const cmd = argv[0];
 	const files = argv.slice(1);
@@ -275,10 +423,14 @@ function main(argv) {
 		});
 		return failed ? 1 : 0;
 	}
-	console.error("usage: node scripts/review-set.js css [file] | check <file...>");
+	if (cmd === "serve") return serveMain(files);
+	console.error("usage: node scripts/review-set.js css [file] | check <file...> | serve <file> [--port N] [--once]");
 	return 2;
 }
 
-if (require.main === module) process.exit(main(process.argv.slice(2)));
+if (require.main === module) {
+	const code = main(process.argv.slice(2));
+	if (code !== null) process.exit(code);
+}
 
-module.exports = { stewardCss, inject, check, BEGIN, END, SCOPE_ID };
+module.exports = { stewardCss, inject, check, checkFeedback, serve, BEGIN, END, SCOPE_ID, SUBMIT_PATH };

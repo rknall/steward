@@ -73,8 +73,29 @@ body { background: var(--rv-bg); color: var(--rv-ink); font-family: var(--rv-fon
 .rv-shell *, .rv-shell *::before, .rv-shell *::after { box-sizing: border-box; }
 
 /* Sidebar */
-#rv-nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; min-width: 0; }
+/* The sidebar fills the viewport height while it sticks, so its footer (general
+   comment and Submit) stays at the bottom of the window as the page scrolls. */
+#rv-nav {
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; min-width: 0;
+  display: flex; flex-direction: column; gap: 12px;
+  height: calc(100vh - 32px - env(safe-area-inset-top, 0px)); height: calc(100dvh - 32px - env(safe-area-inset-top, 0px));
+}
+#rv-nav-menu { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 #rv-nav-menu > summary { display: none; }
+#rv-nav-foot { flex: 0 0 auto; display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--rv-line); }
+#rv-nav-foot .rv-btn { width: 100%; }
+#rv-general { display: grid; gap: 6px; }
+#rv-general[hidden] { display: none; }
+#rv-general-comment {
+  width: 100%; min-height: 110px; max-height: 40vh; resize: vertical; font: inherit; font-size: 14px; padding: 8px 10px;
+  border: 1px solid var(--rv-line); border-radius: 6px; background: var(--rv-panel); color: var(--rv-ink);
+}
+#rv-general-toggle[data-filled="true"]::after { content: " ✓"; color: var(--rv-ok); }
+#rv-submit { border-color: var(--rv-accent); background: var(--rv-accent); color: var(--rv-accent-ink); font-weight: 600; }
+#rv-submit:not(:disabled):hover { filter: brightness(1.08); }
+#rv-submit-msg { margin: 0; font-size: 13px; color: var(--rv-muted); overflow-wrap: anywhere; }
+#rv-submit-msg[data-status="ok"] { color: var(--rv-ok); }
+#rv-submit-msg[data-status="error"] { color: var(--rv-stale); }
 .rv-nav-head { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--rv-muted); margin: 4px 0 8px; }
 #rv-nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .rv-nav-link {
@@ -161,7 +182,8 @@ body { background: var(--rv-bg); color: var(--rv-ink); font-family: var(--rv-fon
 
 @media (max-width: 720px) {
   .rv-shell { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 12px 32px; }
-  #rv-nav { position: static; }
+  #rv-nav { position: static; height: auto; }
+  #rv-nav-menu { overflow: visible; }
   #rv-nav-menu { background: var(--rv-panel); border: 1px solid var(--rv-line); border-radius: 8px; padding: 8px 10px; }
   #rv-nav-menu > summary { display: list-item; cursor: pointer; font-weight: 600; }
   #rv-nav-menu[open] > summary { margin-bottom: 8px; }
@@ -182,6 +204,15 @@ body { background: var(--rv-bg); color: var(--rv-ink); font-family: var(--rv-fon
       <ol id="rv-nav-list"></ol>
       <p id="rv-progress"></p>
     </details>
+    <div id="rv-nav-foot">
+      <button type="button" class="rv-btn" id="rv-general-toggle" aria-expanded="false" aria-controls="rv-general">General comment</button>
+      <div id="rv-general" hidden>
+        <label class="rv-comment-label" for="rv-general-comment">Comment on the whole set</label>
+        <textarea id="rv-general-comment" name="rv-general-comment" placeholder="Anything that is not about one page."></textarea>
+      </div>
+      <button type="button" class="rv-btn" id="rv-submit">Submit feedback</button>
+      <p id="rv-submit-msg" role="status"></p>
+    </div>
   </nav>
 
   <main id="rv-main">
@@ -390,14 +421,33 @@ var RV = (function () {
 		return out;
 	}
 
-	function feedback(set, docsById) {
+	function currentDocs(set, docsById) {
 		var list = [];
 		for (var i = 0; i < set.pages.length; i++) {
 			var doc = docsById ? docsById[set.pages[i].id] : null;
 			var s = status(set, doc);
 			if (s === 'approve' || s === 'disapprove') { list.push(doc); }
 		}
-		return JSON.stringify(list, null, 2);
+		return list;
+	}
+
+	function feedback(set, docsById) {
+		return JSON.stringify(currentDocs(set, docsById), null, 2);
+	}
+
+	// What Submit posts and Copy feedback copies: the current verdicts in page order
+	// plus the one general comment on the whole set.
+	function submission(set, docsById, general, nowIso) {
+		var p = progress(set, docsById);
+		return {
+			set: set.set,
+			task: set.task,
+			rev: set.rev,
+			general: String(general === undefined || general === null ? '' : general).trim(),
+			verdicts: currentDocs(set, docsById),
+			pending: p.pending,
+			at: nowIso
+		};
 	}
 
 	return {
@@ -409,7 +459,8 @@ var RV = (function () {
 		makeVerdict: makeVerdict,
 		status: status,
 		progress: progress,
-		feedback: feedback
+		feedback: feedback,
+		submission: submission
 	};
 })();
 </script>
@@ -422,6 +473,9 @@ var RV = (function () {
 	var BADGE = { none: '', approve: '✓', disapprove: '✕', stale: '!' };
 	var BADGE_TEXT = { none: 'No verdict yet', approve: 'Approved', disapprove: 'Disapproved', stale: 'Verdict out of date' };
 	var NARROW = '(max-width: 720px)';
+	// Served by `node scripts/review-set.js serve`; the doc id is not hash-safe, so no page can take it.
+	var SUBMIT_PATH = '/__review/feedback';
+	var GENERAL_DOC = 'verdicts/_general';
 
 	function $(id) { return document.getElementById(id); }
 
@@ -668,25 +722,107 @@ var RV = (function () {
 		}
 	}
 
-	function copyFeedback() {
-		var text = RV.feedback(set, docs);
+	function generalText() { return $('rv-general-comment').value; }
+
+	function submissionText() {
+		return JSON.stringify(RV.submission(set, docs, generalText(), new Date().toISOString()), null, 2);
+	}
+
+	// note: optional sentence put before the copy result; also shown under Submit.
+	function copyFeedback(note) {
+		var text = submissionText();
 		var area = $('rv-feedback');
 		var msg = $('rv-copy-msg');
+		var lead = typeof note === 'string' && note ? note + ' ' : '';
+		function say(t) {
+			msg.textContent = t;
+			if (lead) { submitMsg(lead + t, 'error'); }
+		}
 		function fallback() {
 			area.value = text;
 			area.hidden = false;
 			area.focus();
 			area.select();
-			msg.textContent = 'Copy the selected text and paste it into the chat.';
+			say('Copy the selected feedback text and paste it into the chat.');
 		}
 		if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
 			window.navigator.clipboard.writeText(text).then(function () {
 				area.hidden = true;
-				msg.textContent = 'Copied. Paste it into the chat.';
+				say('Feedback copied. Paste it into the chat.');
 			}, fallback);
 		} else {
 			fallback();
 		}
+	}
+
+	function submitMsg(text, st) {
+		var el = $('rv-submit-msg');
+		el.textContent = text || '';
+		if (st) { el.setAttribute('data-status', st); } else { el.removeAttribute('data-status'); }
+	}
+
+	function pendingNote() {
+		var p = RV.progress(set, docs);
+		return p.pending ? ' ' + p.pending + ' of ' + p.total + ' pages have no verdict yet.' : '';
+	}
+
+	// Only the local review server takes a POST; a file:// page or a published
+	// link never sends feedback anywhere.
+	function hasServer() {
+		var loc = window.location;
+		return loc.protocol === 'http:' && (loc.hostname === '127.0.0.1' || loc.hostname === 'localhost') &&
+			typeof window.fetch === 'function';
+	}
+
+	function saveGeneralDb() {
+		if (mode !== 'db' || !db) { return null; }
+		return db.doc(GENERAL_DOC).set({ set: set.set, rev: set.rev, comment: generalText().trim(),
+			by: userId, at: new Date().toISOString() });
+	}
+
+	function submitFeedback() {
+		if (mode === 'db') {
+			var saving = saveGeneralDb();
+			submitMsg('Saving…');
+			saving.then(function () {
+				submitMsg('Saved in the verdict store. Tell the session you are done.' + pendingNote(), 'ok');
+			}, function () {
+				copyFeedback('The general comment was not saved.');
+			});
+			return;
+		}
+		if (!hasServer()) {
+			copyFeedback('No review server is running.');
+			return;
+		}
+		var btn = $('rv-submit');
+		btn.disabled = true;
+		submitMsg('Sending…');
+		window.fetch(SUBMIT_PATH, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: submissionText()
+		}).then(function (res) {
+			btn.disabled = false;
+			if (res.ok) {
+				submitMsg('Sent to the session at ' + new Date().toLocaleTimeString() + '.' + pendingNote(), 'ok');
+			} else {
+				copyFeedback('The review server refused the feedback (' + res.status + ').');
+			}
+		}, function () {
+			btn.disabled = false;
+			copyFeedback('The review server cannot be reached.');
+		});
+	}
+
+	function setGeneralOpen(open) {
+		$('rv-general').hidden = !open;
+		$('rv-general-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+		if (open) { $('rv-general-comment').focus(); }
+	}
+
+	function markGeneral() {
+		$('rv-general-toggle').setAttribute('data-filled', generalText().trim() ? 'true' : 'false');
 	}
 
 	function goLocal() {
@@ -694,7 +830,9 @@ var RV = (function () {
 		db = null;
 		// Only without the shared store: verdicts then live in this browser until copied.
 		try { docs = JSON.parse(load(prefix + 'local') || '{}') || {}; } catch (e) { docs = {}; }
-		setBanner('Local review: record your verdicts, then press Copy feedback and paste it into the chat.');
+		setBanner(hasServer() ?
+			'Local review: record your verdicts, then press Submit feedback in the sidebar.' :
+			'Local review: record your verdicts, then press Submit feedback; without a review server it copies the feedback for the chat.');
 		renderVerdicts();
 	}
 
@@ -712,6 +850,12 @@ var RV = (function () {
 				if (snap.docs[i].exists) { next[snap.docs[i].id] = snap.docs[i].data(); }
 			}
 			docs = next;
+			var g = next._general;
+			if (g && g.set === set.set && typeof g.comment === 'string' && !generalText() &&
+					document.activeElement !== $('rv-general-comment')) {
+				$('rv-general-comment').value = g.comment;
+				markGeneral();
+			}
 			if (!snap.metadata || !snap.metadata.fromCache) {
 				if (loadTimer) { window.clearTimeout(loadTimer); loadTimer = null; }
 				setBanner('');
@@ -727,7 +871,18 @@ var RV = (function () {
 	$('rv-verdict').addEventListener('submit', function (e) { e.preventDefault(); });
 	$('rv-approve').addEventListener('click', function () { decide('approve'); });
 	$('rv-disapprove').addEventListener('click', function () { decide('disapprove'); });
-	$('rv-copy').addEventListener('click', copyFeedback);
+	$('rv-copy').addEventListener('click', function () { copyFeedback(''); });
+	$('rv-submit').addEventListener('click', submitFeedback);
+	$('rv-general-toggle').addEventListener('click', function () { setGeneralOpen($('rv-general').hidden); });
+	$('rv-general-comment').addEventListener('input', function () {
+		var v = generalText();
+		store(prefix + 'general', v ? v : null);
+		markGeneral();
+	});
+	$('rv-general-comment').addEventListener('change', function () {
+		var saving = saveGeneralDb();
+		if (saving) { saving.then(null, function () { submitMsg('The general comment was not saved yet; Submit tries again.', 'error'); }); }
+	});
 	$('rv-prev').addEventListener('click', function () { if (current > 0) { window.location.hash = set.pages[current - 1].id; } });
 	$('rv-next').addEventListener('click', function () { if (current < set.pages.length - 1) { window.location.hash = set.pages[current + 1].id; } });
 	$('rv-comment').addEventListener('input', function () {
@@ -748,6 +903,8 @@ var RV = (function () {
 	}
 
 	buildNav();
+	$('rv-general-comment').value = load(prefix + 'general') || '';
+	markGeneral();
 	render();
 
 	if (typeof claude !== 'undefined' && claude && typeof claude.use === 'function') {
