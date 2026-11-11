@@ -115,7 +115,7 @@
 
         var r = null;
         try {
-            r = S.kernel.files.writableDir('steward/logs', consoleNote);
+            r = S.kernel.files.writableDir(S.kernel.files.stewardPath('logs'), consoleNote);
         } catch (e) { r = null; }
 
         if (!r) {

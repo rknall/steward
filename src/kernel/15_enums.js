@@ -84,4 +84,58 @@
         None:    'SpeedBuffNone'
     };
 
+    // Kinds of version strings, owned by kernel/18_semver.js. Release is a plain
+    // x.y.z, Prerelease carries a suffix such as alpha2, Dev is a build ahead of
+    // a tag (-n-g<sha>) or dirty, Unknown is the unversioned 0.0.0 with or
+    // without a suffix (the 0.0.0-git placeholder).
+    S.VersionKind = {
+        Release:    'VersionRelease',
+        Prerelease: 'VersionPrerelease',
+        Dev:        'VersionDev',
+        Unknown:    'VersionUnknown'
+    };
+
+    // States of the updater module's check (modules/updater/check.js).
+    S.UpdateState = {
+        Idle:       'UpdateIdle',
+        Checking:   'UpdateChecking',
+        Current:    'UpdateCurrent',
+        Available:  'UpdateAvailable',
+        Installing: 'UpdateInstalling',
+        Failed:     'UpdateFailed'
+    };
+
+    // Why a check or an install ended, shared by modules/updater/*.js. Busy
+    // means a check or install is already running, OpenEdits means Settings
+    // has unsaved edits, AutoBlocked means an automatic install was asked for
+    // a version pair that semver.autoInstallable rejects.
+    S.UpdateFailure = {
+        Unsupported:     'UpdateUnsupported',
+        Network:         'UpdateNetwork',
+        RateLimited:     'UpdateRateLimited',
+        BadResponse:     'UpdateBadResponse',
+        ForeignUrl:      'UpdateForeignUrl',
+        NoAsset:         'UpdateNoAsset',
+        SizeMismatch:    'UpdateSizeMismatch',
+        DigestMismatch:  'UpdateDigestMismatch',
+        VersionMismatch: 'UpdateVersionMismatch',
+        NoDigest:        'UpdateNoDigest',
+        Busy:            'UpdateBusy',
+        OpenEdits:       'UpdateOpenEdits',
+        AutoBlocked:     'UpdateAutoBlocked',
+        BundleMissing:   'UpdateBundleMissing',
+        BackupFailed:    'UpdateBackupFailed',
+        WriteFailed:     'UpdateWriteFailed',
+        RestoreFailed:   'UpdateRestoreFailed'
+    };
+
+    // Steps of an install, in order (modules/updater/install.js).
+    S.InstallStep = {
+        Download: 'InstallDownload',
+        Verify:   'InstallVerify',
+        Backup:   'InstallBackup',
+        Write:    'InstallWrite',
+        Reload:   'InstallReload'
+    };
+
 }(Steward));

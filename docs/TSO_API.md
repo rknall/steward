@@ -32,7 +32,7 @@ Steward keeps its files under `<client install>/steward/` (for example `steward/
 2. `applicationStorageDirectory`, when the install folder refuses the directory.
 3. `documentsDirectory`, as the last resort.
 
-`Steward.kernel.files.writableDir(rel)` returns `{ dir, where }`, with `where` set to a `Steward.FileLocation` value (`Steward.FileLocation.Application`, `.Storage` or `.Documents`), or `null` when none works. `stewardDir(sub)` is the same under `steward/`. Modules do not build `air.File` or `air.FileStream` objects themselves; they use the file API:
+`Steward.kernel.files.writableDir(rel)` returns `{ dir, where }`, with `where` set to a `Steward.FileLocation` value (`Steward.FileLocation.Application`, `.Storage` or `.Documents`), or `null` when none works. `stewardDir(sub)` is the same under `steward/`. `stewardPath(sub)` returns that path as text, `steward/<sub>`, without touching the file system, for display and for building names. Modules do not build `air.File` or `air.FileStream` objects themselves; they use the file API:
 
 | Call | Purpose |
 |------|---------|

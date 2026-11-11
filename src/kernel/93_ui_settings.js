@@ -111,7 +111,7 @@
         sc.baseline('scheduler', { tickInterval: tick });
 
         var $log = h.card({ icon: '✎', title: sc.nsName('logger') });
-        $log.append(h.field('Write the log to a file', 'steward/logs/console.log',
+        $log.append(h.field('Write the log to a file', S.kernel.files.stewardPath('logs') + '/console.log',
             loggerToggle(h, 'fileEnabled', 'Write the log to a file', cfg.fileEnabled)));
         $log.append(h.field('Include debug lines', 'Much more detail, for bug reports',
             loggerToggle(h, 'debugEnabled', 'Include debug lines', cfg.debugEnabled)));

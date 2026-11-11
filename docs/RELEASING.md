@@ -15,6 +15,7 @@ the test harness use the first of these that is set:
 3. `package.json` `version`, the placeholder `0.0.0-git`, for a checkout
    without git or tags. It is never bumped, so the `steward@0.0.0-git` line npm
    prints before a build is not the bundle version; the build's own last line is.
+   The updater reads any 0.0.0 version as unversioned and never offers it an update.
 4. `0.0.0`.
 
 Tags are the version record. A release build made on a tagged commit reads
@@ -50,6 +51,21 @@ then `scripts/release.js` decides.
 
 CI never commits or pushes to a branch. Only `contents: write` is granted, for
 the tag and release.
+
+## What the in-game updater depends on
+
+The updater module reads the GitHub Releases of this repository and installs the
+asset it finds. Three conventions are therefore a contract; changing any of
+them breaks updates for every installed client:
+
+- The tag shape `v<semver>`, for example `v0.10.14`.
+- The release asset name `user_steward.js`.
+- The banner line ` * Steward v<ver>` at the top of the bundle, which the
+  updater compares with the release tag before it writes the file.
+
+The banner is written by `banner()` in `scripts/build.js`, and
+`tests/modules/updater-install.test.js` builds its fixture from that function.
+A wording change there therefore fails the test, not every installed client.
 
 ## Dry run
 

@@ -14,6 +14,7 @@
  *
  *   read('collect')           ↔ settings.read(null, 'steward.collect')
  *   write('collect', obj)     ↔ settings.store(obj, 'steward.collect')
+ *   replaceAll({ id: obj })   ↔ host.settings['steward.<id>'] = obj, then save()
  *
  * Why delegate? Three reasons:
  *   1. Per-profile separation (matches autoTSO and other userscripts).
@@ -82,8 +83,9 @@
             return false;
         }
         try {
-            // settings.store does a deep $.extend then save(). Passing the
-            // full module object replaces the namespace cleanly.
+            // settings.store does a deep $.extend then save(). It merges into
+            // the stored namespace and never removes keys, so a key dropped
+            // from `value` survives on disk. Use replaceAll to replace.
             host.store(value, ns);
             return true;
         } catch (e) {
@@ -113,13 +115,63 @@
         return out;
     }
 
+    function replaceAll(map) {
+        // Replaces every steward namespace with `map` (same shape as all()):
+        // namespaces absent from `map` are removed, the rest are assigned
+        // whole. This bypasses settings.store on purpose, because its deep
+        // merge cannot drop keys, so a restored snapshot would keep stale ones.
+        var host = hostSettings();
+        if (!host || !host.settings || typeof host.settings !== 'object' ||
+            typeof host.save !== 'function') {
+            S.kernel.warn('settings', 'replaceAll: host settings or save() not present, nothing replaced');
+            return false;
+        }
+        var copy;
+        try {
+            // Deep copy first so the host never shares references with the
+            // caller, and an unserialisable map fails before anything changes.
+            copy = JSON.parse(JSON.stringify(map));
+        } catch (e) {
+            S.kernel.error('settings', 'replaceAll: map is not serialisable:', e);
+            return false;
+        }
+        if (!copy || typeof copy !== 'object') {
+            S.kernel.warn('settings', 'replaceAll: map is not an object, nothing replaced');
+            return false;
+        }
+        var allHost = host.settings;
+        var keys = Object.keys(allHost);
+        var removed = 0;
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (k.indexOf(NS_PREFIX) === 0 &&
+                !Object.prototype.hasOwnProperty.call(copy, k.substring(NS_PREFIX.length))) {
+                delete allHost[k];
+                removed++;
+            }
+        }
+        var ids = Object.keys(copy);
+        for (var j = 0; j < ids.length; j++) {
+            allHost[NS_PREFIX + ids[j]] = copy[ids[j]];
+        }
+        try {
+            host.save();
+        } catch (e2) {
+            S.kernel.error('settings', 'replaceAll: host save threw:', e2);
+            return false;
+        }
+        S.kernel.log('settings', 'replaced ' + ids.length + ' namespaces, removed ' + removed);
+        return true;
+    }
+
     S.kernel.settings = {
         load:  load,
         save:  save,
         flush: flush,
         read:  read,
         write: write,
-        all:   all
+        all:   all,
+        replaceAll: replaceAll
     };
 
 }(Steward));
