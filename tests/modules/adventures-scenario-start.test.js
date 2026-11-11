@@ -37,7 +37,7 @@ function setup(maps, o) {
     S.modules.adventures.builtinScenarios = { twins: builtinText('twins') };
     var rec = S.modules.adventures.scenarios.get('twins');
     var buffs = maps > 0 ? [{ type: 'Adventure', resource: rec.adventure, amount: maps }] : [];
-    A.install(H, { buffs: buffs });
+    A.install(H, { buffs: buffs, adventureDefs: [A.adventureDef({ name: rec.adventure, type: 'Mission' })] });
     var s = {
         fs: fs, H: H, S: S, rec: rec, alerts: alerts, prompts: [], confirms: [],
         run: S.modules.adventures.run, st: S.modules.adventures.state,
@@ -79,11 +79,13 @@ function lastAlert(s) {
 t.test('menu lists a built-in scenario after the templates with its map count', function () {
     var s = setup(3);
     var labels = menuLabels(s);
-    assert.deepStrictEqual(labels.slice(8), ['No templates yet', '---', 'Twins ×3']);
+    assert.deepStrictEqual(labels.slice(8, 10), ['No templates yet', '---']);
     var items = s.S.modules.adventures.menu.items();
+    assert.strictEqual(labelOf(items[10]), 'Scenarios');
+    assert.deepStrictEqual(plain(items[10].items.map(function (it) { return labelOf(it); })), ['Twins ×3']);
     var called = [];
     s.run.startScenario = function (id) { called.push(id); };
-    items[10].onSelect();
+    items[10].items[0].onSelect();
     assert.deepStrictEqual(called, ['twins']);
 });
 
@@ -98,10 +100,11 @@ t.test('a broken scenario file is a disabled row', function () {
     var s = setup(1);
     s.fs.disk[DIR + '/zz_bad.json'] = '{ not json';
     var items = s.S.modules.adventures.menu.items();
-    var last = items[items.length - 1];
+    var inner = items[items.length - 1].items;
+    var last = inner[inner.length - 1];
     assert.strictEqual(labelOf(last), 'zz_bad: broken scenario file');
     assert.strictEqual(last.enabled, false);
-    assert.strictEqual(labelOf(items[items.length - 2]), 'Twins ×1');
+    assert.strictEqual(labelOf(inner[inner.length - 2]), 'Twins ×1');
 });
 
 t.test('sync rebuilds when the scenario set changes', function () {

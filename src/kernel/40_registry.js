@@ -68,7 +68,9 @@
  *
  * When the item set itself changes (not just a label), the module calls
  * Steward.kernel.ui.refreshModuleMenu(id), which rebuilds only its own
- * submenu. Do that on a user action only, never on a timer.
+ * submenu. Do that on a user action only, never on a timer (the adventures
+ * submenu's one rebuild when the adventure list first becomes readable is the
+ * documented exception, see MODULE_GUIDE).
  *
  * Bar menu spec (optional): a `barMenu` field has the same shape as `menu`
  * and becomes a separate root item beside ~Steward~. Its labels and enabled

@@ -589,7 +589,55 @@
                                   ' difficulty=' + d.difficulty + ' requiresEvent=' + d.requiresEvent +
                                   ' selectable=' + S.core.adventures.isSelectable(d));
             }
+            dumpAdventureFolders(cat, defs);
         } catch (e2) { S.kernel.error(cat, 'adventure definitions dump threw:', e2); }
+    }
+
+    // Campaign values and the menu folder of each saved template and scenario,
+    // so one dump settles which host type values the folder table must carry.
+    // The adventures parts are late-bound: the dump works without the module.
+    function dumpAdventureFolders(cat, defs) {
+        var a = S.core.adventures;
+        var camp = {};
+        var raws = [];
+        var events = 0;
+        for (var i = 0; i < defs.length; i++) {
+            if (defs[i].requiresEvent) events++;
+            if (!a.hasCampaign(defs[i])) continue;
+            var raw = String(defs[i].campaign);
+            if (!has(camp, raw)) { camp[raw] = 0; raws.push(raw); }
+            camp[raw]++;
+        }
+        raws.sort();
+        var cp = [];
+        for (var c = 0; c < raws.length; c++) {
+            cp.push(raws[c] + '=' + camp[raws[c]] + ' (' + a.campaignLabel(raws[c]) + ')');
+        }
+        S.kernel.log(cat, '  campaigns: ' + (cp.length ? cp.join(', ') : '(none)'));
+        S.kernel.log(cat, '  requiresEvent: ' + events);
+
+        var index = a.byName(defs);
+        var mod = S.modules && S.modules.adventures;
+        var kinds = [
+            { word: 'template', part: mod && mod.templates, scenario: false },
+            { word: 'scenario', part: mod && mod.scenarios, scenario: true }
+        ];
+        for (var k = 0; k < kinds.length; k++) {
+            if (!kinds[k].part || typeof kinds[k].part.list !== 'function') continue;
+            var rows = kinds[k].part.list();
+            for (var r = 0; r < rows.length; r++) {
+                var rec = rows[r];
+                // unreadable files carry no label or adventure to place
+                if (rec.error !== undefined) continue;
+                var def = has(index, rec.adventure) ? index[rec.adventure] : null;
+                S.kernel.log(cat, '  ' + kinds[k].word + ' "' + rec.label + '" ' + rec.adventure +
+                                  ' type=' + (def ? def.type : '?') +
+                                  ' campaign=' + (def ? def.campaign : '?') +
+                                  ' requiresEvent=' + (def ? def.requiresEvent : '?') +
+                                  ' folder=' + a.folderPath(def, kinds[k].scenario).join(' > ') +
+                                  (def ? '' : ' not in definitions'));
+            }
+        }
     }
 
     function dumpBuffDefinitions(cat) {

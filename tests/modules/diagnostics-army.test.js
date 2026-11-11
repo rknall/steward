@@ -480,3 +480,25 @@ t.test('the sampler button label follows the countdown', function () {
     $btn.trigger('click');
     t.assert.strictEqual($btn.text(), 'Stop (3:00 left)');
 });
+
+t.test('dumpDefinitions logs campaigns and each template\'s folder', function () {
+    var A = require('../stubs/army');
+    var fs = airfs.make();
+    var H = harness.boot({ host: { air: fs.air } });
+    A.install(H, { adventureDefs: [
+        A.adventureDef({ name: 'AdvM', type: 'Mission' }),
+        A.adventureDef({ name: 'AdvC', type: 'Mission', campaign: 'ArabianNights' })
+    ] });
+    H.Steward.modules.adventures.templates.save({
+        label: 'Alpha', adventure: 'AdvM', loadout: 'C:/b/l.json', waves: ['C:/b/w1.json'], speedBuff: 'SpeedBuffDefault'
+    }, 1000);
+    var saved = Object.keys(fs.disk).filter(function (k) { return /t1000\.json$/.test(k); })[0];
+    t.assert.ok(saved, 'saved template file found');
+    fs.disk[saved.replace(/t1000\.json$/, 'zz_bad.json')] = '{ not json';
+    H.clearLogs();
+    H.Steward.modules.diagnostics.army.dumpDefinitions();
+    var lines = H.logs().map(function (l) { return String(l.args[0]); });
+    t.assert.ok(lines.some(function (l) { return /^ {2}campaigns: ArabianNights=1 \(/.test(l); }), lines.join('\n'));
+    t.assert.ok(lines.some(function (l) { return /^ {2}template "Alpha" AdvM type=Mission .*folder=Missions$/.test(l); }), lines.join('\n'));
+    t.assert.ok(!lines.some(function (l) { return /"undefined"|template .*undefined/.test(l); }), lines.join('\n'));
+});

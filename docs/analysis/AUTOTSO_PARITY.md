@@ -205,7 +205,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | `completeQuest` mid-adventure | — | ✗ |
 | `auto.start` / repeat counter | menu start with run count and End repetition; request stored only, no executor | ~ |
 | Scenario adventures (produce/apply items, visit, collect pickups, return home) | `modules/adventures` scenario runs, one JSON file per scenario (see docs/SCENARIOS.md) | ~ |
-| Template menu with map counts | `~Steward~ > Adventures` lists templates with star-menu map counts | ✓ |
+| Template menu with map counts | `~Steward~ > Adventures` lists templates and scenarios in category folders with star-menu map counts | ✓ |
 | Extra template actions (todo) | — | ✗ (home loadout load, start adventure with Black Vortex option, send generals, visit adventure with auto-claim of quests, wait for departure, star generals, use speed buff, produce adventure items (skippable), apply adventure items, waves with kill-all, collect pickups, return home, load generals to end, module-wide retrain of lost units) |
 
 **Note**: `aAdventure` is autoTSO's flagship feature (~1700 lines). Touches every other subsystem. v0.8+ scope.
