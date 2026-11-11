@@ -743,6 +743,62 @@ t.test('itemWant running: held beats done, met held quests and finished quests a
     t.assert.strictEqual(bootClick([main]).Q.itemWant('Shovel', null, { running: true }), 'none');
 });
 
+// ---- itemWant opts.buildings ----------------------------------------------------
+
+function buildingQuest(extra, statuses, mode) {
+    return itemQuest({
+        triggers: [trig('buffad_sabotage', 0, extra || { condition: 12 })],
+        statuses: statuses || [{ status: 0 }], mode: mode === undefined ? 3 : mode
+    });
+}
+
+function runWant(q, opts) {
+    var o = { running: true };
+    for (var k in (opts || {})) o[k] = opts[k];
+    return bootClick([q]).Q.itemWant('Glue', null, o);
+}
+
+t.test('itemWant running: an open non-click type-1 trigger on the given building makes any item open', function () {
+    var q = buildingQuest();
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'open');
+    t.assert.strictEqual(runWant(q, { buildings: ['other', 'buffad_sabotage'] }), 'open');
+});
+
+t.test('itemWant running: no building, another building or an empty name leaves the item unwanted', function () {
+    var q = buildingQuest();
+    t.assert.strictEqual(runWant(q), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: ['other'] }), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: [''] }), 'none');
+    t.assert.strictEqual(runWant(q, { buildings: 'buffad_sabotage' }), 'none');
+});
+
+t.test('itemWant running: a building match on a mode-2 quest is held', function () {
+    var held = [];
+    var q = buildingQuest(null, null, 2);
+    q.getQuestName_string = function () { return 'Sabotage'; };
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'], held: held }), 'held');
+    t.assert.strictEqual(JSON.stringify(held), JSON.stringify([{ quest: 'Sabotage', mode: 2 }]));
+});
+
+t.test('itemWant running: a closed building trigger is done', function () {
+    var q = buildingQuest(null, [{ status: 1 }]);
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'done');
+});
+
+t.test('itemWant running: a click trigger on the building never matches', function () {
+    var q = buildingQuest({ condition: 9 });
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'none');
+});
+
+t.test('itemWant running: a buff-named end condition wins over a closed building trigger', function () {
+    var q = itemQuest({
+        ends: [endCond('Glue', 1)],
+        triggers: [trig('buffad_sabotage', 0, { condition: 12 })],
+        statuses: [{ status: 1 }, { status: 0 }], mode: 3
+    });
+    t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'open');
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };

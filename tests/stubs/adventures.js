@@ -46,6 +46,15 @@
  *     open until every grid of grids has a need of 0, then the quest is met
  *     and finished (stayOpen: met but not finished). An unread quest is in
  *     mode 2 (not started), others in mode 3;
+ *   - a quest { key, name, building, items, grids } names no item: it has no
+ *     end condition and one type-1 trigger (condition 12, triggerIdx 0) on the
+ *     building name, the way a quest asks for items by the building they go
+ *     to. It is met once every item of items has a need of 0 on every grid;
+ *   - w.gridBuildings[grid] (o.gridBuildings) names the building standing at
+ *     grid: core.buildings.byGrid returns an object whose name reads it (a
+ *     camp grid may carry a name too). Delete the entry and the grid is empty;
+ *   - w.sendCap[buff] (o.sendCap, default none) caps what one send of that
+ *     item takes, the way the game may take less than offered per send;
  *   - w.produceableUnreadable = true makes the definition list unreadable.
  *
  * Nothing here edits the shared stubs; host fakes are installed on the booted
@@ -97,8 +106,11 @@ function writeJson(fs, path, data) { fs.disk[path] = JSON.stringify(data); }
 function patchCore(w) {
     var S = w.S;
     S.core.buildings.byGrid = function (grid) {
-        if (!w.camps[grid]) return null;
-        return { grid: grid, GetStreetGridEntry: function () { return grid + 1000; } };
+        var named = Object.prototype.hasOwnProperty.call(w.gridBuildings, grid);
+        if (!w.camps[grid] && !named) return null;
+        var b = { grid: grid, GetStreetGridEntry: function () { return grid + 1000; } };
+        if (named) b.GetBuildingName_string = function () { return w.gridBuildings[grid]; };
+        return b;
     };
     S.core.buildings.isEnemy = function (b) { return !!b && w.camps[b.grid] === true; };
     S.core.buildings.readable = function () { return w.campsUnreadable !== true; };
@@ -318,6 +330,8 @@ function world(o) {
         frees: {},
         items: o.items || {},
         gridNeed: o.gridNeed || {},
+        gridBuildings: o.gridBuildings || {},
+        sendCap: o.sendCap || {},
         itemSends: []
     };
     w.lists[home ? HOME : ZONE] = fighters;
@@ -461,17 +475,22 @@ function world(o) {
     }
 
     // An item applied to a grid: the game takes at most what the grid still
-    // needs, and a quest whose grids are all met finishes.
+    // needs (and at most w.sendCap of the item per send), and a quest whose
+    // items are met on all its grids finishes.
     function itemAction(e, grid, amount) {
         var k = needKey(e.type, grid);
         var left = k === null ? amount : Math.max(0, w.gridNeed[k]);
         var took = Math.min(amount, left, e.amount);
+        if (typeof w.sendCap[e.type] === 'number') took = Math.min(took, w.sendCap[e.type]);
         e.amount -= took;
         if (k !== null) w.gridNeed[k] -= took;
         w.itemSends.push({ buff: e.type, grid: grid, amount: amount, took: took, t: w.t });
         (w.quests || []).forEach(function (q) {
-            if (q.item !== e.type || !q.grids || q.met) return;
-            if (!q.grids.every(function (g) { return gridMet(q.item, g); })) return;
+            var wanted = q.items || (q.item ? [q.item] : []);
+            if (wanted.indexOf(e.type) < 0 || !q.grids || q.met) return;
+            if (!wanted.every(function (b) {
+                return q.grids.every(function (g) { return gridMet(b, g); });
+            })) return;
             q.met = true;
             if (!q.stayOpen) q.finished = true;
         });
@@ -778,6 +797,7 @@ function installItems(w) {
 
     function hostQuest(q) {
         var ends = q.item ? [{ action_string: 'buffappliedonadventure', item_string: q.item, triggerIdx: 0 }] : [];
+        var triggers = q.building ? [{ type: 1, condition: 12, name_string: q.building, amount: 1, triggerIdx: 0 }] : [];
         return {
             isFinished: function () { return !!q.finished; },
             getQuestName_string: function () { return q.name || ''; },
@@ -785,7 +805,7 @@ function installItems(w) {
             IsActive: function () { return true; },
             IsQuestActive: function () { return true; },
             GetUniqueId: function () { return { toKeyString: function () { return q.key; } }; },
-            GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: [] }; },
+            GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: triggers }; },
             mQuestTriggersFinished_vector: [{ status: q.met ? 1 : 0 }]
         };
     }

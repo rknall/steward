@@ -57,6 +57,9 @@
  * reasons) never counts, because a pick-up or item spent on a quest that does
  * not take it is lost and the scenario may run short. opts.held, when given,
  * collects what waits only because its quest is not running yet.
+ * itemWant() also takes opts.buildings, the names of the buildings at the
+ * target grid: a type-1 trigger that is not a click trigger and names one of
+ * them counts as asking for the item, under the same gate.
  *
  * Bundle slot: core, after production.js and before resources.js (core files
  * load in name order). Everything here runs at call time; the top level only
@@ -409,8 +412,10 @@
 
     // The condition of one quest that names one of the wanted items, or null.
     // End conditions with an item action come first; the quest's triggers of
-    // type 1 are the fallback.
-    function itemCondition(def, names) {
+    // type 1 are the fallback, and last come type-1 triggers that are not click
+    // triggers and name one of the buildings standing at the target grid: a
+    // quest like that asks for the item without naming it.
+    function itemCondition(def, names, buildings) {
         var ends = toList(def.endConditions_vector);
         var i;
         if (ends) {
@@ -425,6 +430,14 @@
                 var t = trig[i];
                 if (t && t.type === 1 && inList(names, t.item_string || t.name_string || t.type_string)) return t;
             }
+            if (buildings && buildings.length) {
+                for (i = 0; i < trig.length; i++) {
+                    var b = trig[i];
+                    if (b && b.type === CLICK_TRIGGER_TYPE && b.condition !== CLICK_TRIGGER_CONDITION &&
+                        typeof b.name_string === 'string' && b.name_string.length > 0 &&
+                        inList(buildings, b.name_string)) return b;
+                }
+            }
         }
         return null;
     }
@@ -438,12 +451,22 @@
     // running yet whose condition is still unmet makes it 'held', ahead of
     // 'done' because the item is still needed, and opts.held (an array),
     // when given, gets { quest, mode } for each such quest.
+    // opts.buildings (an array of names) lists the buildings at the target grid:
+    // a non-click type-1 trigger naming one of them counts as asking for the
+    // item, under the same gate, so a building match can also yield 'done'
+    // (its trigger closed or its quest finished) where it used to be 'none'.
     function itemWant(name, targets, opts) {
         opts = opts || {};
         var strict = opts.running === true;
         var qs = readPool();
         if (qs === null) return null;
         var names = [name].concat(targets || []);
+        var buildings = [];
+        if (Object.prototype.toString.call(opts.buildings) === '[object Array]') {
+            for (var b = 0; b < opts.buildings.length; b++) {
+                if (typeof opts.buildings[b] === 'string' && opts.buildings[b].length > 0) buildings.push(opts.buildings[b]);
+            }
+        }
         var seenDone = false;
         var seenHeld = false;
         for (var i = 0; i < qs.length; i++) {
@@ -458,7 +481,7 @@
                 if (!counts && !strict) continue;
                 var def = definition(q).def;
                 if (!def) continue;
-                var cond = itemCondition(def, names);
+                var cond = itemCondition(def, names, buildings);
                 if (!cond) continue;
                 var unmet = !fin && isTriggerOpen(toList(q.mQuestTriggersFinished_vector), cond);
                 if (!counts) {
