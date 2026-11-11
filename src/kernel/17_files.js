@@ -25,12 +25,12 @@
  *     still resolving the file it would write to. They report through an
  *     optional note(level, message) callback (level: a Steward.LogLevel
  *     value) and never throw.
- *   - High level (stewardDir, info, readText, writeText, list, remove, browse;
+ *   - High level (stewardDir, stewardPath, info, readText, writeText, readBytes, writeBytes, list, remove, browse;
  *     browse filters come from the caller) logs under category 'files' and is
  *     used by core and modules.
  *
- * Write semantics: writeText writes the whole text to `<path>.tmp` and then
- * moves it over the target with overwrite, so a failed write leaves the
+ * Write semantics: writeText and writeBytes write the whole content to
+ * `<path>.tmp` and then move it over the target with overwrite, so a failed write leaves the
  * previous file untouched. Residual risk: if AIR has already removed the
  * target when moveTo fails, the previous content is gone; the temp file is
  * deleted either way so it never shows up as a stray entry.
@@ -39,6 +39,10 @@
 (function (S) {
 
     // ---- Shared helpers ------------------------------------------------
+
+    // Folder under the client install directory and the app storage directory
+    // that holds everything steward writes.
+    var STEWARD_ROOT = 'steward';
 
     function hasFileApi() {
         return typeof air !== 'undefined' && !!air && !!air.File;
@@ -162,7 +166,13 @@
 
     // A directory under steward's own folder, e.g. stewardDir('adventures/templates').
     function stewardDir(sub) {
-        return writableDir('steward/' + sub, logNote);
+        return writableDir(stewardPath(sub), logNote);
+    }
+
+    // The same folder as a relative display path, e.g. 'steward/backups', for
+    // log lines and user text. It touches no file, so it never fails.
+    function stewardPath(sub) {
+        return STEWARD_ROOT + '/' + sub;
     }
 
     function info(path) {
@@ -195,8 +205,9 @@
         return { ok: false, error: error, message: message };
     }
 
-    function readText(path) {
-        if (!hasFileApi()) return fail(S.FileError.Unavailable, 'air.File unavailable');
+    // Shared open + read + close body of readText and readBytes; pull(stream)
+    // returns the payload from the open stream.
+    function readWith(path, pull) {
         var f;
         try {
             f = new air.File(path);
@@ -208,13 +219,13 @@
 
         var stream = null;
         var opened = false;
-        var text = null;
+        var value = null;
         var readError = null;
         try {
             stream = new air.FileStream();
             stream.open(f, air.FileMode.READ);
             opened = true;
-            text = stream.readUTFBytes(stream.bytesAvailable);
+            value = pull(stream);
         } catch (e) {
             readError = e;
         } finally {
@@ -226,14 +237,24 @@
             logNote(S.LogLevel.Warn, 'read failed for ' + path + ': ' + readError);
             return fail(S.FileError.Unreadable, String(readError));
         }
+        return { ok: true, value: value };
+    }
 
-        text = text === null || text === undefined ? '' : String(text);
+    function readText(path) {
+        if (!hasFileApi()) return fail(S.FileError.Unavailable, 'air.File unavailable');
+        var r = readWith(path, function (stream) {
+            return stream.readUTFBytes(stream.bytesAvailable);
+        });
+        if (!r.ok) return r;
+        var text = r.value === null || r.value === undefined ? '' : String(r.value);
         // Editors on Windows often save UTF-8 with a byte order mark.
         if (text.length && text.charCodeAt(0) === 0xFEFF) text = text.substr(1);
         return { ok: true, text: text };
     }
 
-    function writeText(path, text) {
+    // Shared tmp + move body of writeText and writeBytes; emit(stream) writes
+    // the content into the open temp-file stream.
+    function writeAtomic(path, emit) {
         if (!hasFileApi()) {
             logNote(S.LogLevel.Error, 'write failed for ' + path + ': air.File unavailable');
             return fail(S.FileError.Unavailable, 'air.File unavailable');
@@ -259,7 +280,7 @@
             stream = new air.FileStream();
             stream.open(tmp, air.FileMode.WRITE);
             opened = true;
-            stream.writeUTFBytes(text === null || text === undefined ? '' : String(text));
+            emit(stream);
         } catch (e) {
             writeError = e;
         } finally {
@@ -282,6 +303,32 @@
             return fail(S.FileError.Unwritable, String(e));
         }
         return { ok: true, path: target.nativePath };
+    }
+
+    function writeText(path, text) {
+        return writeAtomic(path, function (stream) {
+            stream.writeUTFBytes(text === null || text === undefined ? '' : String(text));
+        });
+    }
+
+    function writeBytes(path, ba) {
+        return writeAtomic(path, function (stream) {
+            stream.writeBytes(ba, 0, ba.length);
+        });
+    }
+
+    // Raw content of a file as an air.ByteArray, position 0.
+    function readBytes(path) {
+        if (!hasFileApi() || typeof air.ByteArray !== 'function') {
+            return fail(S.FileError.Unavailable, 'air.File or air.ByteArray unavailable');
+        }
+        var r = readWith(path, function (stream) {
+            var bytes = new air.ByteArray();
+            stream.readBytes(bytes, 0, stream.bytesAvailable);
+            bytes.position = 0;
+            return bytes;
+        });
+        return r.ok ? { ok: true, bytes: r.value } : r;
     }
 
     // Files (not directories) in dirPath whose name ends with suffix, sorted
@@ -411,9 +458,12 @@
         ensureDir:   ensureDir,
         writableDir: writableDir,
         stewardDir:  stewardDir,
+        stewardPath: stewardPath,
         info:        info,
         readText:    readText,
         writeText:   writeText,
+        readBytes:   readBytes,
+        writeBytes:  writeBytes,
         list:        list,
         remove:      remove,
         browse:      browse

@@ -17,8 +17,11 @@ function noop() {}
 
 function makeSettingsHost() {
     var store = {};
-    return {
+    var host = {
         settings: store,
+        // Counts persist calls, as the host's save() flushes the buffer.
+        saves: 0,
+        save:  function () { host.saves++; },
         // Host's read/write signature: (default, namespace).
         read:  function (defaultValue, ns) {
             return Object.prototype.hasOwnProperty.call(store, ns)
@@ -28,6 +31,7 @@ function makeSettingsHost() {
         store: function (val, ns) { store[ns] = val; },
         _all:  function () { return store; }
     };
+    return host;
 }
 
 function makeAir() {

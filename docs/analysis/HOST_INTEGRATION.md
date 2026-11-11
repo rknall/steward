@@ -114,6 +114,19 @@ So **the host already provides per-userscript enable/disable**. Steward doesn't 
 
 `reloadScripts` re-injects the bundle into the same page and global, so a second copy of Steward starts while the first is still running. The new bundle therefore tears down the previous instance itself (`src/kernel/05_reload.js`): it stops the scheduler, the queue and the status interval before replacing the kernel. Known limitation: if Steward is disabled in the manager and scripts are reloaded, no new bundle is injected, so the running instance stays alive until the client restarts.
 
+## Network and reload facts used by the updater
+
+- `$.ajax` (the host jQuery) can fetch `https://api.github.com/` JSON, but in the
+  AIR WebKit it returns text only. A release asset is downloaded with
+  `air.URLLoader` in BINARY mode, which follows the GitHub redirect to the
+  asset host, so the checksum is computed over the real bytes.
+- `reloadScripts()` injects `*.js` files from `userscripts/` only. A backup or
+  temp file next to the bundle with another extension is never loaded; the
+  updater writes the new bundle atomically (`.tmp`, then move) before calling it.
+- `settingsFile` differs per profile, so the settings of each profile are
+  separate. All profiles share one `steward/` folder, and settings backups are
+  tagged with their profile.
+
 ## Implications for Steward
 
 1. **Settings backend.** Steward should delegate to `settings.store/read` instead of writing its own JSON file. Per-module namespace `'steward.<id>'` (e.g. `'steward.collect'`, `'steward.kernel'`). Gains: per-profile separation, dropbox sync, single place to inspect.

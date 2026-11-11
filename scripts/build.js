@@ -20,11 +20,14 @@
  *
  * Without STEWARD_VERSION the version comes from `git describe` (see
  * scripts/version.js) and falls back to package.json when git is unavailable.
+ *
+ * `banner()` is exported because the updater parses its `Steward v<ver>` line
+ * to verify a downloaded bundle, and its tests build fixtures from it. terser
+ * is required inside build() so that requiring this file needs no dependency.
  */
 
 const fs = require("fs");
 const path = require("path");
-const { minify } = require("terser");
 const loadOrder = require("../tests/load-order");
 const version = require("./version");
 const scenarios = require("./scenarios");
@@ -68,6 +71,7 @@ function banner(version, sha, date, fileCount, byteCount) {
 }
 
 async function build() {
+	const { minify } = require("terser");
 	if (!fs.existsSync(BUILD_DIR)) fs.mkdirSync(BUILD_DIR, { recursive: true });
 
 	const parts = [];
@@ -150,4 +154,6 @@ async function build() {
 	);
 }
 
-build();
+if (require.main === module) build();
+
+module.exports = { banner: banner };

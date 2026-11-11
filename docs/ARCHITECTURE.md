@@ -26,8 +26,10 @@ Everything attaches to `Steward`:
 Steward
 ├── kernel
 │   ├── log, warn, error
-│   ├── settings        ← read(module), write(module, obj)
-│   ├── files           ← file API: writableDir, readText, writeText, list, remove, browse
+│   ├── settings        ← read(module), write(module, obj), replaceAll(map) (replace every steward namespace, drops absent ones)
+│   ├── files           ← file API: writableDir, readText, writeText, readBytes, writeBytes, list, remove, browse
+│   ├── semver          ← parse, compare, running, isNewer, autoInstallable (version strings, VersionKind)
+│   ├── sha256          ← binary, utf8, bytes, toBinary (digest of a string or an air.ByteArray)
 │   ├── register({...}) ← module registration
 │   ├── scheduler       ← internal — tick loop, cursors
 │   ├── queue           ← internal — FIFO action queue
@@ -53,6 +55,7 @@ Steward
 │   └── sound           ← pause alert sound
 ├── modules
 │   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
+│   ├── updater         ← release check, verified install, settings backups and restore (see RELEASING.md)
 │   └── <id>            ← exposed only if the module chooses to publish state
 └── (shared enums)
     ├── Priority
@@ -69,6 +72,10 @@ Steward
     ├── GeneralTask     ← declared in the kernel, filled by core/specialists/orders.js
     ├── SpeedBuffChoice
     ├── TemplateStep    ← filled by modules/adventures/steps.js
+    ├── VersionKind     ← declared in the kernel, used by kernel/18_semver.js
+    ├── UpdateState     ← declared in the kernel, used by modules/updater
+    ├── UpdateFailure   ← declared in the kernel, used by modules/updater
+    ├── InstallStep     ← declared in the kernel, used by modules/updater
     ├── FileError
     ├── FileLocation
     └── LogLevel
@@ -105,6 +112,8 @@ The build script (`scripts/build.js`) concatenates files in this order:
 The numeric prefixes inside `src/kernel/` matter: `00_namespace.js` runs before `40_registry.js` runs before `70_lifecycle.js`. Once the kernel is fully attached, core files can rely on `Steward.kernel.*` being there. By the time module files are concatenated, both kernel and core are available.
 
 `05_reload.js` runs right after the namespace. When the host reloads userscripts into the same page and global, the new bundle finds the previous instance there and shuts it down before any later kernel file replaces its `Steward.kernel.*` slots. Every later kernel file must therefore come after it.
+
+`18_semver.js` and `19_sha256.js` follow `17_files.js` and need only the namespace; the updater module calls them at run time.
 
 `17_files.js` follows the same rule and sits before `20_logger.js`, because the logger resolves its own log file through the file API.
 

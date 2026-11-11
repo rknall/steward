@@ -125,6 +125,13 @@ t.test('stewardDir resolves under <client>/steward', function () {
     assert.strictEqual(s.fs.dirs['C:/client/steward/adventures/templates'], true);
 });
 
+t.test('stewardPath is the display path stewardDir resolves', function () {
+    var s = setup();
+    assert.strictEqual(s.files.stewardPath('backups'), 'steward/backups');
+    var r = s.files.stewardDir('x');
+    assert.strictEqual(r.dir.nativePath, 'C:/client/' + s.files.stewardPath('x'));
+});
+
 // ---- logger on the shared helpers ------------------------------------------
 
 t.test('log.filePath is under the client install directory', function () {
@@ -388,4 +395,94 @@ t.test('battleTemplateDir falls back to shortcutsDir', function () {
 t.test('battleTemplateDir is null when nothing is set', function () {
     assert.strictEqual(templateDir({}, { shortcutsDir: '' }), null);
     assert.strictEqual(templateDir({}, {}), null);
+});
+
+// ---- writeBytes / readBytes ---------------------------------------------------
+
+function baOf(s, buf) { return s.fs.air.ByteArray.fromBuffer(buf); }
+
+function allBytes() {
+    var b = Buffer.alloc(256);
+    for (var i = 0; i < 256; i++) b[i] = i;
+    return b;
+}
+
+t.test('writeBytes and readBytes round trip exact bytes and leave no .tmp', function () {
+    var s = setup();
+    var buf = allBytes();
+    var r = s.files.writeBytes('C:/client/steward/b/x.bin', baOf(s, buf));
+    assert.deepStrictEqual(plain(r), { ok: true, path: 'C:/client/steward/b/x.bin' });
+    assert.ok(Buffer.compare(s.fs.bytes['C:/client/steward/b/x.bin'], buf) === 0);
+    assert.deepStrictEqual(keysEndingWith(s.fs.disk, '.tmp'), []);
+    assert.deepStrictEqual(keysEndingWith(s.fs.bytes, '.tmp'), []);
+    var rd = s.files.readBytes('C:/client/steward/b/x.bin');
+    assert.strictEqual(rd.ok, true);
+    assert.strictEqual(rd.bytes.position, 0);
+    assert.ok(Buffer.compare(rd.bytes.toBuffer(), buf) === 0);
+    assert.strictEqual(s.fs.stats.closes, s.fs.stats.opens);
+});
+
+t.test('writeBytes replaces an existing file', function () {
+    var s = setup();
+    s.fs.dirs['C:/store/t'] = true;
+    s.fs.disk['C:/store/t/a.bin'] = 'old';
+    assert.strictEqual(s.files.writeBytes('C:/store/t/a.bin', baOf(s, Buffer.from([1, 2, 3, 255]))).ok, true);
+    assert.deepStrictEqual(Array.prototype.slice.call(s.fs.bytes['C:/store/t/a.bin']), [1, 2, 3, 255]);
+});
+
+t.test('writeBytes move fault keeps the previous content and leaves no .tmp', function () {
+    var s = setup();
+    s.fs.dirs['C:/store/t'] = true;
+    s.fs.disk['C:/store/t/a.bin'] = 'old';
+    s.fs.fail.move['C:/store/t/a.bin'] = true;
+    var r = s.files.writeBytes('C:/store/t/a.bin', baOf(s, Buffer.from([9, 9])));
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'FileUnwritable');
+    assert.strictEqual(s.fs.disk['C:/store/t/a.bin'], 'old');
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(s.fs.bytes, 'C:/store/t/a.bin'), false);
+    assert.deepStrictEqual(keysEndingWith(s.fs.disk, '.tmp'), []);
+    assert.deepStrictEqual(keysEndingWith(s.fs.bytes, '.tmp'), []);
+});
+
+t.test('writeBytes write fault is FileUnwritable and closes the stream', function () {
+    var s = setup();
+    s.fs.dirs['C:/store/t'] = true;
+    s.fs.fail.write['C:/store/t/a.bin.tmp'] = true;
+    var r = s.files.writeBytes('C:/store/t/a.bin', baOf(s, Buffer.from([1])));
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'FileUnwritable');
+    assert.strictEqual(s.fs.stats.closes, s.fs.stats.opens);
+    assert.deepStrictEqual(keysEndingWith(s.fs.disk, '.tmp'), []);
+});
+
+t.test('readBytes of a missing file is FileMissing', function () {
+    var s = setup();
+    var r = s.files.readBytes('C:/docs/none.bin');
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'FileMissing');
+});
+
+t.test('readBytes fault is FileUnreadable and the stream is still closed', function () {
+    var s = setup();
+    s.fs.disk['C:/docs/a.bin'] = 'abc';
+    s.fs.fail.read['C:/docs/a.bin'] = true;
+    var r = s.files.readBytes('C:/docs/a.bin');
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'FileUnreadable');
+    assert.strictEqual(s.fs.stats.closes, s.fs.stats.opens);
+});
+
+t.test('writeBytes and readBytes without air.ByteArray are FileUnavailable', function () {
+    var fs = airfs.make();
+    delete fs.air.ByteArray;
+    var H = harness.boot({ sections: ['kernel'], host: { air: fs.air } });
+    var rd = H.Steward.kernel.files.readBytes('C:/docs/a.bin');
+    assert.strictEqual(rd.ok, false);
+    assert.strictEqual(rd.error, 'FileUnavailable');
+
+    var H2 = harness.boot({ sections: ['kernel'], host: { air: { Introspector: { Console: {} } } } });
+    var wr = H2.Steward.kernel.files.writeBytes('C:/x.bin', { length: 0 });
+    assert.strictEqual(wr.ok, false);
+    assert.strictEqual(wr.error, 'FileUnavailable');
+    assert.strictEqual(H2.Steward.kernel.files.readBytes('C:/x.bin').error, 'FileUnavailable');
 });
