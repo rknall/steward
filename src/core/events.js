@@ -158,6 +158,72 @@
         return S.core.resources.amount(resName);
     }
 
+    // Event resources the player holds, for the dashboard. The host flags its
+    // own event resources (resources.eventName), so the list is read, not
+    // kept here. Rows: { resource, amount, eventName, code, live }; code is
+    // the base event code or null when none matches (relics, collectibles),
+    // amount is null when unreadable. When the host cannot list resources the
+    // data table's event currencies stand in (source 'data', eventName null).
+    // Sorted by data-table code order (no code last), then resource name.
+    // Never throws.
+    function heldResources() {
+        return S.kernel.hostRead.cached('events.heldResources', function () {
+            try {
+                return computeHeld();
+            } catch (e) {
+                return { source: 'data', rows: [] };
+            }
+        });
+    }
+
+    function computeHeld() {
+        var codes = Object.keys(table());
+        var liveCodes = {};
+        var act = active();
+        for (var a = 0; a < act.length; a++) liveCodes[act[a].code] = true;
+        var rows = [];
+        var held = S.core.resources.list();
+        var source = 'host';
+        var i;
+        if (held) {
+            for (i = 0; i < held.length; i++) {
+                var ev = S.core.resources.eventName(held[i].name);
+                if (typeof ev !== 'string' || !ev) continue;
+                var code = matchBaseCode(ev);
+                rows.push({
+                    resource:  held[i].name,
+                    amount:    held[i].amount,
+                    eventName: ev,
+                    code:      code,
+                    live:      !!(code && liveCodes[code])
+                });
+            }
+        } else {
+            source = 'data';
+            for (i = 0; i < codes.length; i++) {
+                var res = eventResource(codes[i]);
+                if (!res) continue;
+                rows.push({
+                    resource:  res,
+                    amount:    S.core.resources.amount(res),
+                    eventName: null,
+                    code:      codes[i],
+                    live:      !!liveCodes[codes[i]]
+                });
+            }
+        }
+        function rank(r) {
+            var n = r.code === null ? -1 : codes.indexOf(r.code);
+            return n < 0 ? codes.length : n;
+        }
+        rows.sort(function (x, y) {
+            var d = rank(x) - rank(y);
+            if (d) return d;
+            return x.resource < y.resource ? -1 : (x.resource > y.resource ? 1 : 0);
+        });
+        return { source: source, rows: rows };
+    }
+
     // True when the event is live but only its `_Shop` variant is in
     // GetActiveEventNames() — items have stopped dropping from explorer
     // treasure searches and the override should disengage. Mirrors
@@ -278,6 +344,7 @@
     S.core.events.byCategory          = byCategory;
     S.core.events.eventResource       = eventResource;
     S.core.events.eventResourceAmount = eventResourceAmount;
+    S.core.events.heldResources       = heldResources;
     S.core.events.levelMultiplier     = levelMultiplier;
     // Suffix vocabulary — see EVENT_SUFFIX_TO_CODE comment above.
     S.core.events.suffixToCode        = suffixToCode;
