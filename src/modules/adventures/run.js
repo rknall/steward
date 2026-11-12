@@ -541,24 +541,25 @@
         return { ok: false, message: 'unknown kind ' + (entry && entry.kind ? entry.kind : '(none)') };
     }
 
-    // The entry a queue starts with: 0, or with noMap skip the first entry
-    // with a map. { index, skipped } with the labels stepped over; null after
-    // telling the user why none can start.
+    // The entry a queue starts with (queues.startIndex). { index, skipped }
+    // with the labels stepped over; null after telling the user why none can
+    // start.
     function firstEntry(copy) {
-        if (copy.noMap !== queues().NO_MAP.Skip) return { index: 0, skipped: [] };
         var pass = {};
-        var skipped = [];
-        for (var i = 0; i < copy.entries.length; i++) {
-            var n = available(copy.entries[i].adventure, pass);
-            if (n === null) {
-                notify('The star menu cannot be read right now. Try again in a moment.');
-                return null;
-            }
-            if (n > 0) return { index: i, skipped: skipped };
-            skipped.push(copy.entries[i].label);
+        var r = queues().startIndex(copy.noMap, copy.entries.length, function (i) {
+            return available(copy.entries[i].adventure, pass);
+        });
+        if (!r) {
+            notify('The star menu cannot be read right now. Try again in a moment.');
+            return null;
         }
-        notify('No map for any entry of "' + copy.label + '".');
-        return null;
+        if (r.index < 0) {
+            notify('No map for any entry of "' + copy.label + '".');
+            return null;
+        }
+        var skipped = [];
+        for (var i = 0; i < r.skipped.length; i++) skipped.push(copy.entries[r.skipped[i]].label);
+        return { index: r.index, skipped: skipped };
     }
 
     // Starts a saved queue at its first entry: every entry must be readable,
@@ -624,11 +625,9 @@
         return 'drop';
     }
 
-    // The entry the paused hand-over tried: the next one, stepped over the
-    // entries Skip entry already passed.
+    // The entry the paused hand-over tried (state.queueTarget).
     function triedEntry(req) {
-        var at = store().queueNext(req);
-        for (var i = 0; i < req.queue.skip && at; i++) at = store().queueAt(req, at);
+        var at = store().queueTarget(req).at;
         return at ? req.queue.entries[at.index] : null;
     }
 

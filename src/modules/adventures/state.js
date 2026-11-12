@@ -662,6 +662,17 @@
         return queueAt(req, { index: req.queue.index, pass: req.queue.pass });
     }
 
+    // The entry the hand-over goes to: the next one, stepped over the
+    // entries Skip entry passed (queue.skip). { at, stepped }: at is null
+    // when the queue ends on the way; stepped counts the step-overs tried.
+    function queueTarget(req) {
+        var at = queueNext(req);
+        var skip = at ? count(req.queue.skip) : 0;
+        var stepped = 0;
+        for (; at && stepped < skip; stepped++) at = queueAt(req, at);
+        return { at: at, stepped: stepped };
+    }
+
     // Makes the entry at `at` the current one: the queue moves there, any
     // pending skip is used up, and the entry's fields become the request's,
     // with no run of it finished yet. closedAt stays, so the gap after the
@@ -1722,6 +1733,7 @@
         settled:       settled,
         queueAt:       queueAt,
         queueNext:     queueNext,
+        queueTarget:   queueTarget,
         enterEntry:    enterEntry,
         isWaveStep:    isWaveStep,
         partOf:        partOf,

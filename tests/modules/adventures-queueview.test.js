@@ -264,3 +264,37 @@ t.test('a label is shown as text, never as HTML', function () {
     w.ctx.render();
     assert.ok(w.$body.text().indexOf('<b>x</b>') > -1);
 });
+
+t.test('a list row spells its passes and kinds in the plural', function () {
+    var w = setup();
+    var a = template(w, 'Long map');
+    var b = template(w, 'Short map');
+    w.q.save({ label: 'Q', loop: true, passes: 2, entries: [
+        { kind: 'template', id: a, count: 1 }, { kind: 'template', id: b, count: 1 }
+    ] }, 5000);
+    w.ctx.render();
+    var text = w.$body.text();
+    assert.ok(text.indexOf('2 passes') > -1, text);
+    assert.strictEqual(text.indexOf('passs'), -1);
+    assert.ok(text.indexOf('2 adventures') > -1, text);
+    assert.ok(text.indexOf('1 queue ·') > -1, text);
+});
+
+t.test('editing() is true only while a draft is held', function () {
+    var w = setup();
+    w.ctx.render();
+    assert.strictEqual(w.qv.editing(), false);
+    click(w.$body, w.$, 'New queue');
+    assert.strictEqual(w.qv.editing(), true);
+    w.qv.reset();
+    assert.strictEqual(w.qv.editing(), false);
+    click(w.$body, w.$, 'New queue');
+    w.qv.reset();
+    w.q.save({ label: 'Q', entries: [{ kind: 'template', id: template(w, 'Long map'), count: 1 }] }, 5000);
+    w.ctx.render();
+    var id = w.q.ids()[0];
+    delete w.fs.disk[w.q.pathOf(id)];
+    click(w.$body, w.$, 'Edit');
+    assert.strictEqual(w.qv.editing(), false);
+    assert.ok(w.$body.text().indexOf('Could not open ' + id) > -1);
+});

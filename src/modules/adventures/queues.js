@@ -361,6 +361,25 @@
         };
     }
 
+    // The entry a queue's Start begins with, kept here so the run code and
+    // the menu's greyed state cannot disagree. noMap: the queue's NO_MAP
+    // value; length: its entry count; countOf(i): the map count of entry i,
+    // null while it cannot be read. Without the no-map skip that is entry 0
+    // and no count is read. With it, the first entry whose count is above 0:
+    // { index, count, skipped } with the indexes stepped over, index -1 when
+    // no entry has a map, null when a read fails before one is found.
+    function startIndex(noMap, length, countOf) {
+        if (noMap !== NO_MAP.Skip) return { index: 0, skipped: [] };
+        var skipped = [];
+        for (var i = 0; i < length; i++) {
+            var n = countOf(i);
+            if (n === null) return null;
+            if (n > 0) return { index: i, count: n, skipped: skipped };
+            skipped.push(i);
+        }
+        return { index: -1, count: 0, skipped: skipped };
+    }
+
     S.modules.adventures.queues = {
         SUBDIR:         SUBDIR,
         FORMAT_VERSION: FORMAT_VERSION,
@@ -382,7 +401,8 @@
         newId:          newId,
         save:           save,
         remove:         remove,
-        toRun:          toRun
+        toRun:          toRun,
+        startIndex:     startIndex
     };
 
 }(Steward));

@@ -1156,11 +1156,9 @@
                 mapSkipped.push(req.label);
             }
         }
-        var at = (q && seriesEnd) ? st().queueNext(req) : null;
-        for (var i = 0; at && i < q.skip; i++) {
-            at = st().queueAt(req, at);
-            stepped++;
-        }
+        var target = (q && seriesEnd) ? st().queueTarget(req) : { at: null, stepped: 0 };
+        var at = target.at;
+        stepped += target.stepped;
         if (at && skipMaps) {
             // Every entry looked at once with no map: a loop would only come
             // round to them again.
