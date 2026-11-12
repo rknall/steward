@@ -368,7 +368,7 @@ Read from the client bytecode and the host scripts of one client build; re-check
 
 - Queues are per production type, not per building: `zone.GetProductionQueue(type)`. An order is a `dTimedProductionVO` whose `buildingGrid` picks the building. Of several buildings with one name, the highest-level one produces, so steward orders into and buffs that one only (level descending, then grid).
 - The type id has a name in the host enum `Enums::TIMED_PRODUCTION_TYPE`. A profile is derived from the id and that name, never from a list of building names.
-- A VO's `amount` is items per stack and `stacks` is the stack count. The 1 to 25 stack limit is the client UI's ceiling only. A queue has no known capacity.
+- A VO's `amount` is items per stack and `stacks` is the stack count. The host's order panel bounds the amount by `defines.MAX_PRODUCTION_AMOUNT` (25) for every type; the Bookbinder sends one book per order. `Steward.core.production.maxProductionAmount()` reads the constant. A queue has no known capacity.
 - Entry fields read: `GetAmount()`, `GetProducedItems()`, `GetProductionTime()`, `GetCollectedTime()`, the time bonus, and the VO's `producedItems`. Time left for one entry is `((amount - produced) * productionTime - collectedTime) / timeBonus` in ms. In-progress counts sum `GetAmount()` without subtracting `GetProducedItems()`.
 - A run of a timed item or buff yields `GetProductionAmount()` items; units and books yield 1.
 
@@ -381,6 +381,17 @@ Read from the client bytecode and the host scripts of one client build; re-check
 | Cooldown | enum name `culturebuilding` | none | not orderable | 0 |
 | Timed | any other type with a `productionQueue` | `global.timedProductions_vector[type]` | one message, `stacks 1` | 1 until a limit is known |
 
+- Availability, read for the item drop-down and the planner (`itemsOf`, `isProducible`). Each check that cannot be read gives null and never hides an item:
+
+| Check | Host read |
+|-------|-----------|
+| event and quest | `Utils::RequirementsHelper.checkRequirements(gi, event, quest)` with the def's `requiresEvent` and `requiresQuest` |
+| level window | `requiresUpgradeLevelMin` and `requiresUpgradeLevelMax` against the producer's level |
+| adventure buff | `BuffSystem::BuffAdventureController.isActiveBuffAdventureBuffOrNormalBuff(name)` |
+| recipe lock | `gi.mRequirements.timedProductionRequirements_vector[key].isFulfilledForSkillList(gi.mCurrentPlayer.getSkills())` |
+| page | the def's `GetGroup()` (timed defs also `GetType()`); the title is the loca key `BuffGroup<g>` for buffs and `<TIMED_PRODUCTION_TYPE.toString(type)>Group<g>` for timed types |
+
+- A recipe-locked item is greyed in the client and cannot be ordered. The buff list from `GetProduceableBuffDefinitions` is already filtered by event and quest.
 - A book's price is the level whose `amountProduced` the player's lifetime `producedAmount` of that book has reached. A finished head entry (VO `producedItems` 1) needs message 141.
 - `culturebuilding` has a cooldown, `productionBuilding.getRemainingCooldown()`, not a queue. When the enum name cannot be read, a queue whose building has that method is treated the same way.
 - Profiles marked not confirmed order with no retry and at most one entry in the queue, so a wrong assumption costs one order.

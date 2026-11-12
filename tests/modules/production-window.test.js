@@ -17,19 +17,29 @@ var assert = t.assert;
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
+var UNITS = 0;
 var BOOKS = 2;
 var TIMED = 40;
-var CULT = 50;
+var LOVERS = 41;
+
+function item(name, label, extra) {
+    var r = { name: name, label: label, producible: true, why: null, page: null, pageLabel: null };
+    for (var k in extra || {}) r[k] = extra[k];
+    return r;
+}
 
 function rowOf(S, name, type, kind, extra) {
     var r = {
-        name: name, label: name, count: 1, level: 3, grid: 100 + type, type: type, kind: kind,
-        profile: { kind: kind, stackable: false },
-        items: [{ name: name + 'Item', label: name + ' item' }, { name: name + 'Other', label: name + ' other' }],
+        name: name, label: S.core.locale.bui(name), count: 1, level: 3, grid: 100 + type, type: type, kind: kind,
+        profile: { kind: kind, orderable: true },
+        items: [item(name + 'Item', name + ' item'), item(name + 'Other', name + ' other')],
         cfg: {},
-        costText: function (item) { return 'cost of ' + item; },
+        managed: false,
+        costText: function (it, n) { return 'cost of ' + it + ' x' + n; },
         buffs: [{ name: 'Fish', label: 'Fish platter', amount: 3, offered: true },
-                { name: 'Duck', label: 'Roasted duck', amount: 0, offered: true }]
+                { name: 'Duck', label: 'Roasted duck', amount: 0, offered: true },
+                { name: 'Salt', label: 'Salt', amount: null, offered: true },
+                { name: 'Gold', label: 'Gold leaf', amount: 9, offered: false }]
     };
     for (var k in extra || {}) r[k] = extra[k];
     return r;
@@ -54,15 +64,22 @@ function setup(stored, hostMode) {
         H.ctx.Modal.prototype.show = function () { calls.push('show'); };
         H.ctx.Modal.prototype.hide = function () { calls.push('hide'); };
     }
-    var keep = { };
-    keep[BOOKS] = 1;
-    S.core.production.keepMax = function (type) { return keep[type] || 9999; };
-    S.core.production.cooldownMs = function () { return null; };
-    H.settings.write('production', { enabled: true, buildings: stored || {} });
+    var names = { LoversStatue: "Lovers' Statue" };
+    S.core.locale.bui = function (n) { return names[n] || n; };
+    var max = {};
+    max[UNITS] = 25;
+    max[BOOKS] = 1;
+    max[TIMED] = 25;
+    max[LOVERS] = 25;
+    S.core.production.orderMax = function (type) { return max[type]; };
+    H.settings.write('production', { enabled: true, bookComplete: true, buildings: stored || {} });
     var rows = [
         rowOf(S, 'Bookbinder', BOOKS, K.Books),
+        rowOf(S, 'Barracks', UNITS, K.Units),
         rowOf(S, 'Gingerbread', TIMED, K.Timed),
-        rowOf(S, 'Temple', CULT, K.Cooldown)
+        rowOf(S, 'LoversStatue', LOVERS, K.Timed, {
+            items: [item('CupidsArrow', "Cupid's Arrow"), item('Rose', 'Rose')]
+        })
     ];
     var views = { calls: [] };
     S.modules.production.model.buildings = function () { return rows; };
@@ -70,14 +87,11 @@ function setup(stored, hostMode) {
         return { enabled: true, queues: 2, entries: 3, nextDoneAt: null,
                  orderBreaker: { open: false }, buffBreaker: { open: false } };
     };
-    S.modules.production.model.queues = function () { return [{ type: TIMED }]; };
+    S.modules.production.model.queues = function () { return [{ type: TIMED, producing: true }]; };
     S.modules.production.views = {
-        queues: function ($c, h, data) { views.calls.push(['queues', data]); $c.append($('<div>').text('queues view')); },
-        demand: function () { throw new Error('demand boom'); },
-        books:  function ($c) { $c.append($('<div>').text('books view')); },
-        recent: function ($c) { $c.append($('<div>').text('recent view')); }
+        queues: function ($c, h, data) { views.calls.push(['queues', data]); $c.append($('<div>').text('queues view')); }
     };
-    return { H: H, S: S, $: $, rig: rig, alerts: alerts, calls: calls, views: views,
+    return { H: H, S: S, $: $, rig: rig, alerts: alerts, calls: calls, views: views, rows: rows,
              win: S.modules.production.window };
 }
 
@@ -102,10 +116,10 @@ function click($root, $, label) {
     hit.trigger('click');
 }
 
-function openOrders(s) {
-    s.win.open('orders');
+function openAll(s) {
+    s.win.open();
     s.rig.visible = true;
-    click(body(s), s.$, 'All 3');
+    click(body(s), s.$, 'All buildings 4');
 }
 
 // The table row whose first cell starts with the building label.
@@ -119,12 +133,59 @@ function rowEl(s, label) {
     return hit;
 }
 
+function cellOf(s, label, i) { return rowEl(s, label).find('td').eq(i); }
+
 function saveBtn(s) { return byText(footer(s), s.$, 'button', 'Save'); }
 
-function setKeep(s, label, text) {
-    var $in = rowEl(s, label).find('input').eq(0);
+function setItems(s, label, text) {
+    var $in = cellOf(s, label, 2).find('input').eq(0);
+    assert.ok($in.length, 'Items input of ' + label);
     $in.val(text).trigger('input').trigger('change');
     return $in;
+}
+
+function pick(s, label, col, value) {
+    cellOf(s, label, col).find('select').eq(0).val(value).trigger('change');
+}
+
+function flip(s, label, on) {
+    var $sw = cellOf(s, label, 4).find('input').eq(0);
+    $sw.prop('checked', on);
+    $sw.trigger('change');
+}
+
+// Option texts of a drop-down, a header marked with a leading '#'.
+function optionsOf(s, $sel) {
+    var out = [];
+    $sel.find('option').each(function () {
+        var $o = s.$(this);
+        out.push(($o.attr('disabled') !== undefined ? '#' : '') + $o.text());
+    });
+    return out;
+}
+
+function selectedOf(s, $sel) {
+    var hit = null;
+    $sel.find('option').each(function () {
+        if (hit === null && s.$(this).attr('selected') !== undefined) hit = s.$(this).text();
+    });
+    return hit;
+}
+
+function tabLabels(s) {
+    var out = [];
+    body(s).find('.steward-chips').eq(0).children('button').each(function () { out.push(s.$(this).text()); });
+    return out;
+}
+
+function capture(s) {
+    var writes = [];
+    var write = s.S.kernel.settings.write;
+    s.S.kernel.settings.write = function (ns, v) {
+        writes.push([ns, plain(v)]);
+        return write.apply(this, arguments);
+    };
+    return writes;
 }
 
 t.test('window.js loads without the edit-guard API and registers it when present', function () {
@@ -148,155 +209,274 @@ t.test('open is refused over open edits and leaves the dashboard alone', functio
     assert.ok(/Save or close/.test(s.alerts[0]));
 });
 
-t.test('open from a clean state releases the dashboard without a hide, then shows, on Queues', function () {
+t.test('a: three tabs, opening on Production Manager after releasing the dashboard', function () {
     var s = setup();
     s.win.open();
     assert.deepStrictEqual(s.calls, ['releaseDashboard', 'show']);
     assert.strictEqual(s.rig.made[0].id, 'StewardProduction');
     assert.strictEqual(s.rig.made[0].title, 'Steward production');
-    assert.ok(/queues view/.test(body(s).text()));
+    assert.deepStrictEqual(tabLabels(s), ['Production Manager', 'Queues 1', 'Settings']);
+    assert.strictEqual(body(s).find('.steward-chips').eq(0).children('button.active').text(), 'Production Manager');
+    assert.ok(saveBtn(s), 'the manager footer has Save');
     assert.ok(/Auto-production on · 2 queues · 3 entries · breaker ok/.test(body(s).text()));
+    s.win.open('queues');
+    assert.ok(/queues view/.test(body(s).text()));
     assert.ok(byText(footer(s), s.$, 'button', 'Refresh'));
     assert.ok(/live views do not redraw/.test(footer(s).text()));
 });
 
-t.test('Keep of a Books row clamps 5 to 1; a Timed row keeps 150', function () {
+t.test('b: the columns are Building, Item · cost, Items, Buff, Enable', function () {
     var s = setup();
-    openOrders(s);
-    var $b = setKeep(s, 'Bookbinder', '5');
-    assert.strictEqual($b.val(), '1');
-    setKeep(s, 'Gingerbread', '150');
+    openAll(s);
+    var cols = [];
+    body(s).find('th').each(function () { cols.push(s.$(this).text()); });
+    assert.deepStrictEqual(cols, ['Building', 'Item · cost', 'Items', 'Buff', 'Enable']);
+    assert.ok(byText(body(s), s.$, 'span', 'Production Manager'), 'card title');
+    assert.ok(/Cost shown per order, from the Items value/.test(body(s).text()));
+});
+
+t.test('c: the building subtitle has no event tag', function () {
+    var s = setup();
+    openAll(s);
+    var sub = cellOf(s, 'Gingerbread', 0).find('.steward-muted').eq(0).text();
+    assert.strictEqual(sub, '×1 · level 3');
+    assert.strictEqual(rowEl(s, "Lovers' Statue").text().indexOf('event'), -1);
+});
+
+t.test('d: items are sorted and unproducible ones left out; pages get header options', function () {
+    var s = setup();
+    s.rows[2].items = [item('Zeta', 'zeta'), item('Beta', 'Alpha'), item('Alpha', 'Alpha'),
+                       item('No', 'Blocked', { producible: false, why: 'level' }),
+                       item('Maybe', 'maybe', { producible: null, why: 'unreadable' })];
+    openAll(s);
+    assert.deepStrictEqual(optionsOf(s, cellOf(s, 'Gingerbread', 1).find('select')),
+        ['(none)', 'Alpha', 'Alpha', 'maybe', 'zeta']);
+    var opts = cellOf(s, 'Gingerbread', 1).find('option');
+    assert.strictEqual(opts.eq(1).attr('value'), 'Alpha');
+
+    var u = setup();
+    u.rows[2].items = [item('R2', 'rare b', { page: '10', pageLabel: 'Ten' }),
+                       item('C2', 'common b', { page: '2', pageLabel: 'Rare' }),
+                       item('C1', 'Common a', { page: '1', pageLabel: 'Common' }),
+                       item('C3', 'Common c', { page: '1', pageLabel: 'Common' }),
+                       item('X', 'hidden', { page: '1', pageLabel: 'Common', producible: false })];
+    openAll(u);
+    assert.deepStrictEqual(optionsOf(u, cellOf(u, 'Gingerbread', 1).find('select')),
+        ['(none)', '#Common', 'Common a', 'Common c', '#Rare', 'common b', '#Ten', 'rare b']);
+});
+
+t.test('e: a saved unproducible item stays selected with its note', function () {
+    var s = setup({ Gingerbread: { item: 'No', items: 1, buff: '', enabled: true } });
+    s.rows[2].items = [item('Yes', 'Yes'), item('No', 'Blocked', { producible: false, why: 'level' })];
+    openAll(s);
+    var $sel = cellOf(s, 'Gingerbread', 1).find('select');
+    assert.deepStrictEqual(optionsOf(s, $sel), ['(none)', 'Yes', 'Blocked']);
+    assert.strictEqual(selectedOf(s, $sel), 'Blocked');
+    assert.ok(/not producible now/.test(cellOf(s, 'Gingerbread', 1).text()));
+    assert.strictEqual(s.win.hasEdits(), false);
+    pick(s, 'Gingerbread', 1, 'Yes');
+    assert.strictEqual(cellOf(s, 'Gingerbread', 1).text().indexOf('not producible now'), -1);
+});
+
+t.test('f: the buff list leaves out not-offered and stock-0 buffs; a stored stock-0 buff shows None', function () {
+    var s = setup({ Gingerbread: { item: '', items: 1, buff: 'Duck', enabled: false } });
+    openAll(s);
+    var $sel = cellOf(s, 'Gingerbread', 3).find('select');
+    assert.deepStrictEqual(optionsOf(s, $sel), ['None', 'Fish platter (3)', 'Salt (?)']);
+    assert.strictEqual(selectedOf(s, $sel), 'None');
+    assert.strictEqual($sel.val(), '');
+    assert.strictEqual(saveBtn(s).prop('disabled'), true);
+    assert.ok(/No unsaved changes/.test(footer(s).text()));
+    assert.strictEqual(s.win.hasEdits(), false);
+});
+
+t.test('g: Save clears a hidden buff once another field changed; Items alone is one change', function () {
+    var s = setup({ Barracks: { item: 'BarracksItem', items: 1, buff: 'Duck', enabled: true } });
+    var writes = capture(s);
+    openAll(s);
+    setItems(s, 'Barracks', '5');
+    assert.ok(/2 changes/.test(footer(s).text()));
     click(footer(s), s.$, 'Save');
-    var saved = s.H.settings.read('production').buildings;
-    assert.strictEqual(saved.Bookbinder.amount, 1);
-    assert.strictEqual(saved.Gingerbread.amount, 150);
-    assert.ok(/one book at a time/.test(rowEl(s, 'Bookbinder').text()));
+    assert.strictEqual(writes.length, 1);
+    assert.deepStrictEqual(writes[0][1], { buildings: { Barracks: { item: 'BarracksItem', items: 5, buff: '', enabled: true } } });
+    assert.strictEqual(s.win.hasEdits(), false);
+    assert.strictEqual(saveBtn(s).prop('disabled'), true);
+
+    var u = setup({ Barracks: { item: 'BarracksItem', items: 1, buff: 'Fish', enabled: true } });
+    openAll(u);
+    setItems(u, 'Barracks', '5');
+    assert.ok(footer(u).text().indexOf('1 change: Barracks items 1 → 5') > -1, footer(u).text());
+    assert.strictEqual(cellOf(u, 'Barracks', 1).find('.steward-muted').eq(1).text(), 'cost of BarracksItem x5');
+});
+
+t.test('g: a hidden buff counts only once the draft changes, and is named in the note', function () {
+    var s = setup({ Barracks: { item: 'BarracksItem', items: 1, buff: 'Duck', enabled: true } });
+    s.win.open();
+    s.rig.visible = true;
+    flip(s, 'Barracks', false);
+    assert.ok(/2 changes/.test(footer(s).text()));
+    flip(s, 'Barracks', true);
+    assert.ok(/No unsaved changes/.test(footer(s).text()));
+    setItems(s, 'Barracks', '1');
+    pick(s, 'Barracks', 1, 'BarracksOther');
+    pick(s, 'Barracks', 1, 'BarracksItem');
+    assert.strictEqual(s.win.hasEdits(), false);
+    pick(s, 'Barracks', 3, 'Fish');
+    pick(s, 'Barracks', 3, '');
+    // Picking None by hand is the same draft as the hidden buff cleared.
+    assert.ok(footer(s).text().indexOf('1 change: Barracks buff Roasted duck → none') > -1, footer(s).text());
+});
+
+t.test('h: picking an item names it by label in the note', function () {
+    var s = setup();
+    openAll(s);
+    pick(s, "Lovers' Statue", 1, 'CupidsArrow');
+    assert.ok(footer(s).text().indexOf("1 change: Lovers' Statue item none → Cupid's Arrow") > -1, footer(s).text());
+    assert.ok(byText(body(s), s.$, 'button', 'Production Manager •'));
+});
+
+t.test('i: flipping Enable is one change', function () {
+    var s = setup();
+    openAll(s);
+    flip(s, 'Barracks', true);
+    assert.ok(footer(s).text().indexOf('1 change: Barracks enabled off → on') > -1, footer(s).text());
+});
+
+t.test('j: Bookbinder Items is a muted 1; Barracks Items clamps to 25', function () {
+    var s = setup();
+    openAll(s);
+    var $b = cellOf(s, 'Bookbinder', 2);
+    assert.strictEqual($b.find('input').length, 0);
+    assert.strictEqual($b.find('.steward-muted').eq(0).text(), '1');
+    assert.ok($b.find('.steward-muted').eq(0).hasClass('steward-muted'));
+    assert.ok(/one book at a time/.test($b.text()));
+    assert.strictEqual(cellOf(s, 'Gingerbread', 2).find('input').length, 1, 'Timed Items is editable');
+    var $in = setItems(s, 'Barracks', '99');
+    assert.strictEqual($in.val(), '25');
+});
+
+t.test('j2: Items 0 shows 1; the typed value goes through itemsFor; runsMax 1 fixes the cell', function () {
+    var s = setup();
+    openAll(s);
+    assert.strictEqual(setItems(s, 'Barracks', '0').val(), '1');
+    var P = s.S.modules.production;
+    var seen = [];
+    P.itemsFor = function (cfg, type) { seen.push([cfg.items, type]); return 9; };
+    var $in = setItems(s, 'Barracks', '7');
+    assert.ok(seen.some(function (c) { return c[0] === 7 && c[1] === UNITS; }), JSON.stringify(seen));
+    assert.strictEqual($in.val(), '9');
+});
+
+t.test('j3: runsMax 1 on Barracks gives the muted fixed 1 with no input', function () {
+    var s = setup();
+    s.S.modules.production.runsMax = function () { return 1; };
+    openAll(s);
+    var $c = cellOf(s, 'Barracks', 2);
+    assert.strictEqual($c.find('input').length, 0);
+    assert.strictEqual($c.find('.steward-muted').eq(0).text(), '1');
+});
+
+t.test('k: the Settings switch writes only { bookComplete } and is not part of the draft', function () {
+    var s = setup();
+    var writes = capture(s);
+    s.win.open('settings');
+    s.rig.visible = true;
+    assert.ok(/Bookbinder auto-complete/.test(body(s).text()));
+    assert.ok(/Settings on this tab apply at once/.test(footer(s).text()));
+    assert.strictEqual(saveBtn(s), null);
+    var $sw = body(s).find('input').eq(0);
+    assert.strictEqual($sw.prop('checked'), true);
+    $sw.prop('checked', false);
+    $sw.trigger('change');
+    assert.deepStrictEqual(writes, [['production', { bookComplete: false }]]);
+    assert.strictEqual(s.win.hasEdits(), false);
+    click(body(s), s.$, 'Production Manager');
+    assert.strictEqual(saveBtn(s).prop('disabled'), true);
+});
+
+t.test('l: no render reads the removed readers; the Queues chip counts the producing rows passed on', function () {
+    var s = setup();
+    var P = s.S.modules.production;
+    var bad = 0;
+    function boom() { bad++; throw new Error('must not be read'); }
+    P.assess = boom;
+    P.recent = boom;
+    P.lastPass = boom;
+    P.model.reservations = boom;
+    P.model.onOff = boom;
+    P.model.queues = function () {
+        return [{ type: 1, producing: true }, { type: 2, producing: false }, { type: 3, producing: true }];
+    };
+    s.win.open();
+    s.rig.visible = true;
+    click(body(s), s.$, 'Queues 2');
+    click(body(s), s.$, 'Settings');
+    click(body(s), s.$, 'Production Manager');
+    assert.strictEqual(bad, 0);
+    var d = s.views.calls[s.views.calls.length - 1][1];
+    assert.strictEqual(d.queues.length, 3);
+    assert.strictEqual(d.queues.filter(function (q) { return q.producing; }).length, 2);
+});
+
+t.test('m: the notices say Automatic queues saved and changes discarded', function () {
+    var s = setup();
+    openAll(s);
+    flip(s, 'Barracks', true);
+    click(footer(s), s.$, 'Save');
+    assert.ok(s.alerts.indexOf('Steward: Automatic queues saved') > -1);
+    flip(s, 'Barracks', false);
+    click(footer(s), s.$, 'Close');
+    assert.ok(s.alerts.indexOf('Steward: Automatic queue changes discarded') > -1);
 });
 
 t.test('the edit guard is true only while visible and dirty', function () {
     var s = setup();
-    openOrders(s);
+    openAll(s);
     assert.strictEqual(s.win.hasEdits(), false);
-    setKeep(s, 'Gingerbread', '7');
+    setItems(s, 'Barracks', '7');
     assert.strictEqual(s.win.hasEdits(), true);
     s.rig.visible = false;
     assert.strictEqual(s.win.hasEdits(), false);
     assert.strictEqual(s.win.isOpen(), false);
 });
 
-t.test('Save is disabled until a change, writes { buildings } and resets dirty', function () {
-    var s = setup({ Gingerbread: { item: 'GingerbreadItem', amount: 150, stack: 0, buff: '' } });
-    s.win.open('orders');
+t.test('Save is disabled until a change and writes only { buildings }; no edit writes nothing', function () {
+    var s = setup({ Barracks: { item: 'BarracksItem', items: 3, buff: '', enabled: true } });
+    var writes = capture(s);
+    s.win.open();
     s.rig.visible = true;
     assert.strictEqual(saveBtn(s).prop('disabled'), true);
-    assert.ok(/No unsaved changes/.test(footer(s).text()));
-    setKeep(s, 'Gingerbread', '200');
+    click(footer(s), s.$, 'Save');
+    assert.strictEqual(writes.length, 0);
+    setItems(s, 'Barracks', '20');
     assert.strictEqual(saveBtn(s).prop('disabled'), false);
     click(footer(s), s.$, 'Save');
-    var stored = s.H.settings.read('production');
-    assert.deepStrictEqual(Object.keys(stored), ['buildings']);
-    assert.strictEqual(stored.buildings.Gingerbread.amount, 200);
-    assert.strictEqual(stored.buildings.Gingerbread.item, 'GingerbreadItem');
-    assert.strictEqual(s.win.hasEdits(), false);
-    assert.strictEqual(saveBtn(s).prop('disabled'), true);
-    assert.ok(s.alerts.indexOf('Steward: Standing orders saved') > -1);
-});
-
-t.test('the change note names one change and counts several', function () {
-    var s = setup({ Gingerbread: { item: 'GingerbreadItem', amount: 150, stack: 0, buff: '' } });
-    s.S.core.locale.bui = function (n) { return n === 'Gingerbread' ? 'Gingerbread house' : n; };
-    s.win.open('orders');
-    s.rig.visible = true;
-    setKeep(s, 'Gingerbread', '200');
-    assert.ok(footer(s).text().indexOf('1 change: Gingerbread house keep 150 → 200') > -1);
-    var $sel = rowEl(s, 'Gingerbread').find('select').eq(1);
-    $sel.val('Fish').trigger('change');
-    assert.ok(/2 changes/.test(footer(s).text()));
-    assert.ok(byText(body(s), s.$, 'button', 'Standing orders •'));
-});
-
-t.test('Stack is hidden for Books and shown for Timed', function () {
-    var s = setup();
-    openOrders(s);
-    assert.strictEqual(rowEl(s, 'Bookbinder').find('td').eq(3).text(), '–');
-    assert.strictEqual(rowEl(s, 'Bookbinder').find('input').length, 1);
-    assert.strictEqual(rowEl(s, 'Gingerbread').find('input').length, 2);
-});
-
-t.test('Cooldown rows are read-only', function () {
-    var s = setup();
-    openOrders(s);
-    var $r = rowEl(s, 'Temple');
-    assert.strictEqual($r.find('input').length, 0);
-    assert.strictEqual($r.find('select').length, 0);
-    assert.ok(/cooldown/.test($r.text()));
-});
-
-t.test('the buff choice marks an empty stock and keeps an unlisted choice', function () {
-    var s = setup({ Gingerbread: { item: '', amount: 0, stack: 0, buff: 'Gone' } });
-    s.win.open('orders');
-    s.rig.visible = true;
-    var text = rowEl(s, 'Gingerbread').find('select').eq(1).text();
-    assert.ok(text.indexOf('Roasted duck (0) - out of stock') > -1);
-    assert.ok(text.indexOf('Gone (not offered)') > -1);
-    assert.strictEqual(s.win.hasEdits(), false);
-});
-
-t.test('an unreadable buff stock reads (?) and is not called out of stock', function () {
-    var s = setup({ Gingerbread: { item: '', amount: 0, stack: 0, buff: '' } });
-    s.S.modules.production.model.buildings = function () {
-        return [rowOf(s.S, 'Gingerbread', TIMED, s.S.ProductionKind.Timed, {
-            buffs: [{ name: 'Duck', label: 'Roasted duck', amount: null, offered: true }]
-        })];
-    };
-    s.win.open('orders');
-    s.rig.visible = true;
-    var text = rowEl(s, 'Gingerbread').find('select').eq(1).text();
-    assert.ok(text.indexOf('Roasted duck (?)') > -1);
-    assert.strictEqual(text.indexOf('out of stock'), -1);
-});
-
-t.test('host: a window fading out after a hide holds no edits and is not open', function () {
-    var s = hostSetup();
-    s.win.open('orders');
-    click(body(s), s.$, 'All 3');
-    setKeep(s, 'Gingerbread', '7');
-    assert.strictEqual(s.win.hasEdits(), true);
-    s.S.kernel.ui.hideModal(s.rig.made[s.rig.made.length - 1].modal);
-    assert.strictEqual(s.win.hasEdits(), false);
-    assert.strictEqual(s.win.isOpen(), false);
-    s.rig.flushFades();
+    assert.deepStrictEqual(Object.keys(writes[0][1]), ['buildings']);
+    assert.deepStrictEqual(writes[0][1].buildings.Barracks, { item: 'BarracksItem', items: 20, buff: '', enabled: true });
+    click(footer(s), s.$, 'Save');
+    assert.strictEqual(writes.length, 1);
 });
 
 t.test('switching tabs keeps the draft', function () {
     var s = setup();
-    openOrders(s);
-    setKeep(s, 'Gingerbread', '42');
-    click(body(s), s.$, 'Queues 2');
+    openAll(s);
+    setItems(s, 'Barracks', '12');
+    click(body(s), s.$, 'Queues 1');
     assert.ok(/queues view/.test(body(s).text()));
     assert.strictEqual(s.win.hasEdits(), true);
-    click(body(s), s.$, 'Standing orders •');
-    click(body(s), s.$, 'All 3');
-    assert.strictEqual(rowEl(s, 'Gingerbread').find('input').eq(0).val(), '42');
+    click(body(s), s.$, 'Production Manager •');
+    assert.strictEqual(cellOf(s, 'Barracks', 2).find('input').eq(0).val(), '12');
 });
 
 t.test('a throwing view is contained in its tab', function () {
     var s = setup();
-    s.S.modules.production.assess = function () { return { rows: [] }; };
-    s.win.open('demand');
+    s.S.modules.production.views.queues = function () { throw new Error('queues boom'); };
+    s.win.open('queues');
     var text = body(s).text();
-    assert.ok(/This view could not be shown: demand boom/.test(text));
+    assert.ok(/This view could not be shown: queues boom/.test(text));
     assert.ok(/Auto-production on/.test(text));
-    click(body(s), s.$, 'Recent');
-    assert.ok(/recent view/.test(body(s).text()));
-});
-
-t.test('Close with a dirty draft says the changes were discarded', function () {
-    var s = setup();
-    openOrders(s);
-    setKeep(s, 'Gingerbread', '9');
-    click(footer(s), s.$, 'Close');
-    assert.ok(s.alerts.indexOf('Steward: Standing-order changes discarded') > -1);
+    click(body(s), s.$, 'Production Manager');
+    assert.ok(rowEl(s, 'Barracks'));
 });
 
 t.test('the header is the submenu status line behind the on/off word', function () {
@@ -306,74 +486,47 @@ t.test('the header is the submenu status line behind the on/off word', function 
     assert.strictEqual($head.text(), 'Auto-production on · 2 queues · 3 entries · breaker ok');
 });
 
-t.test('the stack field defaults to the module default stack', function () {
-    var s = setup();
-    s.S.modules.production.defaultStack = function () { return 7; };
-    openOrders(s);
-    assert.strictEqual(String(rowEl(s, 'Gingerbread').find('input').eq(1).val()), '7');
-});
-
 t.test('a key added to the default row is drafted and saved', function () {
     var s = setup();
     s.S.modules.production.defaultBuilding.note = 'n';
-    openOrders(s);
-    setKeep(s, 'Gingerbread', '5');
-    assert.ok(/1 change: Gingerbread keep 0 → 5/.test(footer(s).text()));
+    openAll(s);
+    setItems(s, 'Barracks', '5');
+    assert.ok(/1 change: Barracks items 1 → 5/.test(footer(s).text()));
     click(footer(s), s.$, 'Save');
-    var saved = s.H.settings.read('production').buildings.Gingerbread;
+    var saved = s.H.settings.read('production').buildings.Barracks;
     assert.strictEqual(saved.note, 'n');
-    assert.strictEqual(saved.amount, 5);
+    assert.strictEqual(saved.items, 5);
 });
 
-t.test('Save writes item, keep, stack and buff of one row; no edit writes nothing', function () {
-    var s = setup();
-    var writes = 0;
-    var write = s.S.kernel.settings.write;
-    s.S.kernel.settings.write = function () { writes++; return write.apply(this, arguments); };
-    openOrders(s);
-    click(footer(s), s.$, 'Save');
-    assert.strictEqual(writes, 0);
-    var $r = rowEl(s, 'Gingerbread');
-    $r.find('select').eq(0).val('GingerbreadOther').trigger('change');
-    setKeep(s, 'Gingerbread', '12');
-    rowEl(s, 'Gingerbread').find('input').eq(1).val('4').trigger('input').trigger('change');
-    rowEl(s, 'Gingerbread').find('select').eq(1).val('Duck').trigger('change');
-    assert.ok(/4 changes/.test(footer(s).text()));
-    click(footer(s), s.$, 'Save');
-    assert.strictEqual(writes, 1);
-    assert.deepStrictEqual(plain(s.H.settings.read('production').buildings.Gingerbread),
-        { item: 'GingerbreadOther', amount: 12, stack: 4, buff: 'Duck' });
-    click(footer(s), s.$, 'Save');
-    assert.strictEqual(writes, 1);
-});
-
-t.test('window.js keeps no literal field list', function () {
+t.test('window.js keeps no literal field list and no standing-order wording', function () {
     var src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'modules', 'production', 'window.js'), 'utf8');
-    assert.strictEqual(src.indexOf("['item', 'amount'"), -1);
+    assert.strictEqual(src.indexOf("['item', 'items'"), -1);
+    assert.strictEqual(/standing order/i.test(src), false);
 });
 
 function activeChip(s) {
     var hit = null;
     body(s).find('button.steward-chip.active').each(function () {
         var txt = s.$(this).text();
-        if (/^(All|Managed) /.test(txt)) hit = txt;
+        if (/^(All buildings|Automatic queues) /.test(txt)) hit = txt;
     });
     return hit;
 }
 
-t.test('orders tab opens on All while no standing order exists', function () {
+t.test('the manager opens on All buildings while no automatic queue exists', function () {
     var s = setup();
-    s.win.open('orders');
+    s.win.open();
     s.rig.visible = true;
-    assert.ok(/^All /.test(activeChip(s) || ''), 'All chip selected');
+    assert.strictEqual(activeChip(s), 'All buildings 4');
     assert.ok(rowEl(s, 'Gingerbread'));
 });
 
-t.test('orders tab opens on Managed once a standing order exists', function () {
-    var s = setup({ Gingerbread: { item: 'GingerbreadItem', amount: 5 } });
-    s.win.open('orders');
+t.test('the manager opens on Automatic queues once a row holds an item or a buff', function () {
+    var s = setup({ Gingerbread: { item: 'GingerbreadItem', items: 1, buff: '', enabled: false } });
+    s.win.open();
     s.rig.visible = true;
-    assert.ok(/^Managed /.test(activeChip(s) || ''), 'Managed chip selected');
+    assert.strictEqual(activeChip(s), 'Automatic queues 1');
+    assert.strictEqual(body(s).find('tbody').eq(0).find('tr').length, 1);
 });
 
 t.test('render reads the model inside a read pass and leaves it afterwards', function () {
@@ -393,56 +546,22 @@ t.test('each render logs one debug line naming the tab', function () {
     var s = setup();
     var lines = [];
     s.S.kernel.debug = function () { lines.push(Array.prototype.join.call(arguments, ' ')); };
-    s.win.open('orders');
+    s.win.open();
     var mine = lines.filter(function (l) { return /window render/.test(l); });
     assert.strictEqual(mine.length, 1);
-    assert.ok(/window render orders took \d+ ms/.test(mine[0]));
+    assert.ok(/window render manager took \d+ ms/.test(mine[0]));
 });
 
-t.test('one render reads assess once and the chip equals the Demand tab', function () {
-    var s = setup();
-    var P = s.S.modules.production;
-    var reads = 0;
-    P.assess = function () { reads++; return { rows: [{ id: 1 }, { id: 2 }] }; };
-    P.lastPass = function () { throw new Error('lastPass must not be read'); };
-    P.model.reservations = function (rows) { return { n: rows.length }; };
-    var seen = null;
-    P.views.demand = function ($c, h, data) { seen = data; $c.append(s.$('<div>').text('demand view')); };
+t.test('host: a window fading out after a hide holds no edits and is not open', function () {
+    var s = hostSetup();
     s.win.open();
-    s.rig.visible = true;
-    assert.strictEqual(reads, 1);
-    assert.ok(byText(body(s), s.$, 'button', 'Demand 2'), 'chip reads Demand 2');
-    click(body(s), s.$, 'Demand 2');
-    assert.strictEqual(reads, 2);
-    assert.strictEqual(seen.rows.length, 2);
-    assert.strictEqual(seen.reservations.n, 2);
-});
-
-t.test('the queues view gets the window rows with its queues', function () {
-    var s = setup();
-    s.S.modules.production.assess = function () { return { rows: [{ id: 1 }] }; };
-    s.win.open();
-    s.rig.visible = true;
-    var d = s.views.calls[s.views.calls.length - 1][1];
-    assert.strictEqual(d.queues.length, 1);
-    assert.strictEqual(d.rows.length, 1);
-});
-
-t.test('the Books tab reads onOff once and passes its counts', function () {
-    var s = setup();
-    var P = s.S.modules.production;
-    var reads = 0;
-    P.model.onOff = function () { reads++; return { rows: [{ n: 1 }], counts: { stopped: 2, miningOwned: 1 } }; };
-    P.model.onOffCounts = function () { throw new Error('onOffCounts must not be called'); };
-    P.model.books = function () { return []; };
-    var seen = null;
-    P.views.books = function ($c, h, data) { seen = data; };
-    s.win.open();
-    s.rig.visible = true;
-    click(body(s), s.$, 'Bookbinder & on/off');
-    assert.strictEqual(reads, 1);
-    assert.strictEqual(seen.counts.stopped, 2);
-    assert.strictEqual(seen.onOff.length, 1);
+    click(body(s), s.$, 'All buildings 4');
+    setItems(s, 'Barracks', '7');
+    assert.strictEqual(s.win.hasEdits(), true);
+    s.S.kernel.ui.hideModal(s.rig.made[s.rig.made.length - 1].modal);
+    assert.strictEqual(s.win.hasEdits(), false);
+    assert.strictEqual(s.win.isOpen(), false);
+    s.rig.flushFades();
 });
 
 // ---- Host Modal model ------------------------------------------------------
@@ -530,14 +649,14 @@ t.test('host: opening still resets the dashboard buffer so a Save is not overwri
     var ui = s.S.kernel.ui;
     ui.openDashboard();
     ui.bufferedSettings('production');
-    s.win.open('orders');
+    s.win.open();
     assert.strictEqual(ui.screen.modal(), null);
     assert.strictEqual(ui.hasOpenEdits(), false);
-    click(body(s), s.$, 'All 3');
-    setKeep(s, 'Gingerbread', '7');
+    click(body(s), s.$, 'All buildings 4');
+    setItems(s, 'Barracks', '7');
     click(footer(s), s.$, 'Save');
     var saved = s.H.settings.read('production').buildings;
-    assert.strictEqual(saved.Gingerbread.amount, 7);
+    assert.strictEqual(saved.Barracks.items, 7);
     ui.openDashboard();
     assert.deepStrictEqual(plain(ui.bufferedSettings('production').buildings), plain(saved));
 });
@@ -559,4 +678,52 @@ t.test('host: a throwing create leaves the dashboard shown and tracked', functio
     assert.strictEqual(s.rig.isShown('StewardDashboard'), true);
     assert.strictEqual(ui.screen.modal(), dash);
     assert.strictEqual(s.rig.balanced(), true);
+});
+
+t.test('k: a row with no listed buff has an empty Buff cell, not a lone None dropdown', function () {
+    var s = setup();
+    s.rows[1].buffs = [];
+    s.rows[2].buffs = [{ name: 'Duck', label: 'Roasted duck', amount: 0, offered: true },
+                       { name: 'Gold', label: 'Gold leaf', amount: 9, offered: false }];
+    openAll(s);
+    assert.strictEqual(cellOf(s, 'Barracks', 3).find('select').length, 0);
+    assert.strictEqual(cellOf(s, 'Barracks', 3).text(), '');
+    assert.strictEqual(cellOf(s, 'Gingerbread', 3).find('select').length, 0);
+    assert.strictEqual(cellOf(s, 'Bookbinder', 3).find('select').length, 1);
+});
+
+t.test('k: a stored buff on a row with no listed buff is cleared once another field changed', function () {
+    var s = setup({ Barracks: { item: 'BarracksItem', items: 1, buff: 'Duck', enabled: true } });
+    s.rows[1].buffs = [];
+    var writes = capture(s);
+    openAll(s);
+    assert.strictEqual(s.win.hasEdits(), false);
+    setItems(s, 'Barracks', '5');
+    click(footer(s), s.$, 'Save');
+    assert.deepStrictEqual(writes[0][1], { buildings: { Barracks: { item: 'BarracksItem', items: 5, buff: '', enabled: true } } });
+});
+
+t.test('n3: the buff drop-down returns when the stock returns', function () {
+    var s = setup({ Barracks: { item: 'BarracksItem', items: 1, buff: 'Duck', enabled: true } });
+    s.rows[1].buffs = [];
+    openAll(s);
+    assert.strictEqual(cellOf(s, 'Barracks', 3).find('select').length, 0);
+    s.rows[1].buffs = [{ name: 'Duck', label: 'Roasted duck', amount: 2, offered: true }];
+    click(body(s), s.$, 'Queues 1');
+    click(body(s), s.$, 'Production Manager');
+    var $sel = cellOf(s, 'Barracks', 3).find('select');
+    assert.strictEqual($sel.length, 1);
+    assert.deepStrictEqual(optionsOf(s, $sel), ['None', 'Roasted duck (2)']);
+    assert.strictEqual($sel.val(), 'Duck');
+    assert.strictEqual(s.win.hasEdits(), false);
+});
+
+t.test('k: an empty buff cell leaves Item and Enable editing and dirty tracking intact', function () {
+    var s = setup();
+    s.rows[1].buffs = [];
+    openAll(s);
+    pick(s, 'Barracks', 1, 'BarracksOther');
+    assert.ok(footer(s).text().indexOf('1 change') > -1, footer(s).text());
+    flip(s, 'Barracks', true);
+    assert.ok(/2 changes/.test(footer(s).text()), footer(s).text());
 });

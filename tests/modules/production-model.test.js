@@ -5,89 +5,23 @@ var harness = require('../harness');
 
 var assert = t.assert;
 
-// A booted steward whose building list is a small world of stub buildings.
-function setup(list, home) {
-    var H = harness.boot();
-    var S = H.Steward;
-    S.core.zone.isHome = function () { return home !== false; };
-    S.core.buildings.list = function () { return list; };
-    S.core.buildings.name = function (b) { return b.name; };
-    S.core.buildings.grid = function (b) { return b.grid; };
-    S.core.deposits.types = function () {
-        return [{ mineName: 'CopperMine', masonName: 'CopperMason' }];
-    };
-    return S;
-}
-
-function bld(name, grid, active, state) {
-    return {
-        name: name,
-        grid: grid,
-        IsProductionActive: function () { return active; },
-        GetResourceCreation: function () {
-            return { GetProductionState: function () { return state; } };
-        }
-    };
-}
-
 function names(rows) {
     return rows.map(function (r) { return r.name; });
 }
 
-t.test('onOff lists a switched-off building with active false', function () {
-    var S = setup([bld('Bakery', 1, false, 0)]);
-    var rows = S.modules.production.model.onOff().rows;
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].active, false);
-});
-
-t.test('onOff lists an active building whose input is missing', function () {
-    var S = setup([bld('Bakery', 1, true, 1)]);
-    assert.equal(names(S.modules.production.model.onOff().rows).join(','), 'Bakery');
-});
-
-t.test('onOff skips an active building that is producing', function () {
-    var S = setup([bld('Bakery', 1, true, 0)]);
-    assert.equal(S.modules.production.model.onOff().rows.length, 0);
-});
-
-t.test('onOff skips a non-boolean active read in state 0', function () {
-    var S = setup([bld('Bakery', 1, 0, 0)]);
-    assert.equal(S.modules.production.model.onOff().rows.length, 0);
-});
-
-t.test('a mine is flagged mining and counted as miningOwned', function () {
-    var S = setup([bld('CopperMine', 2, false, 0), bld('Bakery', 1, false, 0)]);
-    var m = S.modules.production.model;
-    var scan = m.onOff();
-    assert.equal(scan.rows[0].mining, true);
-    assert.equal(scan.rows[1].mining, false);
-    assert.equal(scan.counts.stopped, 2);
-    assert.equal(scan.counts.miningOwned, 1);
-    assert.equal(m.onOffCounts, undefined);
-});
-
-t.test('onOff caps the rows, counts every stopped building and scans once', function () {
-    var list = [];
-    for (var i = 0; i < 205; i++) list.push(bld('Bakery', i, false, 0));
-    var S = setup(list);
-    var reads = 0;
-    S.core.buildings.list = function () { reads++; return list; };
-    var scan = S.modules.production.model.onOff();
-    assert.equal(scan.rows.length, 200);
-    assert.equal(scan.counts.stopped, 205);
-    assert.equal(scan.counts.miningOwned, 0);
-    assert.equal(reads, 1);
-});
-
-t.test('off the home zone the rows are empty', function () {
-    var S = setup([bld('Bakery', 1, false, 0)], false);
-    assert.equal(S.modules.production.model.onOff().rows.length, 0);
-});
-
 // ---- status, snapshot, counted queues and grouping on the counting stub ----
 
 var PS = require('../stubs/production');
+
+// Two buffs, one made in the Provision House queue (1) and one in the Fishhouse
+// queue (6), so both queues have something producible.
+var BUFFS = {
+    buffs: PS.buffDefs(2, ['3', '5']),
+    buffMap: {
+        BB_0: { target: 'ProvisionHouse', group: '', type: 0 },
+        BB_1: { target: 'Fishhouse', group: '', type: 0 }
+    }
+};
 
 var ENUMS = { 1: 'provisionhouse', 2: 'bookbinder', 6: 'fishhouse', 11: 'winery', 20: 'culturebuilding' };
 
@@ -144,6 +78,8 @@ function world(opts) {
 
 function countedWorld() {
     return world({
+        buffs: BUFFS.buffs,
+        buffMap: BUFFS.buffMap,
         queues: { 1: [qe('Bread', 1, 5000)], 6: [], 20: [], 40: [] },
         buildings: [
             { name: 'ProvisionHouse', type: 1 },
@@ -368,7 +304,7 @@ t.test('standingCovered and standingHeld count only own rows', function () {
     var D = b.S.DemandStatus;
     b.S.modules.production.lastPass = function () {
         return { at: 1, rows: [
-            { owner: 'production', status: D.Waiting },
+            { owner: 'production', status: D.Short },
             { owner: 'adventures', status: D.Held },
             { owner: 'other', status: D.Covered }
         ] };
@@ -377,9 +313,9 @@ t.test('standingCovered and standingHeld count only own rows', function () {
     assert.equal(s.standing, 1);
     assert.equal(s.standingCovered, 0);
     assert.equal(s.standingHeld, 0);
-    assert.equal(s.covered, 1);
-    assert.equal(s.held, 1);
-    assert.equal(s.waiting, 1);
+    ['covered', 'waiting', 'shortfall', 'held'].forEach(function (f) {
+        assert.equal(s[f], undefined, f);
+    });
 });
 
 t.test('readAt is when the host part was read', function () {
@@ -415,6 +351,50 @@ t.test('emptyStatus has the same fields as status', function () {
     assert.equal(e.standingCovered, 0);
     assert.equal(e.orderBreaker, null);
     assert.equal(e.buffBreaker, null);
+    assert.strictEqual(e.booksItem, null);
+    assert.strictEqual(e.booksDoneAt, null);
+});
+
+function booksWorld(entries) {
+    return world({
+        queues: { 2: entries },
+        buildings: [{ name: 'Bookbinder', type: 2 }]
+    });
+}
+
+t.test('the Bookbinder head and its absolute finish time come from the status', function () {
+    var b = booksWorld([qe('Tome', 1, 60000), qe('Scroll', 1, 5000)]);
+    var before = Date.now();
+    var s = b.m.status();
+    assert.equal(s.booksItem, 'Tome');
+    assert.ok(s.booksDoneAt >= before + 60000 && s.booksDoneAt <= Date.now() + 60000, String(s.booksDoneAt));
+});
+
+t.test('an empty Bookbinder queue gives no head', function () {
+    var s = booksWorld([]).m.status();
+    assert.strictEqual(s.booksItem, null);
+    assert.strictEqual(s.booksDoneAt, null);
+});
+
+t.test('an unreadable Bookbinder queue gives no head', function () {
+    var b = booksWorld([qe('Tome', 1, 60000)]);
+    var zone = b.H.host.game.gi.mCurrentPlayerZone;
+    var base = zone.GetProductionQueue;
+    zone.GetProductionQueue = function (type) {
+        if (type !== 2) return base(type);
+        return { mProductionType: 2, productionBuilding: {},
+            get mTimedProductions_vector() { throw new Error('bridge'); } };
+    };
+    var s = b.m.status();
+    assert.strictEqual(s.booksItem, null);
+    assert.strictEqual(s.booksDoneAt, null);
+});
+
+t.test('a Bookbinder head without a numeric time keeps the item and no finish time', function () {
+    var b = booksWorld([qe('Tome', 1, undefined)]);
+    var s = b.m.status();
+    assert.equal(s.booksItem, 'Tome');
+    assert.strictEqual(s.booksDoneAt, null);
 });
 
 t.test('snapshot is one object per read pass, fresh outside one', function () {
@@ -453,9 +433,11 @@ t.test('scope and building rows follow queueNames', function () {
     assert.equal(b.m.status().types, 2);
 });
 
-t.test('scope and building rows never call ownedByMining; onOff does', function () {
+t.test('scope and building rows never call ownedByMining', function () {
     var b = world({
         enumNames: ENUMS,
+        buffs: BUFFS.buffs,
+        buffMap: BUFFS.buffMap,
         queues: { 1: [qe('Bread', 1, 5000)], 6: [], 40: [] },
         buildings: [
             { name: 'ProvisionHouse', type: 1 },
@@ -472,7 +454,226 @@ t.test('scope and building rows never call ownedByMining; onOff does', function 
     var rows = b.m.buildings();
     assert.equal(calls, 0, 'status, queues and buildings');
     assert.equal(names(rows).join(','), 'ProvisionHouse,Fishhouse');
-    var scan = b.m.onOff();
-    assert.ok(calls >= 1, 'onOff reads the mining flag');
-    assert.equal(scan.counts.stopped, 1);
+});
+
+// ---- the listing rule, queue rows and costText ----
+
+// Timed type 3 (the Bakery and, where a test wants a second name, Bakery2)
+// whose one item needs an event that has not started, so it is unproducible
+// unless the test starts it. Type 20 is a cooldown building.
+function listWorld(extra) {
+    extra = extra || {};
+    return world({
+        queues: extra.queues || { 3: [], 20: [] },
+        events: extra.events || [],
+        timed: { 3: [{ name: 'Cake', yield: 1, costs: [{ name_string: 'Wheat', amount: 3 }],
+            requiresEvent: extra.free ? '' : 'Halloween' }] },
+        buildings: extra.buildings || [{ name: 'Bakery', type: 3 }, { name: 'Culture', type: 20 }]
+    });
+}
+
+// Replaces the saved rows the model reads.
+function saved(b, rows) {
+    b.S.modules.production.readSettings = function () { return { enabled: true, buildings: rows }; };
+}
+
+t.test('isManaged is true for a row with an item or a buff', function () {
+    var m = listWorld().m;
+    assert.equal(m.isManaged({ item: 'Cake', buff: '' }), true);
+    assert.equal(m.isManaged({ item: '', buff: 'BB_0' }), true);
+    assert.equal(m.isManaged({ item: '', buff: '', enabled: true }), false);
+    assert.equal(m.isManaged(null), false);
+});
+
+t.test('a cooldown type and a type with nothing producible are not listed', function () {
+    var b = listWorld({ queues: { 3: [], 20: [qe('Show', 1, 5000)] } });
+    assert.equal(names(b.m.buildings()).join(','), '');
+    assert.equal(b.m.queues().length, 0, 'a cooldown type with entries stays hidden');
+});
+
+t.test('a saved row keeps an unproducible building listed and managed', function () {
+    var b = listWorld();
+    saved(b, { Bakery: { item: 'Cake', items: 1, buff: '', enabled: true } });
+    var rows = b.m.buildings();
+    assert.equal(names(rows).join(','), 'Bakery');
+    assert.equal(rows[0].managed, true);
+    assert.equal(b.m.queues().length, 1);
+});
+
+t.test('an unproducible type is listed again once its item is producible', function () {
+    var b = listWorld();
+    assert.equal(b.m.buildings().length, 0);
+    b.w.events.push('Halloween');
+    var rows = b.m.buildings();
+    assert.equal(names(rows).join(','), 'Bakery');
+    assert.equal(rows[0].managed, false);
+});
+
+t.test('an unreadable item list keeps the row', function () {
+    var b = listWorld();
+    b.S.core.production.itemsOf = function () { return null; };
+    assert.equal(names(b.m.buildings()).join(','), 'Bakery');
+});
+
+t.test('a type listed through one name keeps its queue row although another name is hidden', function () {
+    var b = listWorld({
+        queues: { 3: [qe('Cake', 1, 5000)], 20: [] },
+        buildings: [{ name: 'Bakery', type: 3 }, { name: 'Bakery2', type: 3 }]
+    });
+    saved(b, { Bakery: { item: 'Cake', items: 1, buff: '', enabled: false } });
+    assert.equal(names(b.m.buildings()).join(','), 'Bakery');
+    var qs = b.m.queues();
+    assert.equal(qs.length, 1);
+    assert.equal(qs[0].type, 3);
+});
+
+t.test('a type with no listed name is on queues() while its entries read, never on buildings()', function () {
+    var b = listWorld({ queues: { 3: [qe('Cake', 1, 5000)], 20: [] } });
+    assert.equal(b.m.buildings().length, 0);
+    var qs = b.m.queues();
+    assert.equal(qs.length, 1);
+    assert.equal(qs[0].producing, true);
+    b.w.queues[3] = [];
+    assert.equal(b.m.queues().length, 0, 'gone once the queue is empty');
+    assert.equal(b.m.buildings().length, 0);
+});
+
+t.test('an unreadable entry list does not list a type with no listed name', function () {
+    var b = listWorld({ queues: { 3: [qe('Cake', 1, 5000)], 20: [] } });
+    var zone = b.H.host.game.gi.mCurrentPlayerZone;
+    var base = zone.GetProductionQueue;
+    zone.GetProductionQueue = function (type) {
+        if (type !== 3) return base(type);
+        return { mProductionType: 3, productionBuilding: {},
+            get mTimedProductions_vector() { throw new Error('bridge'); } };
+    };
+    assert.equal(b.m.queues().length, 0);
+});
+
+t.test('auto names the first enabled row with an item; producing follows the entries', function () {
+    var b = listWorld({
+        free: true,
+        queues: { 3: [qe('Cake', 1, 5000)], 20: [] },
+        buildings: [{ name: 'Bakery', type: 3 }, { name: 'Bakery2', type: 3 }]
+    });
+    saved(b, {
+        Bakery:  { item: 'Cake', items: 1, buff: '', enabled: false },
+        Bakery2: { item: 'Cake', items: 1, buff: '', enabled: true }
+    });
+    var q = b.m.queues()[0];
+    assert.equal(q.producing, true);
+    assert.equal(q.auto.name, 'Bakery2');
+    assert.equal(q.auto.item, 'Cake');
+    assert.equal(q.auto.label, 'Cake');
+    assert.equal(q.source({ item: 'Cake' }), 'Other');
+    b.w.queues[3] = [];
+    assert.equal(b.m.queues()[0].producing, false);
+    saved(b, {});
+    assert.equal(b.m.queues()[0].auto, null);
+});
+
+t.test('costText multiplies the costs by the items of one order', function () {
+    var b = listWorld({ free: true });
+    var row = b.m.buildings()[0];
+    assert.equal(row.costText('Cake', 4), '12 Wheat per order');
+    assert.equal(row.costText('Cake', 0), '3 Wheat per order');
+    assert.equal(row.costText('Cake'), '3 Wheat per order');
+    assert.equal(row.costText('Nothing', 4), '');
+});
+
+t.test('the hidden-set debug line is written once per changed set', function () {
+    var b = listWorld({ queues: { 3: [] }, buildings: [{ name: 'Bakery', type: 3 }] });
+    b.m.buildings();
+    b.m.buildings();
+    assert.equal(logLines(b, 'manager hides').length, 1);
+    assert.ok(String(logLines(b, 'manager hides')[0].args[0]).indexOf('Bakery (nothing producible)') !== -1);
+    b.w.events.push('Halloween');
+    b.m.buildings();
+    assert.equal(logLines(b, 'manager hides').length, 1, 'nothing hidden, nothing logged');
+    b.w.events.length = 0;
+    b.m.buildings();
+    assert.equal(logLines(b, 'manager hides').length, 2, 'the set changed back');
+});
+
+t.test('buildings() and queues() in one pass build the rows once', function () {
+    var b = listWorld({ free: true, queues: { 3: [] }, buildings: [{ name: 'Bakery', type: 3 }] });
+    var calls = 0;
+    var real = b.S.core.buffs.buildingBuffCandidates;
+    b.S.core.buffs.buildingBuffCandidates = function () { calls++; return real.apply(this, arguments); };
+    b.S.kernel.hostRead.pass(function () {
+        b.m.buildings();
+        b.m.queues();
+    });
+    assert.equal(calls, 1, 'one row, built once');
+});
+
+t.test('status and snapshot make no availability call and carry no demand counts', function () {
+    var b = listWorld({ free: true, queues: { 3: [qe('Cake', 1, 5000)], 20: [] } });
+    b.w.reset();
+    var s = b.m.status();
+    b.m.snapshot();
+    ['requirement', 'adventure', 'events', 'skills'].forEach(function (k) {
+        assert.equal(b.w.counts[k], 0, k);
+    });
+    ['covered', 'waiting', 'shortfall', 'held'].forEach(function (f) {
+        assert.equal(s[f], undefined, f);
+    });
+});
+
+// ---- hidden by name ----
+
+function hiddenWorld(extra) {
+    extra = extra || {};
+    return world({
+        enumNames: { 3: 'bakery', 54: 'forerunner' },
+        queues: { 3: [], 54: extra.entries || [] },
+        timed: {
+            3: [{ name: 'Cake', yield: 1, costs: [{ name_string: 'Wheat', amount: 3 }], requiresEvent: '' }],
+            54: [{ name: 'Gift', yield: 1, costs: [{ name_string: 'Wheat', amount: 3 }], requiresEvent: '' }]
+        },
+        buildings: extra.buildings || [{ name: 'StarfallAirship', type: 54 }]
+    });
+}
+
+t.test('a name in the hidden list has no building row, even when managed', function () {
+    var b = hiddenWorld();
+    assert.equal(names(b.m.buildings()).join(','), '');
+    saved(b, { StarfallAirship: { item: 'Gift', items: 1, buff: '', enabled: true } });
+    b.S.kernel.hostRead.invalidate && b.S.kernel.hostRead.invalidate();
+    assert.equal(names(b.m.buildings()).join(','), '');
+    var lines = logLines(b, 'manager hides');
+    assert.ok(lines.length >= 1);
+    assert.ok(String(lines[0].args[0]).indexOf('StarfallAirship (hidden by name)') !== -1);
+});
+
+t.test('the hidden list is exported, so the module gates on the same names', function () {
+    var b = hiddenWorld();
+    assert.strictEqual(b.m.hiddenByName('StarfallAirship'), true);
+    assert.strictEqual(b.m.hiddenByName('ProvisionHouse'), false);
+    assert.strictEqual(b.m.hiddenByName(null), false);
+});
+
+t.test('a type whose names are all hidden is not listed through its entries', function () {
+    var b = hiddenWorld({ entries: [qe('Gift', 1, 5000)] });
+    assert.equal(b.m.queues().length, 0);
+});
+
+t.test('a type whose names are all hidden is not counted', function () {
+    var b = hiddenWorld({ entries: [qe('Gift', 1, 5000)] });
+    var s = b.m.status();
+    assert.equal(s.types, 0);
+    assert.equal(s.queues, 0);
+    var lines = logLines(b, 'queue count leaves out');
+    assert.ok(lines.length >= 1);
+    assert.ok(String(lines[0].args[0]).indexOf('54 (hidden)') !== -1);
+});
+
+t.test('a type with a hidden and a visible name stays listed and counted', function () {
+    var b = hiddenWorld({
+        entries: [qe('Gift', 1, 5000)],
+        buildings: [{ name: 'StarfallAirship', type: 54 }, { name: 'Gifthouse', type: 54 }]
+    });
+    assert.equal(names(b.m.buildings()).join(','), 'Gifthouse');
+    assert.equal(b.m.queues().length, 1);
+    assert.equal(b.m.status().types, 1);
 });

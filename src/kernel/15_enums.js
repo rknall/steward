@@ -189,15 +189,4 @@
         Stop: 'BuffStop'
     };
 
-    // Kinds of entry in the production module's recent list. The values are
-    // unprefixed on purpose: each one is shown as the Action column of the
-    // window's Recent tab. Users: modules/production (notes and the Recent tab).
-    S.ProductionNote = {
-        Order:    'Order',
-        Buff:     'Buff',
-        Complete: 'Complete',
-        Skip:     'Skip',
-        Toggle:   'Toggle'
-    };
-
 }(Steward));

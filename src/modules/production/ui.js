@@ -2,14 +2,14 @@
  * Dashboard surface for the production module.
  *
  * Owns the slim Production tab and the Overview tile. The tab only holds
- * the module's switches and a read-only summary; standing orders, queues
- * and demand live in the production manager window, which the button and
- * the tile link open.
+ * the module's switches and a read-only summary; the automatic queues and
+ * the live queues live in the production manager window, which the button
+ * and the tile link open.
  *
  *   side      the settings column: the module switch, delay and caps, the
- *             standing/buff/Bookbinder flags, and the counts.
- *   render    the main column: breaker banner, what production does now,
- *             short rows, and the pointer to the manager window.
+ *             automatic-queue and buff flags, and the counts.
+ *   render    the main column: breaker banner, what production does now
+ *             (queues and next done), and the pointer to the manager window.
  *   summary   the one-line strip.
  *   tiles     the Overview tile, in one of four states (off, breaker, idle,
  *             running).
@@ -65,13 +65,6 @@
         return (st && typeof st === 'object') ? st : {};
     }
 
-    function lastRows() {
-        try {
-            var last = M().lastPass();
-            return (last && last.rows) || [];
-        } catch (e) { return []; }
-    }
-
     function hhmm(h, ms) {
         return typeof ms === 'number' ? h.clock(new Date(ms)) : '';
     }
@@ -108,7 +101,7 @@
 
     function summary(h) {
         var st = status();
-        return st.standing + ' standing orders · next done ' + nextDone(h, st);
+        return st.standing + ' automatic queues · next done ' + nextDone(h, st);
     }
 
     function side($side, h) {
@@ -137,33 +130,29 @@
         $card.append(h.field('Orders per pass', 'Each verified send holds the module up to 15 s',
             cap('ordersPerPass', 'Orders per pass')));
         $card.append(h.field('Buffs per pass', null, cap('buffsPerPass', 'Buffs per pass')));
-        $card.append(h.field('Standing orders', null, flag('standing', 'Standing orders')));
+        $card.append(h.field('Automatic queues', null, flag('standing', 'Automatic queues')));
         $card.append(h.field('Building buffs', 'Mines and masons stay with Mining',
             flag('buffs', 'Building buffs')));
-        $card.append(h.field('Bookbinder auto-complete', 'Off by default',
-            flag('bookComplete', 'Bookbinder auto-complete')));
         $side.append($card);
 
         var st = status();
         var open = !!(st.orderBreaker && st.orderBreaker.open);
         var $stats = $('<div>', { 'class': 'steward-card' });
         $stats.append(h.stats([
-            { k: 'Standing orders',  v: st.standing, small: 'active' },
+            { k: 'Automatic queues', v: st.standing, small: 'active' },
             { k: 'Buildings buffed', v: st.buffed,   small: 'of ' + st.buffable },
             { k: 'Order breaker',    $v: h.badge(open ? 'paused' : 'ok', open ? 'open' : 'closed') }
         ]));
         $side.append($stats);
     }
 
-    // " · Bookbinder: <item> done hh:mm" while the Bookbinder holds an entry.
-    function bookLine(h) {
-        var books = null;
-        try { books = M().model.books(); }
-        catch (e) { books = null; }
-        if (!books || !books.head) return '';
-        var rem = books.head.remainingMs;
-        return ' · Bookbinder: ' + books.head.item +
-            (typeof rem === 'number' ? ' done ' + hhmm(h, Date.now() + rem) : '');
+    // " · Bookbinder: <item name> done hh:mm" while the Bookbinder queue
+    // holds an entry; the item shows by its name, not its id. The head comes
+    // from the status snapshot, so a repaint costs no host reads.
+    function bookLine(h, st) {
+        if (st.booksItem === null || st.booksItem === undefined || st.booksItem === '') return '';
+        return ' · Bookbinder: ' + res(st.booksItem) +
+            (typeof st.booksDoneAt === 'number' ? ' done ' + hhmm(h, st.booksDoneAt) : '');
     }
 
     function render($main, h) {
@@ -181,26 +170,13 @@
         var $now = h.card({ title: 'Production now', meta: typeof st.readAt === 'number' ? 'read ' + hhmm(h, st.readAt) : 'not read yet' });
         $now.append(h.stats([
             { k: 'Queues',    v: st.queues, small: 'of ' + st.types },
-            { k: 'Next done', v: nextDone(h, st) },
-            { k: 'Demand',    v: st.waiting, small: 'waiting' },
-            { k: 'Short',     v: st.shortfall }
+            { k: 'Next done', v: nextDone(h, st) }
         ]));
         $main.append($now);
 
-        var rows = lastRows();
-        var shown = 0;
-        for (var i = 0; i < rows.length && shown < 3; i++) {
-            var r = rows[i];
-            if (r.status !== S.DemandStatus.Short || !r.shortfall) continue;
-            var missing = num(r.shortfall.need, 0) - num(r.shortfall.have, 0);
-            $main.append(h.banner(r.label + ': short of ' + missing + ' ' + res(r.shortfall.name),
-                { icon: '⚠' }));
-            shown++;
-        }
-
-        var $card = h.card({ title: 'Standing orders, queues and demand live in the production manager' });
+        var $card = h.card({ title: 'Automatic queues and queues live in the production manager' });
         $card.append($('<div>', { 'class': 'steward-muted' }).text(
-            st.standing + ' standing orders · ' + st.buffed + ' buildings buffed' + bookLine(h)));
+            st.standing + ' automatic queues · ' + st.buffed + ' buildings buffed' + bookLine(h, st)));
         $card.append(h.button('Open production manager…', { onClick: openManager }));
         $main.append($card);
     }
@@ -233,14 +209,14 @@
 
         if (st.standing > 0 && st.standingCovered + st.standingHeld >= st.standing) {
             tile.badge = { kind: 'ok', text: 'Idle' };
-            tile.lines = [st.standing + ' standing orders covered',
+            tile.lines = [st.standing + ' automatic queues covered',
                           'Next done ' + nextDone(h, st) + nextItem(st)];
             return [tile];
         }
 
         tile.badge = { kind: 'busy', text: 'Running' };
-        tile.lines = [st.standing + ' standing orders · next done ' + nextDone(h, st),
-                      st.queues + ' queues · demand: ' + st.waiting + ' waiting, ' + st.shortfall + ' short'];
+        tile.lines = [st.standing + ' automatic queues · next done ' + nextDone(h, st),
+                      st.queues + ' queues'];
         return [tile];
     }
 

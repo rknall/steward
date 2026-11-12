@@ -10,6 +10,8 @@ var assert = t.assert;
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
+function thrower() { throw new Error('member'); }
+
 function costLine(name, amount) {
     return { GetName_string: function () { return name; }, GetAmount: function () { return amount; } };
 }
@@ -80,6 +82,10 @@ function setup(opts) {
     var unitBase = { GetType: function () { return 'Recruit'; } };
     var globalDef = {
         timedProductions_vector: { 3: [{ name_string: 'Plank', GetProductionAmount: function () { return 2; },
+                                         GetGroup: function () { return opts.badGroup ? thrower() : 'grp'; },
+                                         GetType: function () { return 'Plank'; },
+                                         requiresEvent: 'Fest', requiresQuest: 'Q1',
+                                         requiresUpgradeLevelMin: 1, requiresUpgradeLevelMax: 3,
                                          GetCosts_vector: function () { return [costLine('Wood', 5)]; } }] },
         skillPoints_vector: [{ id_string: 'Manuscript',
                                levels_vector: [{ amountProduced: 0, GetCosts_vector: function () { return [costLine('Paper', 1)]; } }] }]
@@ -139,6 +145,36 @@ t.test('record lists each queue type with enum name, buildings and entries', fun
     assert.strictEqual(timed.items[0].name, 'Plank');
     assert.strictEqual(timed.items[0].yield, 2);
     assert.strictEqual(timed.items[0].costs[0].name, 'Wood');
+});
+
+t.test('record holds the steward availability, orderMax and the timed requirement fields', function () {
+    var s = setup();
+    var P = s.H.Steward.core.production;
+    P.itemsOf = function (type) {
+        return type === 3 ? [{ name: 'Plank', producible: true }] : [];
+    };
+    P.orderMax = function () { return 5; };
+    var timed = typeOf(plain(s.dg.record()), 3);
+    assert.strictEqual(timed.steward[0].name, 'Plank');
+    assert.strictEqual(timed.steward[0].producible, true);
+    assert.strictEqual(timed.orderMax, 5);
+    var it = timed.items[0];
+    assert.strictEqual(it.group, 'grp');
+    assert.strictEqual(it.typeKey, 'Plank');
+    assert.strictEqual(it.requiresEvent, 'Fest');
+    assert.strictEqual(it.requiresQuest, 'Q1');
+    assert.strictEqual(it.requiresUpgradeLevelMin, 1);
+    assert.strictEqual(it.requiresUpgradeLevelMax, 3);
+});
+
+t.test('a throwing member writes an error marker and the dump goes on', function () {
+    var s = setup({ badGroup: true });
+    s.H.Steward.core.production.itemsOf = function () { throw new Error('items'); };
+    var timed = typeOf(plain(s.dg.record()), 3);
+    assert.ok(/member/.test(timed.items[0].group.error));
+    assert.strictEqual(timed.items[0].typeKey, 'Plank');
+    assert.ok(/items/.test(timed.steward.error));
+    assert.strictEqual(timed.queue.entries.length, 1);
 });
 
 t.test('record keeps queue fields and calls capacity-looking getters', function () {

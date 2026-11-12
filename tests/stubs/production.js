@@ -25,7 +25,30 @@
  *   buildings   [{ name, grid, level, type, buff, state }]; type is the queue
  *               type (omit for continuous producers), buff a running buff
  *               name, state a GetProductionState number
- *   books, timed, home, stock, free   as in the production queue tests
+ *   books, timed, home, stock, free   as in the production queue tests; a
+ *               timed def is { name, yield, costs } plus, optionally, group
+ *               (served by GetGroup()), requiresEvent, requiresQuest,
+ *               requiresUpgradeLevelMin, requiresUpgradeLevelMax, typeKey
+ *               (served by GetType(), default the name) and prodName
+ *               (GetProductionName_string(), default the name)
+ *   events      started event names; Utils::RequirementsHelper's
+ *               checkRequirements(gi, event, quest) is true when the event is
+ *               empty or started and the quest is empty or in quests
+ *   quests      quest names checkRequirements accepts
+ *   adventureBuffs  { name: active } for BuffAdventureController's
+ *               isActiveBuffAdventureBuffOrNormalBuff; absent names are
+ *               normal buffs (true)
+ *   requirements    { key: bool | 'throw' } for
+ *               gi.mRequirements.timedProductionRequirements_vector; a key's
+ *               isFulfilledForSkillList returns the value or throws; absent
+ *               keys have no lock
+ *   skills      what gi.mCurrentPlayer.getSkills() returns (default [])
+ *   labels      { key: text } served by loca.GetText('LAB', key); other keys
+ *               fall through to the harness loca
+ *
+ * Counters beyond the reads above: requirement (isFulfilledForSkillList
+ * calls), adventure (isActiveBuffAdventureBuffOrNormalBuff calls), events
+ * (checkRequirements calls) and skills (getSkills calls).
  */
 
 'use strict';
@@ -82,6 +105,12 @@ function world(opts) {
         home: opts.home !== false,
         stock: opts.stock || {},
         free: typeof opts.free === 'number' ? opts.free : 1000,
+        events: opts.events || [],
+        quests: opts.quests || [],
+        adventureBuffs: opts.adventureBuffs || {},
+        requirements: opts.requirements || {},
+        skills: opts.skills || [],
+        labels: opts.labels || {},
         counts: null,
         reset: null,
         set: null,
@@ -93,7 +122,8 @@ function world(opts) {
             buffVector: 0, buffName: 0, buffGroup: 0,
             queue: {},
             zoneBuildings: 0, byNameIndex: 0,
-            targetDesc: 0, groupContains: 0, starMenu: 0
+            targetDesc: 0, groupContains: 0, starMenu: 0,
+            requirement: 0, adventure: 0, events: 0, skills: 0
         };
     }
     zero();
@@ -246,13 +276,7 @@ function install(H, w) {
         timedProductions_vector: (function () {
             var v = {};
             Object.keys(w.timed).forEach(function (k) {
-                v[k] = w.timed[k].map(function (d) {
-                    return {
-                        name_string: d.name,
-                        GetProductionAmount: function () { return d.yield; },
-                        GetCosts_vector: function () { return d.costs; }
-                    };
-                });
+                v[k] = w.timed[k].map(timedDefFake);
             });
             return v;
         }())
@@ -265,7 +289,67 @@ function install(H, w) {
             }
         }
     });
+    installAvailability(H, w, sent);
     return sent;
+}
+
+function timedDefFake(d) {
+    var def = {
+        name_string: d.name,
+        GetProductionAmount: function () { return d.yield; },
+        GetCosts_vector: function () { return d.costs; },
+        GetType: function () { return has(d, 'typeKey') ? d.typeKey : d.name; },
+        GetProductionName_string: function () { return d.prodName || d.name; }
+    };
+    if (has(d, 'group')) def.GetGroup = function () { return d.group; };
+    ['requiresEvent', 'requiresQuest', 'requiresUpgradeLevelMin', 'requiresUpgradeLevelMax'].forEach(function (k) {
+        if (has(d, k)) def[k] = d[k];
+    });
+    return def;
+}
+
+// The host reads behind item availability: the two static classes, the
+// recipe locks, the player's skills and the LAB page titles. Every value is
+// read live from w, so a test can change it between reads.
+function installAvailability(H, w, sent) {
+    var gi = H.host.game.gi;
+    sent.registerDef('Utils::RequirementsHelper', {
+        checkRequirements: function (g, ev, qu) {
+            w.counts.events++;
+            return (!ev || w.events.indexOf(ev) !== -1) && (!qu || w.quests.indexOf(qu) !== -1);
+        }
+    });
+    sent.registerDef('BuffSystem::BuffAdventureController', {
+        isActiveBuffAdventureBuffOrNormalBuff: function (name) {
+            w.counts.adventure++;
+            return has(w.adventureBuffs, name) ? !!w.adventureBuffs[name] : true;
+        }
+    });
+    gi.mRequirements = {
+        get timedProductionRequirements_vector() {
+            var v = {};
+            Object.keys(w.requirements).forEach(function (key) {
+                v[key] = {
+                    isFulfilledForSkillList: function () {
+                        w.counts.requirement++;
+                        if (w.requirements[key] === 'throw') throw new Error('bridge');
+                        return w.requirements[key];
+                    }
+                };
+            });
+            return v;
+        }
+    };
+    gi.mCurrentPlayer.getSkills = function () {
+        w.counts.skills++;
+        return w.skills;
+    };
+    var loca = H.host.loca;
+    var base = loca.GetText;
+    loca.GetText = function (cat, key) {
+        if (cat === 'LAB' && has(w.labels, key)) return w.labels[key];
+        return base.call(loca, cat, key);
+    };
 }
 
 module.exports = {

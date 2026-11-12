@@ -1,15 +1,14 @@
 /*
  * Production submenu of the native ~Steward~ menu.
  *
- * Layout, always the same seven rows:
+ * Layout, always the same six rows:
  *
  *   ✓/✕ Auto-production          flips enabled
  *   N queues · M entries · ...   display-only status line
  *   Open production manager…     opens the Steward production window
  *   ----
- *   ✓/✕ Standing orders          flips standing
+ *   ✓/✕ Automatic queues         flips standing
  *   ✓/✕ Building buffs           flips buffs
- *   ✓/✕ Bookbinder auto-complete flips bookComplete
  *
  * The row set never changes with state, only the label functions do, so
  * the submenu is never rebuilt: every native rebuild leaks objects in AIR,
@@ -54,7 +53,7 @@
 
     function mark(on) { return on ? '✓ ' : '✕ '; }
 
-    // One settings read per refresh pass, shared by the four switch labels.
+    // One settings read per refresh pass, shared by the three switch labels.
     function settingsOf(pass) {
         if (!pass) return current();
         if (!pass.settings) pass.settings = current();
@@ -143,9 +142,8 @@
             { label: function (pass) { return statusText(statusOf(pass)); }, enabled: false },
             { label: 'Open production manager…', onSelect: openWindow },
             { separator: true },
-            toggleRow('standing', 'Standing orders'),
-            toggleRow('buffs', 'Building buffs'),
-            toggleRow('bookComplete', 'Bookbinder auto-complete')
+            toggleRow('standing', 'Automatic queues'),
+            toggleRow('buffs', 'Building buffs')
         ];
     }
 

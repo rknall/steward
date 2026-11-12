@@ -1,6 +1,6 @@
 'use strict';
 
-// The ~Steward~ › Production submenu: a fixed set of seven rows whose labels
+// The ~Steward~ › Production submenu: a fixed set of six rows whose labels
 // follow the production settings, flips that write only their own key at
 // once and then run the module's applySettings (the same off path as a
 // dashboard Save), and the status line built from the model's status.
@@ -49,47 +49,45 @@ function labels(w) {
     return out;
 }
 
-t.test('production menu: always seven rows, whatever the state', function () {
+t.test('production menu: always six rows, whatever the state', function () {
     var a = setup({ enabled: false, standing: false, buffs: false, bookComplete: false });
     var b = setup({ enabled: true, standing: true, buffs: true, bookComplete: true });
     var c = setup(null);
-    assert.strictEqual(a.items().length, 7);
-    assert.strictEqual(b.items().length, 7);
-    assert.strictEqual(c.items().length, 7);
+    assert.strictEqual(a.items().length, 6);
+    assert.strictEqual(b.items().length, 6);
+    assert.strictEqual(c.items().length, 6);
     var its = a.items();
     assert.strictEqual(its[3].separator, true);
     assert.strictEqual(its[1].enabled, false, 'status line is display-only');
     assert.strictEqual(its[1].onSelect, undefined);
     assert.strictEqual(its[2].label, 'Open production manager…');
+    assert.strictEqual(labels(a).join('|').indexOf('Bookbinder'), -1, 'no Bookbinder row');
     // The registry accepts every row, so none is dropped at build.
-    assert.strictEqual(a.S.kernel.registry.menuItems('production', its).length, 7);
+    assert.strictEqual(a.S.kernel.registry.menuItems('production', its).length, 6);
 });
 
 t.test('production menu: labels follow the settings', function () {
     var w = setup({ enabled: true, standing: false, buffs: true, bookComplete: false });
     var l = labels(w);
     assert.strictEqual(l[0], '✓ Auto-production');
-    assert.strictEqual(l[4], '✕ Standing orders');
+    assert.strictEqual(l[4], '✕ Automatic queues');
     assert.strictEqual(l[5], '✓ Building buffs');
-    assert.strictEqual(l[6], '✕ Bookbinder auto-complete');
     w.S.kernel.settings.write('production', { enabled: false, standing: true, buffs: false, bookComplete: true });
     l = labels(w);
     assert.strictEqual(l[0], '✕ Auto-production');
-    assert.strictEqual(l[4], '✓ Standing orders');
+    assert.strictEqual(l[4], '✓ Automatic queues');
     assert.strictEqual(l[5], '✕ Building buffs');
-    assert.strictEqual(l[6], '✓ Bookbinder auto-complete');
 });
 
 t.test('production menu: an unstored key reads as its default', function () {
     var w = setup({ enabled: true });
     var l = labels(w);
-    assert.strictEqual(l[4], '✓ Standing orders', 'standing defaults to on');
+    assert.strictEqual(l[4], '✓ Automatic queues', 'standing defaults to on');
     assert.strictEqual(l[5], '✓ Building buffs', 'buffs defaults to on');
-    assert.strictEqual(l[6], '✕ Bookbinder auto-complete', 'bookComplete defaults to off');
 });
 
 t.test('production menu: each flip writes only its own key', function () {
-    var keys = ['enabled', null, null, null, 'standing', 'buffs', 'bookComplete'];
+    var keys = ['enabled', null, null, null, 'standing', 'buffs'];
     for (var i = 0; i < keys.length; i++) {
         if (!keys[i]) continue;
         var w = setup({ enabled: true, standing: true, buffs: true, bookComplete: true, actionDelay: 1500 });
@@ -102,7 +100,7 @@ t.test('production menu: each flip writes only its own key', function () {
 });
 
 t.test('production menu: every flip runs the module\'s applySettings once', function () {
-    var keys = [0, 4, 5, 6];
+    var keys = [0, 4, 5];
     var states = [true, false];
     for (var i = 0; i < keys.length; i++) {
         for (var j = 0; j < states.length; j++) {
@@ -131,13 +129,13 @@ t.test('production menu: Auto-production off cancels the queue work and drops th
 });
 
 t.test('production menu: sub-switches off and any flip on cancel nothing', function () {
-    var keys = [4, 5, 6];
+    var keys = [4, 5];
     for (var i = 0; i < keys.length; i++) {
         var off = setup({ enabled: true, standing: true, buffs: true, bookComplete: true });
         off.items()[keys[i]].onSelect();
         assert.deepStrictEqual(off.cancels, [], 'row ' + keys[i] + ' off cancels nothing');
     }
-    var rows = [0, 4, 5, 6];
+    var rows = [0, 4, 5];
     for (var k = 0; k < rows.length; k++) {
         var on = setup({ enabled: false, standing: false, buffs: false, bookComplete: false });
         // Each case flips one key to on; the others stay as stored.

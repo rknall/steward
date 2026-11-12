@@ -233,21 +233,15 @@ t.test('plan: a queue at its entry limit is QueueFull, an unreadable count is Un
     assert.equal(res.rows[0].status, T.D.Order);
 });
 
-t.test('plan: single-shape kinds clamp the runs to stackOf, books to one run', function () {
+t.test('plan: books are capped at one run, other kinds order the whole amount', function () {
     var T = setup();
     T.world.pool.Gold = 100000;
     var res = T.plan([need('production', 'oil', 20, 'Oil', 500, K_Q)]);
-    assert.equal(res.rows[0].runs, 25);   // default stack bound
-    assert.equal(res.orders[0].runs, 25);
-
-    res = T.plan([need('production', 'oil', 20, 'Oil', 500, K_Q)],
-        { stackOf: function () { return 7; } });
-    assert.equal(res.orders[0].runs, 7);
+    assert.equal(res.orders[0].runs, 100);   // ceil(500 / 5), no stack bound
 
     res = T.plan([need('production', 'book', 2, 'Manuscript', 3, K_S)]);
     assert.equal(res.orders[0].runs, 1);
 
-    // Stackable kinds are not clamped.
     res = T.plan([need('production', 'r', 0, 'Rifleman', 60, K_Q)]);
     assert.equal(res.orders[0].runs, 60);
 });
@@ -356,4 +350,138 @@ t.test('plan: a queue-basis buff need with a null stock plans from the queue alo
     assert.equal(res.rows[0].queued, 6);
     assert.equal(res.rows[0].status, T.D.Order);
     assert.equal(res.rows[0].runs, 1);
+});
+
+// orderRuns: an own need that names its run count orders only into an idle
+// queue. The stub answers every own need with the given count.
+function runsOf(n) {
+    return function (nd) { return nd.owner === 'production' ? n : null; };
+}
+
+t.test('plan: orderRuns orders its runs into an empty queue', function () {
+    var T = setup();
+    T.world.queued.Oil = 4;   // queued runs of this item do not cover it
+    var res = T.plan([need('production', 'oil', 20, 'Oil', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Order);
+    assert.equal(res.rows[0].runs, 5);
+    assert.deepEqual(plain(res.orders), [{ owner: 'production', key: 'oil', type: 20, item: 'Oil', runs: 5 }]);
+});
+
+t.test('plan: orderRuns reads Covered while the queue holds any entry', function () {
+    var T = setup();
+    T.world.entries[20] = 1;   // one entry of another item
+    var res = T.plan([need('production', 'oil', 20, 'Oil', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Covered);
+    assert.equal(res.orders.length, 0);
+
+    T.world.entries[0] = 3;   // no entry limit on units, still Covered
+    res = T.plan([need('production', 'r', 0, 'Rifleman', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Covered);
+});
+
+t.test('plan: orderRuns with an unreadable entry count is Unreadable', function () {
+    var T = setup();
+    T.world.entries[20] = null;
+    var res = T.plan([need('production', 'oil', 20, 'Oil', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Unreadable);
+    assert.equal(res.orders.length, 0);
+});
+
+t.test('plan: orderRuns gives Held before the entry count is read', function () {
+    var T = setup();
+    var reads = 0;
+    T.read.entryCount = function () { reads++; return 0; };
+    T.world.held.Oil = { label: 'run' };
+    var res = T.plan([need('production', 'oil', 20, 'Oil', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Held);
+    assert.equal(reads, 0);
+});
+
+t.test('plan: orderRuns on books is capped by perOrderMax', function () {
+    var T = setup();
+    var res = T.plan([need('production', 'book', 2, 'Manuscript', 1, K_Q)], { orderRuns: runsOf(3) });
+    assert.equal(res.rows[0].status, T.D.Order);
+    assert.equal(res.orders[0].runs, 1);
+});
+
+t.test('plan: orderRuns with a short price is Short', function () {
+    var T = setup();
+    T.world.pool.Gold = 10;
+    var res = T.plan([need('production', 'oil', 20, 'Oil', 1, K_Q)], { orderRuns: runsOf(5) });
+    assert.equal(res.rows[0].status, T.D.Short);
+    assert.deepEqual(res.rows[0].shortfall, { name: 'Gold', need: 20, have: 10 });
+    assert.equal(res.orders.length, 0);
+});
+
+t.test('plan: orderRuns past maxOrders is Deferred', function () {
+    var T = setup();
+    var res = T.plan([
+        need('production', 'oil', 20, 'Oil', 1, K_Q),
+        need('production', 'p', 1, 'BB_Plank', 1, K_Q)
+    ], { orderRuns: runsOf(2), maxOrders: 1 });
+    assert.equal(res.rows[0].status, T.D.Order);
+    assert.equal(res.rows[1].status, T.D.Deferred);
+    assert.equal(res.orders.length, 1);
+});
+
+t.test('plan: orderRuns leaves another owner reserving its missing runs', function () {
+    var T = setup();
+    var asked = [];
+    var res = T.plan([need('adventures', 'run', 0, 'Rifleman', 5, K_Q, T.P.RunNow)], {
+        orderRuns: function (nd) { asked.push(nd.owner); return 3; }
+    });
+    assert.equal(res.rows[0].status, T.D.Waiting);
+    assert.equal(res.rows[0].runs, 5);
+    assert.equal(res.orders.length, 0);
+    assert.equal(asked.length, 0);
+});
+
+t.test('plan: orderRuns giving 0, null or a fraction takes the amount path', function () {
+    var T = setup();
+    T.world.entries[20] = 0;
+    [0, null, 2.5].forEach(function (n) {
+        var res = T.plan([need('production', 'oil', 20, 'Oil', 10, K_Q)], { orderRuns: runsOf(n) });
+        assert.equal(res.rows[0].status, T.D.Order);
+        assert.equal(res.rows[0].runs, 2);   // ceil(10 / 5)
+    });
+
+    // The amount path still honours the entry limit and the queued amount.
+    T.world.entries[20] = 1;
+    var full = T.plan([need('production', 'oil', 20, 'Oil', 10, K_Q)], { orderRuns: runsOf(0) });
+    assert.equal(full.rows[0].status, T.D.QueueFull);
+});
+
+t.test('plan: orderRuns places one order per type per call', function () {
+    var T = setup();
+    T.read.entryCount = function () { return 0; };   // memoized read: always empty
+    var two = [
+        need('production', 'oil-a', 20, 'Oil', 1, K_Q),
+        need('production', 'oil-b', 20, 'Oil', 1, K_Q)
+    ];
+    var res = T.plan(two, { orderRuns: runsOf(2), maxOrders: 2 });
+    assert.equal(res.rows[0].status, T.D.Order);
+    assert.equal(res.rows[1].status, T.D.Covered);
+    assert.equal(res.orders.length, 1);
+    assert.equal(res.orders[0].key, 'oil-a');
+
+    // A Short first need does not claim the type.
+    var pricey = { 'oil-a': 300, 'oil-b': 2 };
+    res = T.plan(two, { orderRuns: function (nd) { return pricey[nd.key]; }, maxOrders: 2 });
+    assert.equal(res.rows[0].status, T.D.Short);
+    assert.equal(res.rows[1].status, T.D.Order);
+    assert.equal(res.orders.length, 1);
+    assert.equal(res.orders[0].key, 'oil-b');
+
+    // Two different types both order.
+    res = T.plan([
+        need('production', 'oil', 20, 'Oil', 1, K_Q),
+        need('production', 'p', 1, 'BB_Plank', 1, K_Q)
+    ], { orderRuns: runsOf(2), maxOrders: 2 });
+    assert.equal(res.rows[0].status, T.D.Order);
+    assert.equal(res.rows[1].status, T.D.Order);
+    assert.equal(res.orders.length, 2);
+
+    // The claim lives only inside one call.
+    res = T.plan([two[1]], { orderRuns: runsOf(2), maxOrders: 2 });
+    assert.equal(res.rows[0].status, T.D.Order);
 });

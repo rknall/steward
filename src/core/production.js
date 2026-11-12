@@ -19,7 +19,9 @@
  *     its costs are per run; for a buff, queued() counts runs
  *   - an order is message 91 with a dTimedProductionVO, one message per stack
  *     shape (a count of full stacks, then the remainder)
- *   - STACK_SIZE 25 is the stack size the autoTSO client uses by default
+ *   - the host's defines.MAX_PRODUCTION_AMOUNT (25) is the most the order
+ *     panel allows per message; maxProductionAmount() reads it once and
+ *     falls back to STACK_SIZE 25 only while it cannot be read
  *
  * The buff list is read through buffTable(), once per read pass.
  *
@@ -302,12 +304,30 @@
         }
     }
 
+    var maxAmount = null;
+
+    // The host's most items per order message, read once because it is a
+    // static constant. An unreadable value answers STACK_SIZE and caches
+    // nothing, so a later readable value still wins.
+    function maxProductionAmount() {
+        if (maxAmount !== null) return maxAmount;
+        try {
+            var d = game.def('defines');
+            var v = d ? d.MAX_PRODUCTION_AMOUNT : null;
+            if (typeof v === 'number' && v > 0 && v === Math.floor(v)) {
+                maxAmount = v;
+                return v;
+            }
+        } catch (e) { /* defines not readable yet */ }
+        return STACK_SIZE;
+    }
+
     // Splits n units into stack shapes: [{ amount, count }] with the full
     // stacks first and the remainder last. Each shape is one message.
     function stacks(n, size) {
         var out = [];
         if (typeof n !== 'number' || !(n > 0) || n !== Math.floor(n)) return out;
-        var per = (typeof size === 'number' && size > 0) ? size : STACK_SIZE;
+        var per = (typeof size === 'number' && size > 0) ? size : maxProductionAmount();
         var full = Math.floor(n / per);
         var rest = n - full * per;
         if (full > 0) out.push({ amount: per, count: full });
@@ -408,7 +428,7 @@
 
     // Order n of an item into the queue of a production type. opts:
     // { stack, grid }; stack is the items per message of a stackable type
-    // (STACK_SIZE by default), grid the producing building (the queue's own
+    // (maxProductionAmount() by default), grid the producing building (the queue's own
     // building by default). Verified once the item's queued total has grown
     // by n over the total read just before the first send. A retry orders
     // only what is still missing, so a late first order is never doubled; a
@@ -425,7 +445,7 @@
         // Stackable types split an order into full stacks and a remainder;
         // every other type takes the whole order as one message.
         function shapesOf(remaining) {
-            if (pr && pr.stackable) return stacks(remaining, opts.stack || STACK_SIZE);
+            if (pr && pr.stackable) return stacks(remaining, opts.stack || maxProductionAmount());
             if (typeof remaining !== 'number' || !(remaining > 0) || remaining !== Math.floor(remaining)) return [];
             return [{ amount: remaining, count: 1 }];
         }
@@ -529,6 +549,7 @@
     P.QUEUE_ELITE         = QUEUE_ELITE;
     P.BUFF_QUEUES         = BUFF_QUEUES;
     P.STACK_SIZE          = STACK_SIZE;
+    P.maxProductionAmount = maxProductionAmount;
     P.queueIdFor          = queueIdFor;
     P.queued              = queued;
     P.queuedIn            = queuedIn;

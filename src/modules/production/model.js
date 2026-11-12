@@ -12,27 +12,42 @@
  * tables) cross the bridge once per call however many rows it builds. A
  * pass never wraps an action; the closures on the rows run later, fresh.
  *
- *   buildings()     one row per queue building name (mines and masons left
- *                   out), describing its producer, the highest-level one.
- *   queues()        one row per production type with its entries, the same
- *                   entries grouped into lines, and times.
+ *   buildings()     one row per listed queue building name (mines and
+ *                   masons left out), describing its producer, the
+ *                   highest-level one.
+ *   queues()        one row per listed production type with its entries,
+ *                   the same entries grouped into lines, times, whether it
+ *                   is producing and its automatic queue, if any.
+ *   isManaged(cfg)  whether a saved row holds an item or a buff.
  *   status(maxAge)  the only count of queues, entries, the next completion
  *                   and buffed buildings, plus the last plan pass and the
  *                   breaker snapshots. The host part is reused when it is at
  *                   most maxAge ms old; without maxAge it is read fresh.
- *                   readAt is when that part was read. standingCovered and
- *                   standingHeld count only this module's rows; covered and
- *                   held count every owner's.
+ *                   readAt is when that part was read. standing,
+ *                   standingCovered and standingHeld count only this
+ *                   module's rows.
  *   snapshot()      status(SNAPSHOT_MAX_AGE_MS), for the passive surfaces
  *                   (menu label, dashboard tab, tile). One status object per
  *                   read pass, so a dashboard draw shows one set of numbers.
  *   emptyStatus()   the status shape with nothing read, for a view that has
  *                   no model yet.
  *   groupEntries()  queue entries folded into display lines.
- *   reservations()  what other owners' needs reserve, per resource.
- *   onOff()         { rows, counts }: stopped home buildings (capped), with
- *                   whether mining owns them, and the uncapped counts.
- *   books()         the Bookbinder queue.
+ *
+ * The listing rule, stated once (buildings() and queues() share one row set
+ * per read pass):
+ *   building row    listed when its profile is orderable and either its
+ *                   item list does not read, or some item is producible
+ *                   (not false), or its saved row is managed (a saved
+ *                   choice stays even when nothing is producible now).
+ *   queue type      listed when one of its names' rows is listed, or when
+ *                   its profile is orderable and its entries read non-empty,
+ *                   so a busy building with nothing to order still shows
+ *                   what it produces. A cooldown type is never orderable.
+ *                   An unreadable entry list does not list a type that way.
+ *   hidden by name  a name in HIDDEN_NAMES is never listed. A type whose
+ *                   names are all hidden is not listed and not counted.
+ *                   The production module reads the same list, so a hidden
+ *                   name is never ordered or buffed either.
  *
  * Definitions used by status, stated once:
  *   counted queue   a type from queueTypes() that queueNames() maps at
@@ -48,14 +63,17 @@
  *   next done       the earliest now + head.remainingMs over running queues
  *                   with a numeric head time (nextDoneAt), and that head's
  *                   item (nextItem).
+ *   bookbinder      the head item of the first counted queue of kind Books
+ *                   with at least one entry (booksItem), and now +
+ *                   head.remainingMs when that is numeric (booksDoneAt, an
+ *                   absolute time so a reused part stays right). Both are
+ *                   null when there is no such queue or its entries do not
+ *                   read, so the line follows the Queues count's scope.
  *   buffed N of M   island-wide: M is every home building with a production
  *                   queue or a numeric production state (mines, sawmills and
  *                   other continuous producers included), N those of them
  *                   with a running production buff. The settings do not
  *                   enter it.
- *
- * The count of short demand rows is called shortfall, not short: short is
- * an ES3 reserved word that AIR 32 cannot parse as a key.
  *
  * Bundle slot: module, loads before module.js and settings.js (name
  * order); every S.modules.production.* reference happens at call time.
@@ -65,8 +83,7 @@
 
     if (!S.modules.production) S.modules.production = {};
 
-    var OWNER     = 'production';
-    var ONOFF_MAX = 200;
+    var OWNER = 'production';
 
     // How old a status host part the passive surfaces accept. A label or a
     // tile that re-reads every queue on each refresh is what stalled the
@@ -120,23 +137,20 @@
         return out;
     }
 
-    function types() {
-        return pass(function () { return scope().kept; });
-    }
-
     // The signature of the last excluded-types debug line.
     var excludedSaid = null;
 
     // The counted queues among the scoped rows. The types dropped on the
     // way are logged once per changed set, so a count that looks wrong can
     // be traced to its types.
-    function counted(list, mining) {
+    function counted(list, mining, names) {
         var out = [];
         var why = [];
         for (var m = 0; m < (mining ? mining.length : 0); m++) why.push(mining[m] + ' (mining)');
         for (var i = 0; i < list.length; i++) {
             var t = list[i];
             if (t.kind === S.ProductionKind.Cooldown) { why.push(t.type + ' (cooldown)'); continue; }
+            if (names && hiddenType(t, names)) { why.push(t.type + ' (hidden)'); continue; }
             if (safe(function () { return P().queueOf(t.type); }, null) === null) {
                 why.push(t.type + ' (no queue)');
                 continue;
@@ -161,14 +175,6 @@
         return out;
     }
 
-    function stockOf(name) {
-        return safe(function () {
-            var r = S.core.resources;
-            var v = name === r.POPULATION ? r.freePopulation() : r.amount(name);
-            return typeof v === 'number' ? v : null;
-        }, null);
-    }
-
     function grid(b) {
         return b ? safe(function () { return S.core.buildings.grid(b); }, null) : null;
     }
@@ -177,12 +183,55 @@
         return b ? safe(function () { return S.core.buildings.level(b); }, null) : null;
     }
 
-    function buildings() {
-        return pass(buildRows);
+    function isManaged(cfg) {
+        return !!(cfg && (cfg.item || cfg.buff));
     }
 
+    // One predicate for both listing rules: a type that cannot take an
+    // order (a cooldown building, an unreadable profile) is never listed.
+    function orderable(pr) {
+        return !!pr && pr.orderable !== false;
+    }
+
+    // Buildings hidden by name: buff buildings the listing rule below does
+    // not catch yet. A stopgap, to be replaced by a generic rule.
+    var HIDDEN_NAMES = { StarfallAirship: true };
+
+    function hiddenByName(name) {
+        return typeof name === 'string' && has(HIDDEN_NAMES, name);
+    }
+
+    // A type whose every scoped name is hidden by name. A type with no
+    // scoped name at all is not hidden.
+    function hiddenType(t, names) {
+        var bs = t.buildings || [];
+        var any = false;
+        for (var i = 0; i < bs.length; i++) {
+            var n = bs[i] && bs[i].name;
+            if (typeof n !== 'string' || !has(names, n) || String(names[n]) !== String(t.type)) continue;
+            any = true;
+            if (!hiddenByName(n)) return false;
+        }
+        return any;
+    }
+
+    function listedBuilding(r) {
+        if (hiddenByName(r.name)) return false;
+        if (!orderable(r.profile)) return false;
+        if (r.items === null) return true;
+        for (var i = 0; i < r.items.length; i++) {
+            if (r.items[i] && r.items[i].producible !== false) return true;
+        }
+        return r.managed;
+    }
+
+    // The signature of the last hidden-names debug line.
+    var hiddenSaid = null;
+
+    // Every row is built, then filtered, so the hidden names are logged once
+    // per changed set and can be traced to their reason.
     function buildRows() {
-        var out = [];
+        var all = [];
         var seen = {};
         var sc = scope();
         var names = sc.names;
@@ -196,17 +245,40 @@
                 if (has(seen, name)) { seen[name].count++; continue; }
                 if (!has(names, name)) continue;
                 seen[name] = row(name, t);
-                out.push(seen[name]);
+                all.push(seen[name]);
             }
         }
-        return out;
+        var shown = [];
+        var why = [];
+        for (var k = 0; k < all.length; k++) {
+            if (listedBuilding(all[k])) shown.push(all[k]);
+            else {
+                why.push(all[k].name + ' (' +
+                    (hiddenByName(all[k].name) ? 'hidden by name' :
+                        orderable(all[k].profile) ? 'nothing producible' : 'not orderable') + ')');
+            }
+        }
+        var sig = why.join(', ');
+        if (sig !== hiddenSaid) {
+            hiddenSaid = sig;
+            if (sig) S.kernel.debug('production', 'manager hides: ' + sig);
+        }
+        return { shown: shown, names: names, kept: list };
+    }
+
+    // The row set of this read pass, shared by buildings() and queues().
+    function rowSet() {
+        return S.kernel.hostRead.cached('production.rows', buildRows);
+    }
+
+    function buildings() {
+        return pass(function () { return rowSet().shown; });
     }
 
     function row(name, t) {
         var b = safe(function () { return M().highest(name); }, null);
         var type = t.type;
-        var pr = safe(function () { return P().profile(type); }, null);
-        var books = !!pr && pr.kind === S.ProductionKind.Books;
+        var cfg = cfgOf(name);
         return {
             name:    name,
             label:   bui(name),
@@ -215,43 +287,65 @@
             grid:    grid(b),
             type:    type,
             kind:    t.kind,
-            profile: pr,
+            profile: safe(function () { return P().profile(type); }, null),
             items:   safe(function () { return P().itemsOf(type); }, null),
-            cfg:     cfgOf(name),
-            // The cost of one order unit: a stack of the configured size,
-            // or one book.
-            costText: function (item) {
+            cfg:     cfg,
+            managed: isManaged(cfg),
+            // The cost of one order of `items` runs; one run when items is
+            // not a positive number.
+            costText: function (item, items) {
                 var info = safe(function () { return P().itemInfo(type, item); }, null);
                 if (!info || !info.costs || !info.costs.length) return '';
-                var mult = books ? 1 : safe(function () { return M().stackFor(name, type); }, 1);
+                var mult = typeof items === 'number' && items > 0 ? items : 1;
                 var parts = [];
                 for (var k = 0; k < info.costs.length; k++) {
                     parts.push((info.costs[k].amount * mult) + ' ' + res(info.costs[k].name));
                 }
-                return parts.join(', ') + (books ? ' per book' : ' per stack');
+                return parts.join(', ') + ' per order';
             },
             buffs:   safe(function () { return S.core.buffs.buildingBuffCandidates(name, false); }, [])
         };
     }
 
+    // The listed types: through a listed building name, or orderable with
+    // entries on the queue.
     function queues() {
         return pass(function () {
+            var set = rowSet();
+            var listedType = {};
+            for (var r = 0; r < set.shown.length; r++) listedType[String(set.shown[r].type)] = true;
             var out = [];
-            var list = types();
             var now = Date.now();
-            for (var i = 0; i < list.length; i++) {
-                out.push(queueRow(list[i], now));
+            for (var i = 0; i < set.kept.length; i++) {
+                var t = set.kept[i];
+                var es = safe(function () { return P().entries(t.type); }, null);
+                if (!has(listedType, String(t.type))) {
+                    if (hiddenType(t, set.names)) continue;
+                    var pr = es && es.length ? safe(function () { return P().profile(t.type); }, null) : null;
+                    if (!orderable(pr)) continue;
+                }
+                out.push(queueRow(t, now, es, set.names));
             }
             return out;
         });
     }
 
-    function queueRow(t, now) {
+    // The first name of a type, in queueNames() order, whose saved row is
+    // enabled and has an item.
+    function autoOf(type, names) {
+        for (var n in names) {
+            if (!has(names, n) || String(names[n]) !== String(type)) continue;
+            var cfg = cfgOf(n);
+            if (cfg.enabled === true && cfg.item) return { name: n, item: cfg.item, label: res(cfg.item) };
+        }
+        return null;
+    }
+
+    function queueRow(t, now, es, names) {
         var type = t.type;
         var first = t.buildings && t.buildings.length ? t.buildings[0] : null;
         var b = first ? safe(function () { return M().highest(first.name); }, null) : null;
         var rem = safe(function () { return P().remainingMs(type); }, null);
-        var es = safe(function () { return P().entries(type); }, null);
         return {
             type:        type,
             kind:        t.kind,
@@ -260,15 +354,17 @@
             count:       t.buildings ? t.buildings.length : 0,
             entries:     es,
             lines:       groupEntries(es),
+            producing:   !!es && es.length > 0,
+            auto:        autoOf(type, names),
             remainingMs: rem,
             doneAt:      typeof rem === 'number' ? now + rem : null,
             cooldownMs:  safe(function () { return P().cooldownMs(type); }, null),
             buff:        b ? safe(function () { return S.core.buildings.productionBuffInfo(b); }, null) : null,
-            // Entries this module placed this session read as standing
-            // orders; anything else (the user, an adventure run) as Other.
+            // Entries this module placed this session read as automatic
+            // queues; anything else (the user, an adventure run) as Other.
             source: function (entry) {
                 var placed = !!entry && safe(function () { return M().isPlaced(type, entry.item); }, false);
-                return placed ? 'Standing order' : 'Other';
+                return placed ? 'Automatic queue' : 'Other';
             }
         };
     }
@@ -357,8 +453,9 @@
     function hostPart() {
         return pass(function () {
             var sc = scope();
-            var list = counted(sc.kept, sc.mining);
+            var list = counted(sc.kept, sc.mining, sc.names);
             var running = 0, unreadable = 0, entryCount = 0, nextDoneAt = null, nextItem = null;
+            var booksItem = null, booksDoneAt = null, booksFound = false;
             var now = Date.now();
             for (var i = 0; i < list.length; i++) {
                 var es = safe(function () { return P().entries(list[i].type); }, null);
@@ -371,6 +468,11 @@
                     nextDoneAt = now + head.remainingMs;
                     nextItem = head.item === undefined ? null : head.item;
                 }
+                if (list[i].kind === S.ProductionKind.Books && booksFound === false) {
+                    booksFound = true;
+                    booksItem = head.item === undefined ? null : head.item;
+                    booksDoneAt = num(head.remainingMs) ? now + head.remainingMs : null;
+                }
             }
             var bc = buffCount();
             return {
@@ -380,6 +482,8 @@
                 entries:    entryCount,
                 nextDoneAt: nextDoneAt,
                 nextItem:   nextItem,
+                booksItem:  booksItem,
+                booksDoneAt: booksDoneAt,
                 buffed:     bc.buffed,
                 buffable:   bc.buffable
             };
@@ -391,12 +495,12 @@
 
     function emptyPart() {
         return { types: 0, queues: 0, unreadable: 0, entries: 0,
-                 nextDoneAt: null, nextItem: null, buffed: 0, buffable: 0 };
+                 nextDoneAt: null, nextItem: null, booksItem: null, booksDoneAt: null,
+                 buffed: 0, buffable: 0 };
     }
 
     function zeroCounts() {
-        return { standing: 0, covered: 0, waiting: 0, shortfall: 0, held: 0,
-                 standingCovered: 0, standingHeld: 0 };
+        return { standing: 0, standingCovered: 0, standingHeld: 0 };
     }
 
     // The one builder of the status object, so status() and emptyStatus()
@@ -410,11 +514,9 @@
             entries:         part.entries,
             nextDoneAt:      part.nextDoneAt,
             nextItem:        part.nextItem,
-            standing:        counts.standing,
-            covered:         counts.covered,
-            waiting:         counts.waiting,
-            shortfall:       counts.shortfall,
-            held:            counts.held,
+            booksItem:       part.booksItem,
+            booksDoneAt:     part.booksDoneAt,
+            standing:       counts.standing,
             standingCovered: counts.standingCovered,
             standingHeld:    counts.standingHeld,
             orderBreaker:    orderBreaker,
@@ -455,17 +557,10 @@
         var rows = last && last.rows ? last.rows : [];
         var counts = zeroCounts();
         for (var r = 0; r < rows.length; r++) {
-            var own = rows[r].owner === OWNER;
-            if (own) counts.standing++;
-            if (rows[r].status === D.Covered) {
-                counts.covered++;
-                if (own) counts.standingCovered++;
-            } else if (rows[r].status === D.Waiting) counts.waiting++;
-            else if (rows[r].status === D.Short) counts.shortfall++;
-            else if (rows[r].status === D.Held) {
-                counts.held++;
-                if (own) counts.standingHeld++;
-            }
+            if (rows[r].owner !== OWNER) continue;
+            counts.standing++;
+            if (rows[r].status === D.Covered) counts.standingCovered++;
+            else if (rows[r].status === D.Held) counts.standingHeld++;
         }
 
         return shape(part, counts, !!s.enabled,
@@ -482,110 +577,16 @@
         });
     }
 
-    // What the needs of other owners reserve: one line per need and
-    // resource, each with the stock and what is free once every listed
-    // reservation of that resource is taken. rows defaults to the last pass.
-    function reservations(rows) {
-        if (!rows) {
-            var last = safe(function () { return M().lastPass(); }, null);
-            rows = last && last.rows ? last.rows : [];
-        }
-        var out = [];
-        var total = {};
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            if (!r || r.owner === OWNER || !(r.runs > 0)) continue;
-            var info = safe(function () { return P().itemInfo(r.type, r.item); }, null);
-            if (!info || !info.costs) continue;
-            for (var k = 0; k < info.costs.length; k++) {
-                var c = info.costs[k];
-                var amount = c.amount * r.runs;
-                total[c.name] = (total[c.name] || 0) + amount;
-                out.push({ name: c.name, reserved: amount, stock: stockOf(c.name),
-                           forLabel: r.label, priority: r.priority });
-            }
-        }
-        for (var j = 0; j < out.length; j++) {
-            out[j].free = out[j].stock === null ? null : out[j].stock - total[out[j].name];
-        }
-        return out;
-    }
-
-    // One scan of the home buildings: the stopped rows (capped) and the
-    // uncapped counts.
-    function scanOnOff() {
-        var out = { rows: [], stopped: 0, miningOwned: 0 };
-        if (safe(function () { return S.core.zone.isHome(); }, false) !== true) return out;
-        var all = safe(function () { return S.core.buildings.list(); }, null) || [];
-        for (var i = 0; i < all.length; i++) {
-            var b = all[i];
-            if (!b) continue;
-            var active = safe(function () { return P().isActive(b); }, null);
-            var state = safe(function () { return S.core.buildings.productionState(b); }, null);
-            if (active !== false && state !== S.core.buildings.MISSING_INPUT_STATE) continue;
-            var name = safe(function () { return S.core.buildings.name(b); }, null);
-            var mining = safe(function () { return M().ownedByMining(name); }, false);
-            out.stopped++;
-            if (mining) out.miningOwned++;
-            if (out.rows.length >= ONOFF_MAX) continue;
-            out.rows.push({
-                name:   name,
-                label:  bui(name),
-                grid:   grid(b),
-                state:  state,
-                active: active,
-                // Who manages the building, not who turned it off: no
-                // turn-off is attributed, since steward turns nothing off
-                // here except mining's own pauses, which mining tracks.
-                mining: !!mining
-            });
-        }
-        return out;
-    }
-
-    // The capped rows and the uncapped counts come from the same scan, so a
-    // view's list and its totals cannot disagree.
-    function onOff() {
-        var s = pass(scanOnOff);
-        return { rows: s.rows, counts: { stopped: s.stopped, miningOwned: s.miningOwned } };
-    }
-
-    function books() {
-        return pass(readBooks);
-    }
-
-    function readBooks() {
-        var type = P().QUEUE_BOOKS;
-        var list = types();
-        var t = null;
-        for (var i = 0; i < list.length; i++) if (list[i].type === type) { t = list[i]; break; }
-        if (!t || !t.buildings || !t.buildings.length) return null;
-        var name = t.buildings[0].name;
-        var b = safe(function () { return M().highest(name); }, null);
-        var es = safe(function () { return P().entries(type); }, null);
-        var head = es && es.length ? es[0] : null;
-        var cfg = cfgOf(name);
-        return {
-            level:    b ? level(b) : t.buildings[0].level,
-            grid:     b ? grid(b) : t.buildings[0].grid,
-            head:     head,
-            info:     head ? safe(function () { return P().bookInfo(head.item); }, null) : null,
-            finished: !!(head && head.finished),
-            standing: (cfg.item && cfg.amount > 0) ? { item: cfg.item, amount: cfg.amount } : null
-        };
-    }
-
     S.modules.production.model = {
         buildings:    buildings,
         queues:       queues,
+        isManaged:    isManaged,
         status:       status,
         snapshot:     snapshot,
         emptyStatus:  emptyStatus,
         SNAPSHOT_MAX_AGE_MS: SNAPSHOT_MAX_AGE_MS,
         groupEntries: groupEntries,
-        reservations: reservations,
-        onOff:        onOff,
-        books:        books
+        hiddenByName: hiddenByName
     };
 
 }(Steward));

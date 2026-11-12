@@ -1,28 +1,38 @@
 /*
  * "Steward production" window of the production module.
  *
- * A separate host Modal rather than a dashboard tab: the standing-order
- * table and the live views need more room than a tab has. A zone load
+ * A separate host Modal rather than a dashboard tab: the automatic-queue
+ * table and the queue view need more room than a tab has. A zone load
  * closes host modals, so an unsaved draft can never outlive the island it
  * was edited on.
  *
- * Standing orders opens on All until a standing order exists, then on
- * Managed.
+ * Three tabs, opening on Production Manager: Production Manager, Queues and
+ * Settings. Only Production Manager edits through a draft. Queues hands the
+ * model's listed queue rows to S.modules.production.views.queues, read when
+ * the tab renders or on Refresh, and never redraws on its own. The Settings
+ * switch writes its one setting at once and is never part of the draft.
  *
- * Five tabs, Queues by default: Queues, Demand, Standing orders,
- * Bookbinder & on/off and Recent. Only Standing orders edits anything; the
- * other tabs hand their data to S.modules.production.views.<tab>, read when
- * the tab renders or on Refresh, and never redraw on their own.
+ * Production Manager opens on All buildings until an automatic queue
+ * exists, then on Automatic queues.
  *
- * Standing-order edits are buffered in `state.draft`, a copy of the stored
- * buildings map, until Save. `state.orig` is the normalized draft as it was
- * when the window opened or last saved, so the footer, the tab dot and the
- * edit guard can tell an unchanged draft from a changed one. Switching tabs
- * keeps the draft. Save writes only the buildings map.
+ * Edits are buffered in `state.draft`, a copy of the stored buildings map,
+ * until Save. `state.orig` is the normalized draft as it was when the window
+ * opened or last saved, so the footer, the tab dot and the edit guard can
+ * tell an unchanged draft from a changed one. Switching tabs keeps the
+ * draft. Save writes only the buildings map.
  *
- * The footer is built once per tab kind (orders or live) and only updated
- * while the user types or picks: the Save button is never replaced under a
- * click.
+ * Hidden buffs: the buff drop-down lists only offered buffs in stock, so a
+ * stored buff whose stock ran out reads None. Showing it so changes nothing:
+ * the dirty check compares the raw draft, and the stored buff comes back
+ * with its stock. A Save, though, writes what the window shows, so it clears
+ * such a buff on every row of this island and names it in the change note.
+ *
+ * Item and buff names in the change note are the labels the rendered rows
+ * carried, so the note never shows a raw id.
+ *
+ * The footer is built once per tab kind (orders, live or settings) and only
+ * updated while the user types or picks: the Save button is never replaced
+ * under a click.
  *
  * The window registers an edit guard with the kernel UI, so the dashboard
  * and Settings screens refuse to open over a changed draft, and this window
@@ -44,14 +54,16 @@
  */
 
 (function (S) {
+    'use strict';
 
     if (!S.modules.production) S.modules.production = {};
 
     var MODAL_ID = 'StewardProduction';
     var TITLE = 'Steward production';
 
-    var TABS = ['queues', 'demand', 'orders', 'books', 'recent'];
-    var FIELD_WORDS = { item: 'item', amount: 'keep', stack: 'stack', buff: 'buff' };
+    var TABS = ['manager', 'queues', 'settings'];
+    var FIELD_WORDS = { item: 'item', items: 'items', buff: 'buff', enabled: 'enabled' };
+    var UNPRODUCIBLE = 'not producible now';
 
     var modal = null;
     var state = null;
@@ -88,14 +100,37 @@
         return safe(function () { return S.core.locale.bui(name) || name; }, name);
     }
 
+    function res(name) {
+        return safe(function () { return S.core.locale.res(name) || name; }, name);
+    }
+
     function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
     function clockSec(d) {
         return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
     }
 
-    function clockAt(ms) {
-        return typeof ms === 'number' ? H().clock(new Date(ms)) : '';
+    function labelOf(x) {
+        return String(x.label || x.name);
+    }
+
+    // The window's one order for items and buffs: by label, ignoring case,
+    // then by name so equal labels still sort the same way every time.
+    function byLabel(a, b) {
+        var c = labelOf(a).toLowerCase().localeCompare(labelOf(b).toLowerCase());
+        if (c !== 0) return c;
+        return String(a.name) < String(b.name) ? -1 : (String(a.name) > String(b.name) ? 1 : 0);
+    }
+
+    // Host pages are numbered groups: by number, anything else after them.
+    function byPage(a, b) {
+        var na = parseInt(a, 10);
+        var nb = parseInt(b, 10);
+        var aNum = !isNaN(na);
+        var bNum = !isNaN(nb);
+        if (aNum && bNum && na !== nb) return na - nb;
+        if (aNum !== bNum) return aNum ? -1 : 1;
+        return a < b ? -1 : (a > b ? 1 : 0);
     }
 
     // ---- Draft state ----------------------------------------------------------
@@ -157,6 +192,19 @@
         return JSON.stringify(normalize(draft));
     }
 
+    // The draft as a Save would write it: a buff the drop-down did not list
+    // on its last render is cleared. Rows of other islands were not rendered
+    // and keep theirs.
+    function effective(draft) {
+        var out = copyBuildings(draft);
+        for (var name in out) {
+            if (!has(out, name) || !has(state.buffShown, name)) continue;
+            if (out[name].buff && !has(state.buffShown[name], out[name].buff)) out[name].buff = '';
+        }
+        return out;
+    }
+
+    // The raw draft, so merely showing a hidden buff as None is no change.
     function isDirty() {
         return !!(state && state.draft && snapshot(state.draft) !== state.orig);
     }
@@ -173,15 +221,21 @@
         return shown() && isDirty();
     }
 
-    function showValue(f, v) {
-        if (f === 'item' || f === 'buff') return v ? String(v) : 'none';
+    function showValue(name, f, v) {
+        if (f === 'enabled') return v === true ? 'on' : 'off';
+        if (f === 'item' || f === 'buff') {
+            if (!v) return 'none';
+            var map = has(state.labels, name) ? state.labels[name][f] : null;
+            return map && has(map, v) ? map[v] : res(v);
+        }
         return String(v);
     }
 
-    // One entry per changed field, in building-name order.
+    // One entry per changed field of the draft a Save would write, in
+    // building-name order.
     function changes() {
         var a = JSON.parse(state.orig);
-        var b = normalize(state.draft);
+        var b = normalize(effective(state.draft));
         var names = [];
         var n;
         for (n in a) if (has(a, n)) names.push(n);
@@ -196,13 +250,14 @@
                 var f = list[k];
                 if (was[f] === now[f]) continue;
                 out.push(bui(names[i]) + ' ' + fieldWord(f) + ' ' +
-                    showValue(f, was[f]) + ' → ' + showValue(f, now[f]));
+                    showValue(names[i], f, was[f]) + ' → ' + showValue(names[i], f, now[f]));
             }
         }
         return out;
     }
 
     function changeNote() {
+        if (!isDirty()) return 'No unsaved changes';
         var list = changes();
         if (!list.length) return 'No unsaved changes';
         if (list.length === 1) return '1 change: ' + list[0];
@@ -215,7 +270,7 @@
     }
 
     function isManaged(cfg) {
-        return !!(cfg && ((cfg.item && cfg.amount > 0) || cfg.buff));
+        return safe(function () { return M().model.isManaged(cfg); }, false) === true;
     }
 
     function anyManaged(map) {
@@ -228,11 +283,12 @@
     // ---- Shell ----------------------------------------------------------------
 
     function tabKind(tab) {
-        return tab === 'orders' ? 'orders' : 'live';
+        if (tab === 'manager') return 'orders';
+        return tab === 'settings' ? 'settings' : 'live';
     }
 
-    // One read pass per render: the status, the tab's model call and the
-    // footer share the host lists they would otherwise each read again.
+    // One read pass per render: the status, the model calls and the footer
+    // share the host lists they would otherwise each read again.
     function render() {
         var t0 = Date.now();
         var hr = S.kernel.hostRead;
@@ -252,11 +308,11 @@
         var $panel = $('<div>', { 'class': 'steward-panel steward-compact' });
         var st = safe(function () { return M().model.status(); }, null);
         $panel.append(headerLine(st));
-        // The chip and the tabs count the same rows: read once per render,
-        // inside the render pass, so they cannot differ.
-        var rows = demandRows();
-        $panel.append(tabBar(st, rows));
-        $panel.append(tabBody(rows));
+        // The Queues chip and the Queues tab count the same rows: read once
+        // per render, inside the render pass, so they cannot differ.
+        var queues = readQueues();
+        $panel.append(tabBar(queues));
+        $panel.append(tabBody(queues));
         $body.empty();
         $body.append($panel);
         var kind = tabKind(state.tab);
@@ -271,22 +327,31 @@
             'Auto-production ' + (st && st.enabled ? 'on' : 'off') + ' · ' + tail);
     }
 
-    function demandRows() {
-        var r = safe(function () { return M().assess(); }, null);
-        return r && r.rows ? r.rows : [];
+    // A failed read keeps its error for the Queues tab to show.
+    function readQueues() {
+        try {
+            var list = M().model.queues();
+            return { list: list || [], error: null };
+        } catch (e) {
+            return { list: [], error: e };
+        }
     }
 
-    function ordersLabel() {
-        return 'Standing orders' + (isDirty() ? ' •' : '');
+    function producingCount(list) {
+        var n = 0;
+        for (var i = 0; i < list.length; i++) if (list[i] && list[i].producing) n++;
+        return n;
     }
 
-    function tabBar(st, rows) {
+    function managerLabel() {
+        return 'Production Manager' + (isDirty() ? ' •' : '');
+    }
+
+    function tabBar(queues) {
         var items = [
-            { id: 'queues', label: 'Queues ' + ((st && st.queues) || 0) },
-            { id: 'demand', label: 'Demand ' + rows.length },
-            { id: 'orders', label: ordersLabel() },
-            { id: 'books',  label: 'Bookbinder & on/off' },
-            { id: 'recent', label: 'Recent' }
+            { id: 'manager',  label: managerLabel() },
+            { id: 'queues',   label: 'Queues ' + producingCount(queues.list) },
+            { id: 'settings', label: 'Settings' }
         ];
         state.$tabs = H().chips(items, state.tab, function (id) {
             if (TABS.indexOf(id) === -1) return;
@@ -302,11 +367,12 @@
             'This view could not be shown: ' + message + ' (details in the console log)'));
     }
 
-    function tabBody(rows) {
+    function tabBody(queues) {
         var $box = $('<div>');
         try {
-            if (state.tab === 'orders') renderOrders($box);
-            else renderLive($box, state.tab, rows);
+            if (state.tab === 'manager') renderManager($box);
+            else if (state.tab === 'settings') renderSettings($box);
+            else renderQueues($box, queues);
         } catch (e) {
             S.kernel.error('production', 'render ' + state.tab + ' tab threw:', e);
             $box = $('<div>');
@@ -315,121 +381,187 @@
         return $box;
     }
 
-    // ---- Live tabs ------------------------------------------------------------
+    // ---- Queues tab -----------------------------------------------------------
 
-    function liveData(tab, rows) {
-        var model = M().model;
-        if (tab === 'queues') return { queues: model.queues(), rows: rows };
-        if (tab === 'demand') {
-            return { rows: rows, reservations: model.reservations(rows) };
-        }
-        if (tab === 'books') {
-            var oo = model.onOff();
-            return { books: model.books(), onOff: oo.rows, counts: oo.counts };
-        }
-        return M().recent();
-    }
-
-    function renderLive($c, tab, rows) {
+    function renderQueues($c, queues) {
+        if (queues.error) throw queues.error;
         var views = M().views;
-        var view = views ? views[tab] : null;
+        var view = views ? views.queues : null;
         if (typeof view !== 'function') {
             $c.append(textEl('div', 'steward-muted', 'This view is not available.'));
             return;
         }
-        view($c, H(), liveData(tab, rows));
+        view($c, H(), { queues: queues.list });
     }
 
-    // ---- Standing orders tab --------------------------------------------------
+    // ---- Settings tab ---------------------------------------------------------
 
-    // The module's own default, so the shown value is the one it orders with.
-    function stackDefault(row) {
-        return safe(function () { return M().defaultStack(row.type); }, 1);
+    function renderSettings($c) {
+        var h = H();
+        var s = safe(function () { return M().readSettings(); }, null) || {};
+        var $card = h.card({ icon: '⚙', title: 'Settings', meta: 'Applies at once' });
+        $card.append(h.field('Bookbinder auto-complete',
+            'Collects finished books while the Bookbinder row is enabled',
+            h.toggle({
+                checked: !!s.bookComplete,
+                write: function (v) {
+                    S.kernel.settings.write('production', { bookComplete: v });
+                    S.kernel.log('ui', 'production', 'bookComplete', '→', v);
+                }
+            })));
+        $c.append($card);
     }
 
-    function itemCell(h, row, cfg) {
-        var options = [{ label: '(none)', value: '' }];
+    // ---- Production Manager tab -----------------------------------------------
+
+    function itemsOf(row, cfg) {
+        return safe(function () { return M().itemsFor(cfg, row.type); }, 1);
+    }
+
+    function orderMaxOf(row) {
+        return safe(function () { return M().runsMax(row.type); }, 1);
+    }
+
+    function costOf(row, cfg) {
+        if (!cfg.item) return '';
+        return safe(function () { return row.costText(cfg.item, itemsOf(row, cfg)); }, '') || '';
+    }
+
+    // The labels each rendered row carried, item and buff, so the change
+    // note names what the user saw. Kept across renders: a value that left
+    // a list still reads by name.
+    function recordLabels(row) {
+        if (!has(state.labels, row.name)) state.labels[row.name] = { item: {}, buff: {} };
+        var map = state.labels[row.name];
         var items = row.items || [];
-        var known = false;
-        for (var i = 0; i < items.length; i++) {
-            options.push({ label: items[i].label || items[i].name, value: items[i].name });
-            if (items[i].name === cfg.item) known = true;
+        var buffs = row.buffs || [];
+        var i;
+        for (i = 0; i < items.length; i++) if (items[i]) map.item[items[i].name] = labelOf(items[i]);
+        for (i = 0; i < buffs.length; i++) if (buffs[i]) map.buff[buffs[i].name] = labelOf(buffs[i]);
+    }
+
+    // (none), then the items the host would take now, alphabetical; grouped
+    // under greyed page headers when they span more than one host page. A
+    // saved item that is not listed comes last, so showing the row never
+    // rewrites the stored choice.
+    function itemOptions(row, cfg) {
+        var all = row.items || [];
+        var listed = [];
+        var i;
+        for (i = 0; i < all.length; i++) {
+            if (all[i] && all[i].producible !== false) listed.push(all[i]);
         }
-        // Kept selectable so showing the row never rewrites the stored choice.
-        if (cfg.item && !known) options.push({ label: cfg.item, value: cfg.item });
-        var $cost = textEl('div', 'steward-muted', cfg.item ? row.costText(cfg.item) : '');
-        var $sel = h.dropdown(options, {
+        listed.sort(byLabel);
+        var pages = [];
+        var titles = {};
+        for (i = 0; i < listed.length; i++) {
+            var p = listed[i].page === null || listed[i].page === undefined ? '' : String(listed[i].page);
+            if (!has(titles, p)) {
+                pages.push(p);
+                titles[p] = listed[i].pageLabel || (p ? 'Group ' + p : 'Other');
+            }
+        }
+        var options = [{ label: '(none)', value: '' }];
+        var known = false;
+        for (i = 0; i < listed.length; i++) if (listed[i].name === cfg.item) known = true;
+        if (pages.length > 1) {
+            pages.sort(byPage);
+            for (var g = 0; g < pages.length; g++) {
+                options.push({ label: titles[pages[g]], header: true });
+                for (i = 0; i < listed.length; i++) {
+                    var key = listed[i].page === null || listed[i].page === undefined ? '' : String(listed[i].page);
+                    if (key === pages[g]) options.push({ label: labelOf(listed[i]), value: listed[i].name });
+                }
+            }
+        } else {
+            for (i = 0; i < listed.length; i++) options.push({ label: labelOf(listed[i]), value: listed[i].name });
+        }
+        var unlisted = cfg.item && !known ? cfg.item : null;
+        if (unlisted) options.push({ label: showValue(row.name, 'item', unlisted), value: unlisted });
+        return { options: options, unlisted: unlisted };
+    }
+
+    function itemCell(h, row, cfg, ctx) {
+        var built = itemOptions(row, cfg);
+        ctx.$cost = textEl('div', 'steward-muted', costOf(row, cfg));
+        var $note = textEl('div', 'steward-muted', built.unlisted && cfg.item === built.unlisted ? UNPRODUCIBLE : '');
+        var $sel = h.dropdown(built.options, {
             selected: cfg.item,
             width:    '100%',
             onChange: function (v) {
-                draftRow(row.name).item = v || '';
-                $cost.text(v ? row.costText(v) : '');
+                var d = draftRow(row.name);
+                d.item = v || '';
+                ctx.$cost.text(costOf(row, d));
+                $note.text(built.unlisted && d.item === built.unlisted ? UNPRODUCIBLE : '');
                 updateFooter();
             }
         });
-        return $('<div>').append($sel).append($cost);
+        return $('<div>').append($sel).append($note).append(ctx.$cost);
     }
 
-    function keepCell(h, row, cfg) {
-        // The bound comes from the queue's profile (one book at a time for
-        // the Bookbinder), so it is never retyped here.
-        var max = S.core.production.keepMax(row.type);
-        if (typeof max !== 'number') max = 0;
-        var $n = h.number({
-            value: cfg.amount,
-            width: '60px',
-            label: 'Items to keep queued',
-            parse: function (t) {
-                var n = S.kernel.ui.settingsParse.whole(t);
-                return n === null ? null : Math.max(0, Math.min(max, n));
-            },
-            onChange: function (v) {
-                draftRow(row.name).amount = v;
-                updateFooter();
-            }
-        });
-        var $c = $('<div>').append($n);
-        if (row.kind === S.ProductionKind.Books) $c.append(textEl('div', 'steward-muted', 'one book at a time'));
-        return $c;
-    }
-
-    function stackCell(h, row, cfg) {
-        var K = S.ProductionKind;
-        var stackable = !!(row.profile && row.profile.stackable);
-        if (!stackable && row.kind !== K.Timed) return { text: '–', cls: 'steward-muted' };
-        var max = S.core.production.STACK_SIZE;
-        return h.number({
-            value: cfg.stack > 0 ? cfg.stack : stackDefault(row),
+    // The bound is the runs one order message of the type can carry, so it
+    // is never retyped here; a type that takes one run shows a fixed 1.
+    function itemsCell(h, row, cfg, ctx) {
+        var max = orderMaxOf(row);
+        var $c = $('<div>');
+        if (max === 1) {
+            $c.append(textEl('div', 'steward-muted', '1'));
+            if (row.kind === S.ProductionKind.Books) $c.append(textEl('div', 'steward-muted', 'one book at a time'));
+            return $c;
+        }
+        return $c.append(h.number({
+            value: itemsOf(row, cfg),
             width: '50px',
             label: 'Items per order',
             parse: function (t) {
                 var n = S.kernel.ui.settingsParse.whole(t);
-                return n === null ? null : Math.max(1, Math.min(max, n));
+                return n === null ? null : itemsOf(row, { items: n });
             },
             onChange: function (v) {
-                draftRow(row.name).stack = v;
+                var d = draftRow(row.name);
+                d.items = v;
+                if (ctx.$cost) ctx.$cost.text(costOf(row, d));
                 updateFooter();
             }
-        });
+        }));
+    }
+
+    // Offered buffs in stock, alphabetical. An unreadable stock is not "out
+    // of stock": it is listed as (?).
+    function buffList(row) {
+        var all = row.buffs || [];
+        var out = [];
+        for (var i = 0; i < all.length; i++) {
+            if (all[i] && all[i].offered && all[i].amount !== 0) out.push(all[i]);
+        }
+        out.sort(byLabel);
+        return out;
+    }
+
+    // Recorded for every row of the island, shown or not, so a Save clears
+    // a hidden buff on rows behind the Automatic queues chip too.
+    function recordBuffs(row) {
+        var set = { '': true };
+        var list = buffList(row);
+        for (var i = 0; i < list.length; i++) set[list[i].name] = true;
+        state.buffShown[row.name] = set;
     }
 
     function buffCell(h, row, cfg) {
         var options = [{ label: 'None', value: '' }];
-        var list = row.buffs || [];
+        var list = buffList(row);
+        // Nothing to pick: a lone "None" dropdown only looks like a choice.
+        // A stored hidden buff is still cleared by Save via recordBuffs.
+        if (!list.length) return textEl('span', 'steward-muted', '');
         var listed = false;
         for (var i = 0; i < list.length; i++) {
             var b = list[i];
-            // An unreadable star menu is not "out of stock": show ? and no warning.
             var known = typeof b.amount === 'number';
-            var label = (b.label || b.name) + ' (' + (known ? b.amount : '?') + ')';
-            if (!b.offered) label = (b.label || b.name) + ' (not offered)';
-            else if (known && !(b.amount > 0)) label += ' - out of stock';
-            options.push({ label: label, value: b.name });
+            options.push({ label: labelOf(b) + ' (' + (known ? b.amount : '?') + ')', value: b.name });
             if (b.name === cfg.buff) listed = true;
         }
-        if (cfg.buff && !listed) options.push({ label: cfg.buff + ' (not offered)', value: cfg.buff });
         return h.dropdown(options, {
-            selected: cfg.buff,
+            selected: listed ? cfg.buff : '',
             width:    '100%',
             onChange: function (v) {
                 draftRow(row.name).buff = v || '';
@@ -438,67 +570,72 @@
         });
     }
 
+    function enableCell(h, row, cfg) {
+        return h.toggle({
+            checked: cfg.enabled === true,
+            label:   'Enable automatic queue',
+            onChange: function (v) {
+                draftRow(row.name).enabled = v === true;
+                updateFooter();
+            }
+        });
+    }
+
     function buildingCell(row) {
         var $c = $('<div>');
         $c.append(textEl('b', null, row.label));
-        var sub = '×' + row.count + ' · level ' + (row.level === null ? '?' : row.level);
-        if (row.kind === S.ProductionKind.Timed) sub = 'event · ' + sub;
-        $c.append(textEl('div', 'steward-muted', sub));
+        $c.append(textEl('div', 'steward-muted',
+            '×' + row.count + ' · level ' + (row.level === null ? '?' : row.level)));
         return $c;
-    }
-
-    function cooldownText(row) {
-        var ms = safe(function () { return S.core.production.cooldownMs(row.type); }, null);
-        return typeof ms === 'number' && ms > 0 ? 'cooldown ' + clockAt(Date.now() + ms) : 'cooldown';
     }
 
     function orderRow(h, row) {
         // Cells read the draft, not the stored settings, so a re-render after
         // a tab switch shows the unsaved values.
         var cfg = has(state.draft, row.name) ? state.draft[row.name] : blank();
-        if (row.kind === S.ProductionKind.Cooldown) {
-            var dash = { text: '–', cls: 'steward-muted' };
-            return [buildingCell(row), { text: cooldownText(row), cls: 'steward-muted' }, dash, dash, dash];
-        }
-        return [buildingCell(row), itemCell(h, row, cfg), keepCell(h, row, cfg),
-                stackCell(h, row, cfg), buffCell(h, row, cfg)];
+        var ctx = { $cost: null };
+        return [buildingCell(row), itemCell(h, row, cfg, ctx), itemsCell(h, row, cfg, ctx),
+                buffCell(h, row, cfg), enableCell(h, row, cfg)];
     }
 
-    function renderOrders($c) {
+    function renderManager($c) {
         var h = H();
         var rows = M().model.buildings() || [];
         var managed = [];
+        state.buffShown = {};
         for (var i = 0; i < rows.length; i++) {
+            recordLabels(rows[i]);
+            recordBuffs(rows[i]);
             if (isManaged(state.draft[rows[i].name])) managed.push(rows[i]);
         }
-        var shown = state.filter === 'all' ? rows : managed;
+        var list = state.filter === 'all' ? rows : managed;
         var $card = h.card({
             icon:  '⚙',
-            title: 'Standing orders',
-            meta:  managed.length + ' managed of ' + rows.length + ' buildings · Save applies to this tab only'
+            title: 'Production Manager',
+            meta:  'Cost shown per order, from the Items value'
         });
         $card.append(h.chips([
-            { id: 'managed', label: 'Managed ' + managed.length },
-            { id: 'all',     label: 'All ' + rows.length }
+            { id: 'auto', label: 'Automatic queues ' + managed.length },
+            { id: 'all',  label: 'All buildings ' + rows.length }
         ], state.filter, function (id) {
-            state.filter = id === 'all' ? 'all' : 'managed';
+            state.filter = id === 'all' ? 'all' : 'auto';
             render();
         }));
         var cells = [];
-        for (var r = 0; r < shown.length; r++) cells.push(orderRow(h, shown[r]));
+        for (var r = 0; r < list.length; r++) cells.push(orderRow(h, list[r]));
         $card.append(h.table({
             fill: true,
             cols: [
-                { label: 'Building',    width: '22%' },
-                { label: 'Item · cost', width: '30%' },
-                { label: 'Keep',        width: '12%' },
-                { label: 'Stack',       width: '10%' },
-                { label: 'Buff',        width: '26%' }
+                { label: 'Building',    width: '24%' },
+                { label: 'Item · cost', width: '31%' },
+                { label: 'Items',       width: '14%' },
+                { label: 'Buff',        width: '22%' },
+                { label: 'Enable',      width: '9%' }
             ],
             rows:      cells,
             emptyText: state.filter === 'all'
                 ? 'No production queue buildings on this island.'
-                : 'No standing orders yet. Pick All to set one up.'
+                : 'No automatic queues yet. Pick All buildings to set one up.'
         }));
         $c.append($card);
         h.fit();
@@ -507,7 +644,7 @@
     // ---- Footer ---------------------------------------------------------------
 
     function closeWindow() {
-        if (isDirty()) notify('Standing-order changes discarded');
+        if (isDirty()) notify('Automatic queue changes discarded');
         // Hides only a shown window: a second hide during the fade would
         // unbalance the host's stage layer swap.
         if (S.kernel.ui && typeof S.kernel.ui.hideModal === 'function') S.kernel.ui.hideModal(modal);
@@ -515,10 +652,11 @@
 
     function saveDraft() {
         if (!isDirty()) return;
-        var buildings = copyBuildings(state.draft);
-        S.kernel.settings.write('production', { buildings: buildings });
-        notify('Standing orders saved');
-        state.orig = snapshot(state.draft);
+        var eff = effective(state.draft);
+        S.kernel.settings.write('production', { buildings: copyBuildings(eff) });
+        notify('Automatic queues saved');
+        state.draft = eff;
+        state.orig = snapshot(eff);
         updateFooter();
     }
 
@@ -526,7 +664,7 @@
         render();
     }
 
-    // Built once per tab kind: 'orders' or 'live'.
+    // Built once per tab kind: 'orders', 'live' or 'settings'.
     function renderFooter(kind) {
         state.footKind = kind;
         state.$save = null;
@@ -541,6 +679,8 @@
             state.$save = h.button('Save', { onClick: saveDraft });
             state.$mid = $('<span>');
             $footer.append(state.$save).append(state.$mid).append($close);
+        } else if (kind === 'settings') {
+            $footer.append(textEl('span', 'steward-foot-note', 'Settings on this tab apply at once')).append($close);
         } else {
             state.$mid = textEl('span', 'steward-foot-note', '');
             $footer.append(h.button('Refresh', { onClick: refresh })).append(state.$mid).append($close);
@@ -553,11 +693,11 @@
         if (!state) return;
         var dirty = isDirty();
         if (state.$tabs) {
-            var $chip = state.$tabs.children('button').eq(TABS.indexOf('orders'));
-            if ($chip && $chip.length) $chip.text(ordersLabel());
+            var $chip = state.$tabs.children('button').eq(TABS.indexOf('manager'));
+            if ($chip && $chip.length) $chip.text(managerLabel());
         }
         if (!state.$mid) return;
-        if (state.footKind !== 'orders') {
+        if (state.footKind === 'live') {
             state.$mid.text('Read ' + clockSec(state.readAt || new Date()) +
                 ' · live views do not redraw on their own');
             return;
@@ -589,10 +729,12 @@
         var stored = safe(function () { return M().readSettings().buildings; }, null) || {};
         var draft = copyBuildings(stored);
         state = {
-            tab: TABS.indexOf(tab) === -1 ? 'queues' : tab,
-            filter: anyManaged(draft) ? 'managed' : 'all',
+            tab: TABS.indexOf(tab) === -1 ? 'manager' : tab,
+            filter: anyManaged(draft) ? 'auto' : 'all',
             draft: draft,
             orig: snapshot(draft),
+            labels: {},
+            buffShown: {},
             readAt: null,
             footKind: null, $save: null, $mid: null, $tabs: null
         };

@@ -87,6 +87,44 @@ t.test('itemsOf(1) with 200 defs reads the list once and each name and group at 
     assert.strictEqual(names(items), want.join(','));
 });
 
+// Every def has a recipe lock, so each one costs a requirement call.
+function lockAll(n) {
+    var req = {};
+    for (var i = 0; i < n; i++) req['BB_' + i] = true;
+    return req;
+}
+
+t.test('itemsOf(1) checks each def at most once and reads the skills once per pass', function () {
+    var b = setup({ buffs: PS.buffDefs(200, ['3', '5', '11']), requirements: lockAll(200) });
+    var items;
+    b.S.kernel.hostRead.pass(function () {
+        items = b.P.itemsOf(1);
+        assert.strictEqual(b.w.counts.buffVector, 1);
+        assert.ok(b.w.counts.buffName <= 200, 'buffName ' + b.w.counts.buffName);
+        assert.ok(b.w.counts.buffGroup <= 200, 'buffGroup ' + b.w.counts.buffGroup);
+        assert.ok(b.w.counts.adventure <= items.length, 'adventure ' + b.w.counts.adventure);
+        assert.ok(b.w.counts.requirement <= items.length, 'requirement ' + b.w.counts.requirement);
+        assert.ok(b.w.counts.adventure > 0, 'adventure counted');
+        assert.strictEqual(b.w.counts.skills, 1);
+
+        var before = JSON.stringify(b.w.counts);
+        b.P.itemsOf(1);
+        assert.strictEqual(JSON.stringify(b.w.counts), before, 'a second itemsOf in the pass is free');
+    });
+    assert.strictEqual(items.length, 67);
+    assert.strictEqual(items[0].producible, true);
+});
+
+t.test('isProducible in a fresh pass checks only its own item', function () {
+    var b = setup({ buffs: PS.buffDefs(200, ['3']), requirements: lockAll(200) });
+    b.S.kernel.hostRead.pass(function () {
+        assert.strictEqual(b.P.isProducible(1, 'BB_42'), true);
+    });
+    assert.ok(b.w.counts.adventure <= 1, 'adventure ' + b.w.counts.adventure);
+    assert.ok(b.w.counts.requirement <= 1, 'requirement ' + b.w.counts.requirement);
+    assert.ok(b.w.counts.skills <= 1, 'skills ' + b.w.counts.skills);
+});
+
 t.test('one pass over every buff reader reads the list once', function () {
     var c = passReads(200);
     assert.strictEqual(c.buffVector, 1);

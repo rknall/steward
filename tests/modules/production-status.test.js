@@ -89,9 +89,9 @@ t.test('every passive surface shows the first status after the world changes', f
     var label = b.P.menu.items()[1].label({});
     assert.ok(label.indexOf('2 queues') === 0, label);
 
-    // Only the card's Bookbinder line reads a queue (type 2), never the counted ones.
+    // The listing reads each queue once for all surfaces, never once per surface.
     Object.keys(b.w.counts.queue).forEach(function (k) {
-        assert.strictEqual(k, '2', 'queue ' + k + ' was read by a surface');
+        assert.strictEqual(b.w.counts.queue[k], 1, 'queue ' + k + ' was read ' + b.w.counts.queue[k] + ' times');
     });
 });
 
@@ -134,8 +134,7 @@ t.test('one pass: summary, side, render and tiles share the first read', functio
                 var $main = build(b, 'render');
                 seen[name] = {
                     side: $side.text(),
-                    // The Bookbinder line is a countdown from the draw time.
-                    main: $main.text().replace(/ · Bookbinder:.*?(Open production)/, '$1'),
+                    main: $main.text(),
                     tile: b.P.tiles(b.h)[0].lines.join('|'),
                     sum: b.P.summary(b.h)
                 };
@@ -153,6 +152,22 @@ t.test('one pass: summary, side, render and tiles share the first read', functio
     assert.deepStrictEqual(seen.second, seen.first);
     assert.ok(seen.first.main.indexOf('2 of 3') >= 0, seen.first.main);
     assert.ok(seen.first.tile.indexOf('2 queues') >= 0, seen.first.tile);
+});
+
+t.test('a dashboard draw on the real model never calls queues() or buildings()', function () {
+    var b = world();
+    var n = { queues: 0, buildings: 0 };
+    var q = b.P.model.queues, bl = b.P.model.buildings;
+    b.P.model.queues = function () { n.queues++; return q.apply(this, arguments); };
+    b.P.model.buildings = function () { n.buildings++; return bl.apply(this, arguments); };
+    b.S.kernel.hostRead.pass(function () {
+        b.P.summary(b.h);
+        build(b, 'side');
+        build(b, 'render');
+        b.P.tiles(b.h);
+    });
+    assert.strictEqual(n.queues, 0);
+    assert.strictEqual(n.buildings, 0);
 });
 
 t.test('Idle counts only standing rows: an adventure hold does not idle the tile', function () {
@@ -196,15 +211,142 @@ t.test('no view counts queues or entries itself', function () {
     });
 });
 
-t.test('views read last-pass rows only through ui.js lastRows, and never onOffCounts', function () {
+
+t.test('views never read the last pass or onOffCounts themselves', function () {
     var dir = path.join(__dirname, '..', '..', 'src', 'modules', 'production');
     ['ui.js', 'window.js', 'views.js'].forEach(function (f) {
         var src = fs.readFileSync(path.join(dir, f), 'utf8');
         assert.ok(!/onOffCounts/.test(src), f + ' calls onOffCounts');
         var calls = src.match(/lastPass\(/g) || [];
-        assert.strictEqual(calls.length, f === 'ui.js' ? 1 : 0, f + ' has ' + calls.length + ' lastPass( calls');
+        assert.strictEqual(calls.length, 0, f + ' has ' + calls.length + ' lastPass( calls');
     });
-    var ui = fs.readFileSync(path.join(dir, 'ui.js'), 'utf8');
-    var fn = /function lastRows\(\) \{[\s\S]*?\n    \}/.exec(ui);
-    assert.ok(fn && /lastPass\(/.test(fn[0]), 'the one lastPass( call is in lastRows');
+});
+
+// ---- one listing rule on the manager table and the Queues tab ----
+
+// A Bakery (timed type 3) whose one item needs an event that has not started,
+// so it is unproducible; Culture (type 20) is the cooldown Concert Hall.
+function listWorld(opts) {
+    opts = opts || {};
+    var w = PS.world({
+        enumNames: { 1: 'provisionhouse', 20: 'culturebuilding' },
+        queues: { 3: opts.bakery || [], 20: opts.culture || [] },
+        timed: { 3: [{ name: 'Cake', yield: 1, costs: [{ name_string: 'Wheat', amount: 3 }],
+            requiresEvent: 'Halloween' }] },
+        buildings: [{ name: 'Bakery', type: 3 }, { name: 'Culture', type: 20 }]
+    });
+    var H = harness.boot({ host: { swmmo: w.swmmo } });
+    PS.install(H, w);
+    jq.install(H);
+    H.settings.write('production', { enabled: true });
+    var S = H.Steward;
+    S.core.deposits.types = function () { return []; };
+    S.core.buildings.invalidate();
+    if (opts.saved) {
+        S.modules.production.readSettings = function () {
+            return { enabled: true, buildings: { Bakery: { item: 'Cake', items: 1, buff: '', enabled: true } } };
+        };
+    }
+    w.reset();
+    var b = { H: H, S: S, w: w, P: S.modules.production, h: S.kernel.ui.helpers };
+    b.rig = hostStubs.installModal(H);
+    S.kernel.ui.ensureStyle = function () {};
+    S.kernel.ui.releaseDashboard = function () {};
+    H.ctx.Modal.prototype.show = function () {};
+    return b;
+}
+
+function windowBody(b) {
+    b.P.window.open();
+    return b.rig.made[b.rig.made.length - 1].modal.Body();
+}
+
+function buttonText(b, $root, prefix) {
+    var $ = b.H.ctx.$;
+    var hit = null;
+    $root.find('button').each(function () {
+        if (hit === null && $(this).text().indexOf(prefix) === 0) hit = $(this);
+    });
+    return hit;
+}
+
+function clickButton(b, $root, prefix) {
+    var hit = buttonText(b, $root, prefix);
+    assert.ok(hit, 'button "' + prefix + '" exists');
+    hit.trigger('click');
+}
+
+// Both surfaces of one window: the manager table's building labels, then the
+// Queues tab text and its chip.
+function surfaces(b) {
+    var $ = b.H.ctx.$;
+    var $body = windowBody(b);
+    var labels = [];
+    $body.find('tr').each(function () {
+        var $td = $(this).find('td').eq(0);
+        if ($td.length && $td.find('b').length) labels.push($td.find('b').eq(0).text());
+    });
+    var chip = buttonText(b, $body, 'Queues ').text();
+    clickButton(b, $body, 'Queues ');
+    return { manager: labels, queuesText: $body.text(), chip: chip };
+}
+
+function listed(list, label) { return list.indexOf(label) !== -1; }
+
+t.test('a Concert Hall with entries is on neither the manager table nor the Queues tab', function () {
+    var b = listWorld({ culture: [qe('Show')] });
+    var bui = b.S.core.locale.bui;
+    var s = surfaces(b);
+    assert.ok(!listed(s.manager, bui('Culture')), s.manager.join(','));
+    assert.ok(s.queuesText.indexOf(bui('Culture')) < 0, s.queuesText);
+});
+
+t.test('an all-unproducible building with an empty queue is on neither surface', function () {
+    var b = listWorld();
+    var bui = b.S.core.locale.bui;
+    var s = surfaces(b);
+    assert.ok(!listed(s.manager, bui('Bakery')), s.manager.join(','));
+    assert.ok(s.queuesText.indexOf(bui('Bakery')) < 0, s.queuesText);
+});
+
+t.test('a busy all-unproducible building is on the Queues tab and its chip, not the manager table', function () {
+    var b = listWorld({ bakery: [qe('Cake')] });
+    var bui = b.S.core.locale.bui;
+    var s = surfaces(b);
+    assert.ok(!listed(s.manager, bui('Bakery')), s.manager.join(','));
+    assert.ok(s.queuesText.indexOf(bui('Bakery')) >= 0, s.queuesText);
+    assert.strictEqual(s.chip, 'Queues 1');
+});
+
+t.test('a saved row keeps its building on both surfaces', function () {
+    var b = listWorld({ saved: true });
+    var bui = b.S.core.locale.bui;
+    var s = surfaces(b);
+    assert.ok(listed(s.manager, bui('Bakery')), s.manager.join(','));
+    assert.ok(s.queuesText.indexOf(bui('Bakery')) >= 0, s.queuesText);
+});
+
+t.test('the window, dashboard tab, tile and submenu texts have no Standing and no Demand', function () {
+    var b = world();
+    var rig = hostStubs.installModal(b.H);
+    b.S.kernel.ui.ensureStyle = function () {};
+    b.S.kernel.ui.releaseDashboard = function () {};
+    b.H.ctx.Modal.prototype.show = function () {};
+    b.P.window.open();
+    var $body = rig.made[rig.made.length - 1].modal.Body();
+    var texts = [$body.text()];
+    ['Queues ', 'Settings'].forEach(function (p) {
+        clickButton(b, $body, p);
+        texts.push($body.text());
+    });
+    texts.push(build(b, 'side').text(), build(b, 'render').text(), b.P.summary(b.h));
+    b.P.tiles(b.h).forEach(function (tile) {
+        texts.push(tile.title || '', tile.lines.join('|'), tile.badge ? tile.badge.text : '');
+    });
+    b.P.menu.items().forEach(function (it) {
+        texts.push(typeof it.label === 'function' ? it.label({}) : String(it.label || ''));
+    });
+    texts.forEach(function (x) {
+        assert.ok(!/Standing|Demand/.test(x), x);
+    });
 });

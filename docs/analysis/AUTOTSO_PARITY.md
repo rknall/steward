@@ -149,11 +149,11 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | Buildings list / search / by-grid / by-name | `core.buildings.*` | ✓ |
 | Production toggle (`SetProductionActiveCommand` / `SendServerAction(107)`) | `core.production.setActive` (action 107, verified on `IsProductionActive`; mining uses it) | ✓ |
 | `aBuildings.production.{order, info, inProgress, affordable}` | `orderIn`, `itemsOf` / `itemInfo`, `queuedIn`, `jointShortfalls` (all with a production type) | ✓ |
-| `manage()` periodic auto-production | `modules/production`: standing orders, buffs on the highest-level building of a name while its queue has entries, Bookbinder auto-complete (off by default). A Bookbinder standing order goes beyond autoTSO, which never orders books | ✓ |
+| `manage()` periodic auto-production | `modules/production`: automatic queues (one order while the queue is idle), a row's buff on the highest-level building of a name, sent only after an automatic-queue order of that row is verified and only while the building shows no running buff (stricter than autoTSO, which buffs while the queue has entries), Bookbinder auto-complete (follows the Bookbinder row; a switch in the Settings tab). A Bookbinder automatic queue goes beyond autoTSO, which never orders books | ✓ |
 | `collectibles.{check, collect, lootables, buildings, manage}` | `modules/collect` (refined: pure-collectible focus, event-aware patterns) | ✓ |
 | `deposits.{removeDepleted, manage}` (geo dispatch + mine build/upgrade) | `modules/geologists` + `modules/mining` (build, upgrade, pause, buff); `removeDepleted` — (#15) | ~ |
 | `production.getBook` (Bookbinder / skill book special handling) | `core.production.bookInfo`; completion (message 141) pending live confirmation | ~ |
-| Timed production viewer (host `6-timed.js`) | "Steward production" window: queues, demand, Bookbinder and on/off, recent actions | ✓ |
+| Timed production viewer (host `6-timed.js`) | "Steward production" window: Production Manager, Queues and Settings tabs | ✓ |
 | Buff application during production | `modules/mining` `tryBuff` + `core/buffs.building` (mines and masons, per deposit type) | ✓ |
 
 Buffs on continuous (non-queue) production buildings, such as sawmills and farms, stay with `runProduction` (#17). The production module buffs only the producer of a queue that has entries. Adventures' Produce and Retrain steps are not yet on the planner and the demand ledger; adventures only holds troops while a run is active.

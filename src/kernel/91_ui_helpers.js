@@ -331,7 +331,9 @@
     // ---------------------------------------------------------------
     // Parchment dropdown. Options are strings or { label, value }; a bound
     // dropdown commits the option's own value, not the string the select
-    // reports, so numeric values stay numbers in the buffer.
+    // reports, so numeric values stay numbers in the buffer. An option object
+    // with header: true is a greyed, non-selectable group heading: it has no
+    // value, is never committed and is never marked selected.
     // ---------------------------------------------------------------
     function dropdown(options, opts) {
         opts = opts || {};
@@ -343,6 +345,11 @@
         var values = [];
         for (var i = 0; i < options.length; i++) {
             var o = options[i];
+            if (o && typeof o === 'object' && o.header) {
+                $sel.append($('<option>', { 'class': 'steward-opt-head' })
+                    .attr('disabled', 'disabled').text(o.label || ''));
+                continue;
+            }
             var label, value;
             if (typeof o === 'string') { label = o; value = o; }
             else { label = o.label || o.value; value = (typeof o.value === 'undefined' ? label : o.value); }

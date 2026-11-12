@@ -135,10 +135,10 @@ A host member can read as a function and then as undefined, and a view that walk
 - `hostRead.pass(fn)` opens a read pass around a view model, a window render, a dashboard tab draw or a module's planning pass. Inside it the memoizing readers answer from one memo; outside a pass they read fresh, exactly as before. A nested pass joins the open one. A module status that must agree across the parts of one draw memoizes it with `hostRead.cached`.
 - Never wrap an action def, a send or `actions.attempt` in a pass. They run later from the kernel queue and their verification reads must stay live.
 - A cached value is shared by every reader in the pass, so treat it as read-only.
-- The memoizing readers are `production.queueTypes`, `queueOf`, `entries`, `itemsOf`, `queuedIn` and `buffTable`, `buildings.byName` (the name index), the `buffs` entries, star menu, target table and group-contains reads, and the production model's status (`hostRead.cached('production.status')`).
+- The memoizing readers are `production.queueTypes`, `queueOf`, `entries`, `itemsOf`, `queuedIn`, `buffTable`, `production.avail|<type>|<item>` (one item's availability) and `production.skills`, `buildings.byName` (the name index), the `buffs` entries, star menu, target table and group-contains reads, and the production model's status (`hostRead.cached('production.status')`).
 - `buffs.buildingBuffCandidates` and `buffs.speedBuffs` read the star menu once per call even outside a pass, so the amounts of one call agree.
 - `buffs.amount`, a candidate's or speed buff's `amount`, `mapCounts` and `populationStock` are null when unreadable. A view shows `?`, never 0.
-- `production.stockOf` passes a buff or resource stock's null on; the planner marks the row `stockUnknown` and orders nothing on it, and the production buff phase skips the buff.
+- `production.stockOf` passes a buff or resource stock's null on; the planner marks the row `stockUnknown` and orders nothing on it, and the buff that would go with an order is left out.
 
 ```js
 var model = Steward.kernel.hostRead.pass(function () {
@@ -213,6 +213,8 @@ Several owners order into the same host queues, so none of them spends the wareh
 - A need is `{ label, type, item, items, basis, priority }`: `items` is a positive integer, `basis` is `Steward.DemandBasis.Queue` (keep N queued) or `Steward.DemandBasis.Stock` (have N in stock), and a module never writes the string. `priority` is one value of `Steward.ProductionPriority`. Never write a number.
 - A `put` or `hold` lives 2 minutes. Re-put every pass; an owner that stops running stops reserving.
 - `Steward.core.production.plan(needs, { actFor })` returns `{ rows, orders }`. Every need reserves its missing runs in priority order, but only the rows of the `actFor` owner produce orders. Another owner's needs reduce what is left to spend and nothing more. Feed it `demand.list()`.
+- `plan` also takes `opts.orderRuns(need)`. For an own need it returns the runs to order: the planner then orders exactly that many runs (capped by the type's per-order limit), only into an empty queue, and reads the need Covered while the queue holds any entry. One order per type is placed per call, so two names that share a queue never both order. Anything but a positive whole number takes the normal path. The per-order ceiling is `Steward.core.production.orderMax(type)` (the Bookbinder 1, every other type `maxProductionAmount()`).
+- `Steward.core.production.itemsOf(type)` entries are `{ name, label, producible, why, page, pageLabel }`. `isProducible(type, item)` answers true, false or null for one item without building the whole list. null means a check could not be read and never hides an item.
 - Send each order with `Steward.core.production.orderIn`. The planner sends nothing.
 - `Steward.core.production.producer(name)` is the building a name's queue runs at (highest level, then lowest grid). Order into and buff only that one.
 - `Steward.core.production.isActive(b)` reads the on/off state and returns null when unknown.

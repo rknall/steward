@@ -11,7 +11,10 @@
  * production-<zone>-<epoch ms>.json.
  *
  * Reads the host directly and not the production core readers, so the dump
- * stays valid when those readers rest on a wrong assumption.
+ * stays valid when those readers rest on a wrong assumption. The one
+ * exception is the `steward` entry of each type, the core's own availability
+ * verdict, kept beside the raw host items and their requirement fields so a
+ * run settles the hiding rule for every building.
  *
  * Never enqueues queue work. Never sends a packet.
  *
@@ -156,7 +159,13 @@
                 out.push({
                     name:  guard(function () { return it.name_string; }),
                     costs: costLines(it),
-                    yield: guard(function () { return it.GetProductionAmount(); })
+                    yield: guard(function () { return it.GetProductionAmount(); }),
+                    group:                   guard(function () { return it.GetGroup(); }),
+                    requiresEvent:           guard(function () { return it.requiresEvent; }),
+                    requiresQuest:           guard(function () { return it.requiresQuest; }),
+                    requiresUpgradeLevelMin: guard(function () { return it.requiresUpgradeLevelMin; }),
+                    requiresUpgradeLevelMax: guard(function () { return it.requiresUpgradeLevelMax; }),
+                    typeKey:                 guard(function () { return it.GetType(); })
                 });
             }
             return out;
@@ -197,7 +206,11 @@
             enumName:  enumName(type),
             buildings: recs,
             queue:     queueRecord(type),
-            items:     timedItems(type)
+            items:     timedItems(type),
+            // What the steward lists for the type, so the dump shows next to
+            // the raw host items which ones the window would offer.
+            steward:   guard(function () { return S.core.production.itemsOf(type); }),
+            orderMax:  guard(function () { return S.core.production.orderMax(type); })
         };
     }
 

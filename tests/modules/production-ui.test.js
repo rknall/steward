@@ -17,6 +17,7 @@ function setup(o) {
     jq.install(H);
     var S = H.Steward;
     H.settings.write('production', { enabled: o.enabled !== false });
+    var calls = { queues: 0, buildings: 0 };
     var st = {
         enabled: true, queues: 2, types: 5, entries: 3, nextDoneAt: new Date(2026, 0, 1, 14, 5).getTime(),
         standing: 3, covered: 0, waiting: 1, shortfall: 0, held: 0,
@@ -30,12 +31,11 @@ function setup(o) {
     // Every surface reads the snapshot; the live reads must stay unused.
     P.model.snapshot = function () { return st; };
     P.model.status = function () { throw new Error('status must not be read'); };
-    P.model.books = function () { return o.books || null; };
-    P.model.queues = function () { throw new Error('queues must not be read'); };
-    P.lastPass = function () { return { at: 0, rows: o.rows || [] }; };
+    P.model.queues = function () { calls.queues++; throw new Error('queues must not be read'); };
+    P.model.buildings = function () { calls.buildings++; throw new Error('buildings must not be read'); };
     var opened = [];
     P.window = { open: function () { opened.push(true); } };
-    return { H: H, S: S, h: S.kernel.ui.helpers, opened: opened, st: st };
+    return { H: H, S: S, h: S.kernel.ui.helpers, opened: opened, st: st, calls: calls };
 }
 
 function build(w, part) {
@@ -84,22 +84,22 @@ t.test('idle tile when every standing row is covered or held', function () {
     });
     var tl = tile(w);
     same(tl.badge, { kind: 'ok', text: 'Idle' });
-    same(tl.lines, ['3 standing orders covered', 'Next done 14:05 · Bread']);
+    same(tl.lines, ['3 automatic queues covered', 'Next done 14:05 · Bread']);
 });
 
 t.test('running tile', function () {
     var w = setup({ status: { waiting: 2, shortfall: 1 } });
     var tl = tile(w);
     same(tl.badge, { kind: 'busy', text: 'Running' });
-    same(tl.lines, ['3 standing orders · next done 14:05',
-        '2 queues · demand: 2 waiting, 1 short']);
+    same(tl.lines, ['3 automatic queues · next done 14:05', '2 queues']);
+    assert.ok(tl.lines.join(' ').indexOf('demand') < 0);
     tl.links[0].onClick();
     assert.strictEqual(w.opened.length, 1);
 });
 
 t.test('summary line', function () {
     var w = setup();
-    assert.strictEqual(w.S.modules.production.summary(w.h), '3 standing orders · next done 14:05');
+    assert.strictEqual(w.S.modules.production.summary(w.h), '3 automatic queues · next done 14:05');
 });
 
 t.test('side toggles bind their paths', function () {
@@ -108,11 +108,9 @@ t.test('side toggles bind their paths', function () {
     var names = [];
     $side.find('.steward-field-name').each(function (i, el) { names.push(w.H.ctx.$(el).text()); });
     same(names, ['Auto-production', 'Delay between actions', 'Orders per pass',
-        'Buffs per pass', 'Standing orders', 'Building buffs', 'Bookbinder auto-complete']);
+        'Buffs per pass', 'Automatic queues', 'Building buffs']);
     var $boxes = $side.find('input[type=checkbox]');
-    assert.strictEqual($boxes.length, 4);
-    $boxes.eq(3).prop('checked', true).trigger('change');
-    assert.strictEqual(w.h.get('production', 'bookComplete'), true);
+    assert.strictEqual($boxes.length, 3);
     $boxes.eq(1).prop('checked', false).trigger('change');
     assert.strictEqual(w.h.get('production', 'standing'), false);
 });
@@ -133,6 +131,7 @@ t.test('side stats and breaker badge', function () {
     var $stats = build(w, 'side').find('.steward-stat');
     assert.strictEqual($stats.length, 3);
     assert.strictEqual($stats.eq(0).find('.steward-stat-v').text(), '3 active');
+    assert.strictEqual($stats.eq(0).find('.steward-stat-k').text(), 'Automatic queues');
     assert.strictEqual($stats.eq(1).find('.steward-stat-v').text(), '1 of 2');
     assert.strictEqual($stats.eq(2).find('.steward-badge').text(), 'closed');
     w.st.orderBreaker = { open: true, run: 5, nextProbeAt: 0 };
@@ -152,23 +151,40 @@ t.test('Production now reads the snapshot', function () {
     var w = setup({ status: { queues: 9, types: 12 } });
     var $main = build(w, 'render');
     assert.strictEqual($main.find('.steward-stat').eq(0).find('.steward-stat-v').text(), '9 of 12');
-    assert.strictEqual(w.S.modules.production.summary(w.h), '3 standing orders · next done 14:05');
-    assert.strictEqual(tile(w).lines[1], '9 queues · demand: 1 waiting, 0 short');
+    assert.strictEqual(w.S.modules.production.summary(w.h), '3 automatic queues · next done 14:05');
+    assert.strictEqual(tile(w).lines[1], '9 queues');
 });
 
 t.test('main shows the card, the pointer and the open button', function () {
+    var done = new Date(2026, 0, 1, 15, 30).getTime();
     var w = setup({
-        books: { head: { item: 'Tome', remainingMs: 60000 } },
-        status: { buffed: 2 }
+        status: { buffed: 2, booksItem: 'Tome', booksDoneAt: done }
     });
     var $main = build(w, 'render');
     assert.strictEqual($main.find('.steward-banner').length, 0);
     var stats = $main.find('.steward-stat');
     assert.strictEqual(stats.eq(1).find('.steward-stat-k').text(), 'Next done');
     assert.strictEqual(stats.eq(1).find('.steward-stat-v').text(), '14:05');
-    assert.ok(/3 standing orders · 2 buildings buffed · Bookbinder: Tome done \d\d:\d\d/.test($main.text()), $main.text());
+    assert.strictEqual(stats.length, 2, 'no Demand or Short stat');
+    assert.ok(/3 automatic queues · 2 buildings buffed · Bookbinder: Tome done 15:30/.test($main.text()), $main.text());
+    assert.ok($main.text().indexOf('Automatic queues and queues live in the production manager') >= 0, 'pointer card title');
     $main.find('button').trigger('click');
     assert.strictEqual(w.opened.length, 1);
+});
+
+t.test('a dashboard draw never reads the queues or the buildings', function () {
+    var w = setup({ status: { booksItem: 'Tome', booksDoneAt: null } });
+    build(w, 'render');
+    build(w, 'side');
+    w.S.modules.production.summary(w.h);
+    w.S.modules.production.tiles(w.h);
+    assert.strictEqual(w.calls.queues, 0);
+    assert.strictEqual(w.calls.buildings, 0);
+});
+
+t.test('no Bookbinder item gives no Bookbinder text', function () {
+    var w = setup({ status: { booksItem: null, booksDoneAt: null } });
+    assert.ok(build(w, 'render').text().indexOf('Bookbinder:') < 0);
 });
 
 t.test('banner and Reset while a breaker is open', function () {
@@ -182,19 +198,12 @@ t.test('banner and Reset while a breaker is open', function () {
     assert.strictEqual(w.S.modules.production.orderBreaker.isOpen(), false);
 });
 
-t.test('at most three short rows get a line', function () {
-    var rows = [];
-    for (var i = 0; i < 5; i++) {
-        rows.push({ status: 'DemandShort', label: 'Row' + i, shortfall: { name: 'Bread', need: 10, have: 4 } });
-    }
-    rows.push({ status: 'DemandCovered', label: 'Fine' });
-    var w = setup({ rows: rows });
-    var $b = build(w, 'render').find('.steward-banner');
-    assert.strictEqual($b.length, 3);
-    assert.ok($b.eq(0).text().indexOf('Row0: short of 6 ') >= 0, $b.eq(0).text());
+t.test('no short banner even with Short rows', function () {
+    var w = setup({ status: { shortfall: 4 } });
+    assert.strictEqual(build(w, 'render').find('.steward-banner').length, 0);
 });
 
-t.test('Idle counts only standing rows, not other owners covered or held', function () {
+t.test('Idle counts only automatic queues, not other owners covered or held', function () {
     var w = setup({ status: { standing: 1, standingCovered: 0, standingHeld: 0, covered: 1, held: 1 } });
     assert.strictEqual(tile(w).badge.text, 'Running');
     w = setup({ status: { standing: 1, standingCovered: 1, standingHeld: 0, covered: 1, held: 1 } });
@@ -219,13 +228,14 @@ t.test('a throwing snapshot falls back to the model emptyStatus on every surface
                  standingCovered: 0, standingHeld: 0, nextDoneAt: null, readAt: null,
                  orderBreaker: null, buffBreaker: null, nextItem: null };
     };
-    assert.strictEqual(P.summary(w.h), '7 standing orders · next done none');
+    assert.strictEqual(P.summary(w.h), '7 automatic queues · next done none');
     assert.ok(build(w, 'render').text().indexOf('4 of 6') >= 0);
-    assert.ok(build(w, 'side').text().indexOf('Standing orders') >= 0);
+    assert.ok(build(w, 'side').text().indexOf('Automatic queues') >= 0);
     assert.strictEqual(tile(w).badge.text, 'Running');
 });
 
 t.test('ui.js keeps no hand-built empty status', function () {
     var src = require('fs').readFileSync(require('path').join(__dirname, '../../src/modules/production/ui.js'), 'utf8');
     assert.ok(src.indexOf('nextDoneAt: null') < 0);
+    assert.ok(src.indexOf('bookComplete') < 0);
 });

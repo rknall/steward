@@ -18,6 +18,17 @@
  * Amounts are items. A queued run of a yield-y item counts as y items, and a
  * missing amount is ordered as whole runs, rounded up.
  *
+ * Idle-only orders: when opts.orderRuns(need) gives a positive whole number
+ * for an own need, that need is ordered only while its type's queue holds no
+ * entry. It reads Covered while anything is queued there, of any item or
+ * owner, and once the queue is empty it orders exactly that many runs, capped
+ * by the profile's perOrderMax. At most one such order per type comes out of
+ * one call: several building names can share one queue and the entry read is
+ * memoized per pass, so a second name would see the same empty queue and
+ * stack a second order on it. Only an Order claims the type; a Short,
+ * Deferred or Unreadable need leaves it for the next own need of that type.
+ * Any other result from orderRuns takes the amount path above.
+ *
  * Pure over its read argument: every host fact comes through opts.read,
  * whose defaults bind at call time to S.core.production. Nothing is sent,
  * nothing is stored. A read that the need depends on and that comes back
@@ -71,12 +82,14 @@
         };
     }
 
-    function defaultStack() {
-        return S.core.production.STACK_SIZE;
-    }
-
     function isCount(n) {
         return typeof n === 'number' && n >= 0;
+    }
+
+    // A run count orderRuns may hand back: anything else means the need
+    // takes the amount path.
+    function isRuns(n) {
+        return typeof n === 'number' && n > 0 && n < Infinity && Math.floor(n) === n;
     }
 
     // One result row. The first short resource is called shortfall, not
@@ -107,7 +120,7 @@
         var read = readsOf(opts.read);
         var actFor = opts.actFor;
         var isHeld = typeof opts.isHeld === 'function' ? opts.isHeld : defaultHeld(actFor);
-        var stackOf = typeof opts.stackOf === 'function' ? opts.stackOf : defaultStack;
+        var orderRuns = typeof opts.orderRuns === 'function' ? opts.orderRuns : null;
         var maxOrders = typeof opts.maxOrders === 'number' ? opts.maxOrders : Infinity;
 
         var rows = [];
@@ -115,6 +128,9 @@
         // Runs already claimed by the needs priced before, as
         // jointShortfalls orders.
         var taken = [];
+        // Types that already got an idle-only order in this call (type ->
+        // true). Call-local: the next pass reads the real entries again.
+        var idleClaimed = {};
 
         // Prices own on top of what is taken. Sets the row's shortfall fields
         // and returns the shortfall list, or null when it cannot be priced.
@@ -128,6 +144,39 @@
                 r.reserved = !!alone && typeof alone.length === 'number' && alone.length === 0;
             }
             return s;
+        }
+
+        // Prices an own order and, when it fits and the order budget allows,
+        // places it. Returns true when the row became an Order.
+        function commit(need, r, own) {
+            var s = price(r, own);
+            if (s === null) { r.status = Status.Unreadable; return false; }
+            if (s.length > 0) { r.status = Status.Short; return false; }
+            if (orders.length >= maxOrders) { r.status = Status.Deferred; return false; }
+
+            r.status = Status.Order;
+            orders.push({ owner: need.owner, key: need.key, type: need.type, item: need.item, runs: own.count });
+            taken.push(own);
+            return true;
+        }
+
+        // An own need with an orderRuns count: it orders only into an idle
+        // queue. The amount test and the entry limit do not apply, because a
+        // queue holding anything already reads Covered.
+        function idleOrder(need, r, p, n) {
+            if (isHeld(p.kind, need.item)) { r.status = Status.Held; return; }
+            // The claim is checked before the entry read, so it costs no read.
+            if (idleClaimed[need.type] === true) { r.status = Status.Covered; return; }
+            var count = read.entryCount(need.type);
+            if (!isCount(count)) { r.status = Status.Unreadable; return; }
+            if (count > 0) { r.status = Status.Covered; return; }
+
+            var runs = n;
+            if (typeof p.perOrderMax === 'number' && runs > p.perOrderMax) runs = p.perOrderMax;
+            r.runs = runs;
+            if (commit(need, r, { unit: need.item, count: runs, type: need.type })) {
+                idleClaimed[need.type] = true;
+            }
         }
 
         for (var i = 0; i < (needs ? needs.length : 0); i++) {
@@ -152,6 +201,15 @@
 
             var q = runsQueued * y;
             r.queued = q;
+
+            if (need.owner === actFor && orderRuns) {
+                var n = orderRuns(need);
+                if (isRuns(n)) {
+                    idleOrder(need, r, p, n);
+                    continue;
+                }
+            }
+
             if (need.basis === S.DemandBasis.Stock) {
                 if (r.stock >= need.items) { r.status = Status.Covered; continue; }
                 if (q + r.stock >= need.items) { r.status = Status.Waiting; continue; }
@@ -190,21 +248,9 @@
             // One order carries at most what the profile's shape allows; the
             // rest follows on a later pass.
             if (typeof p.perOrderMax === 'number' && runs > p.perOrderMax) runs = p.perOrderMax;
-            if (!p.stackable) {
-                var bound = stackOf(need);
-                if (typeof bound === 'number' && bound > 0 && runs > bound) runs = bound;
-            }
             own.count = runs;
             r.runs = runs;
-
-            s = price(r, own);
-            if (s === null) { r.status = Status.Unreadable; continue; }
-            if (s.length > 0) { r.status = Status.Short; continue; }
-            if (orders.length >= maxOrders) { r.status = Status.Deferred; continue; }
-
-            r.status = Status.Order;
-            orders.push({ owner: need.owner, key: need.key, type: need.type, item: need.item, runs: runs });
-            taken.push(own);
+            commit(need, r, own);
         }
 
         return { rows: rows, orders: orders };

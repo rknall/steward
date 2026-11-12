@@ -26,21 +26,52 @@
  *     productionBuilding), not a queue, and cannot be ordered into
  *   - any other type with a productionQueue is a timed workshop whose items
  *     are global.timedProductions_vector[type]
- *   - a VO's amount is items per stack and stacks the stack count; the 1-25
- *     stack limit is only the client UI's ceiling, and the SiegeWorkshop and
- *     Bookbinder have no stack setting
+ *   - a VO's amount is items per stack and stacks the stack count; the stack
+ *     count of every type is bounded by the host's defines.MAX_PRODUCTION_AMOUNT
+ *     (read by maxProductionAmount()), and the SiegeWorkshop and Bookbinder
+ *     have no stack setting
  *   - an entry's GetAmount() is summed for in-progress counts without
  *     subtracting GetProducedItems(); time left is
  *     ((amount - produced) * productionTime - collectedTime) / timeBonus
  *   - no queue capacity is known for any type, and event and special
  *     buildings have no known rules, so they read as unconfirmed workshops
+ *   - one order message carries at most perOrderMax runs, else the host's
+ *     maxProductionAmount() for every kind (orderMax), as the order panel's
+ *     own amount slider does
+ *
+ * Availability, also host facts kept here only. Each item of itemsOf says
+ * whether it can be ordered now (producible true, false or null) and, when
+ * not, why:
+ *   - the produceable buff list (GetProduceableBuffDefinitions) is already
+ *     filtered by the event and quest rules, so a buff adds only two checks
+ *   - adventure: BuffSystem::BuffAdventureController's static
+ *     isActiveBuffAdventureBuffOrNormalBuff(name) is false for a buff of an
+ *     adventure that is not running
+ *   - recipe: gi.mRequirements.timedProductionRequirements_vector[key] is the
+ *     lock of an item, a player skill, fulfilled when
+ *     isFulfilledForSkillList(mCurrentPlayer.getSkills()) is true; an item
+ *     without an entry has no lock. The key is the buff name, or a timed
+ *     def's GetType()
+ *   - a timed def (every other orderable type) also has an event and quest
+ *     rule, Utils::RequirementsHelper's static checkRequirements(gi,
+ *     requiresEvent, requiresQuest), and an upgrade-level window
+ *     requiresUpgradeLevelMin..Max on the producing building's level; a
+ *     bound that is not a number is no bound
+ *   - pages: a buff's page is its group, titled LAB 'BuffGroup<g>'; a timed
+ *     def's page is GetGroup() (else its group slot), titled LAB
+ *     '<enum name>Group<g>'; a missing title reads 'Group <g>'
+ *   - a check whose class, member or result cannot be read is null, never
+ *     false: an unreadable check never hides an item
  *
  * Unconfirmed profiles (confirmed false) order with retries 0 and at most one
  * entry in the queue, so a wrong assumption costs one order, not a loop.
  *
  * queueOf, queueTypes, entries and itemsOf memoize inside a read pass
  * (S.kernel.hostRead.pass), so one render or planning pass reads each queue
- * and the building list once. Outside a pass they read live. The action defs
+ * and the building list once. So do the availability reads: the result per
+ * item (production.avail|type|name), the player's skills (production.skills)
+ * and each static class (production.static|name). Outside a pass they read
+ * live. The action defs
  * (orderIn, complete) never run inside a pass, so their verification reads
  * always see the host as it is now.
  *
@@ -55,9 +86,10 @@
 
     var COMPLETE_TIMEOUT_MS = 15000;
     var MESSAGE_COMPLETE    = 141;
-    var KEEP_UNBOUNDED      = 9999;
     var ENUM_TYPES          = 'Enums::TIMED_PRODUCTION_TYPE';
     var CULTURE_ENUM        = 'culturebuilding';
+    var ADVENTURE_BUFFS     = 'BuffSystem::BuffAdventureController';
+    var REQUIREMENTS_HELPER = 'Utils::RequirementsHelper';
 
     function P() { return S.core.production; }
 
@@ -164,15 +196,13 @@
         return makeProfile(type, K.Timed, en, { maxEntries: 1 });
     }
 
-    // The largest standing amount a type can hold: runs per order times the
-    // entries the queue takes, or KEEP_UNBOUNDED when either is unlimited.
-    function keepMax(type) {
+    // The most runs one order message of a type carries, or null for a
+    // non-number type.
+    function orderMax(type) {
         var pr = profile(type);
         if (!pr) return null;
-        if (typeof pr.perOrderMax === 'number' && typeof pr.maxEntries === 'number') {
-            return pr.perOrderMax * pr.maxEntries;
-        }
-        return KEEP_UNBOUNDED;
+        if (typeof pr.perOrderMax === 'number') return pr.perOrderMax;
+        return P().maxProductionAmount();
     }
 
     // The queue type a building feeds: its queue's mProductionType, else the
@@ -413,7 +443,7 @@
             }
             return;
         }
-        out.push({ name: name, label: label(name) });
+        out.push(itemEntry(name));
     }
 
     function unitItems(type) {
@@ -436,16 +466,219 @@
         return out;
     }
 
+    // An entry of itemsOf. Kinds without checks or pages pass only the name.
+    function itemEntry(name, avail, page, pageLabel) {
+        return {
+            name:       name,
+            label:      label(name),
+            producible: avail ? avail.producible : true,
+            why:        avail ? avail.why : null,
+            page:       typeof page === 'string' ? page : null,
+            pageLabel:  typeof pageLabel === 'string' ? pageLabel : null
+        };
+    }
+
+    // A host class for its statics, looked up once per read pass; null when
+    // the host has none.
+    function staticClass(name) {
+        return S.kernel.hostRead.cached('production.static|' + name, function () {
+            try { return game.def(name) || null; }
+            catch (e) { return null; }
+        });
+    }
+
+    // Calls a static of a host class: true or false, or null when the class,
+    // the member or a boolean result is missing.
+    function staticCheck(className, member, args) {
+        var cls = staticClass(className);
+        if (!cls) return null;
+        try {
+            var f = cls[member];
+            if (typeof f !== 'function') return null;
+            var v = f.apply(cls, args);
+            return typeof v === 'boolean' ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // The player's skills, read once per read pass; null when unreadable.
+    function skills() {
+        return S.kernel.hostRead.cached('production.skills', function () {
+            try {
+                var v = call(game.gi.mCurrentPlayer, 'getSkills');
+                return v === undefined ? null : v;
+            } catch (e) {
+                return null;
+            }
+        });
+    }
+
+    // Whether the player has the recipe of an item: true when the host keeps
+    // no lock for the key, null when the lock or the skills cannot be read.
+    function requirement(key) {
+        try {
+            var reqs = game.gi.mRequirements;
+            var vec = reqs ? reqs.timedProductionRequirements_vector : null;
+            if (!vec) return null;
+            var lock = vec[key];
+            if (!lock) return true;
+            var sk = skills();
+            if (sk === null) return null;
+            var f = lock.isFulfilledForSkillList;
+            if (typeof f !== 'function') return null;
+            var v = f.call(lock, sk);
+            return typeof v === 'boolean' ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function adventureOk(name) {
+        return staticCheck(ADVENTURE_BUFFS, 'isActiveBuffAdventureBuffOrNormalBuff', [name]);
+    }
+
+    // Folds checks run in order, [[why, thunk], ...], into { producible, why }:
+    // the first false names why and stops, so nothing after it is read; a
+    // null and no false reads as unreadable.
+    function fold(checks) {
+        var unknown = false;
+        for (var i = 0; i < checks.length; i++) {
+            var v = checks[i][1]();
+            if (v === false) return { producible: false, why: checks[i][0] };
+            if (v !== true) unknown = true;
+        }
+        return unknown ? { producible: null, why: 'unreadable' } : { producible: true, why: null };
+    }
+
+    function checkBuff(rec) {
+        return fold([
+            ['adventure', function () { return adventureOk(rec.name); }],
+            ['recipe',    function () { return requirement(rec.name); }]
+        ]);
+    }
+
+    // The producing building's level of a type: the first building of its
+    // queueTypes entry, which is sorted highest level first; null when unknown.
+    function producerLevel(type) {
+        var list = queueTypes();
+        if (!list) return null;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].type !== type) continue;
+            var b = list[i].buildings[0];
+            return b ? num(b.level) : null;
+        }
+        return null;
+    }
+
+    // The producer level read at most once per list, and only for a def that
+    // has a level bound.
+    function levelOnce(type) {
+        var done = false, v = null;
+        return function () {
+            if (!done) { v = producerLevel(type); done = true; }
+            return v;
+        };
+    }
+
+    function inLevelWindow(def, levelOf) {
+        var lo = num(def.requiresUpgradeLevelMin);
+        var hi = num(def.requiresUpgradeLevelMax);
+        if (lo === null && hi === null) return true;
+        var level = levelOf();
+        if (level === null) return null;
+        return (lo === null || level >= lo) && (hi === null || level <= hi);
+    }
+
+    // A def without an event or quest has no rule to ask the host about, so
+    // the common case costs no bridge call.
+    function eventOk(def) {
+        var ev = def.requiresEvent, qu = def.requiresQuest;
+        if (!ev && !qu) return true;
+        return staticCheck(REQUIREMENTS_HELPER, 'checkRequirements', [game.gi, ev, qu]);
+    }
+
+    function timedName(def) {
+        var n = call(def, 'GetProductionName_string');
+        return (typeof n === 'string' && n) ? n : def.name_string;
+    }
+
+    function timedKey(def) {
+        var key = call(def, 'GetType');
+        return (key === undefined || key === null) ? null : requirement(key);
+    }
+
+    function checkTimed(def, levelOf) {
+        return fold([
+            ['event',     function () { return eventOk(def); }],
+            ['level',     function () { return inLevelWindow(def, levelOf); }],
+            ['adventure', function () { return adventureOk(timedName(def)); }],
+            ['recipe',    function () { return timedKey(def); }]
+        ]);
+    }
+
+    // The availability of one item, { producible, why }, memoized per read
+    // pass, so itemsOf and isProducible share one result.
+    function availability(type, name, compute) {
+        return S.kernel.hostRead.cached('production.avail|' + type + '|' + name, function () {
+            try { return compute(); }
+            catch (e) { return { producible: null, why: 'unreadable' }; }
+        });
+    }
+
+    function buffAvail(type, rec) {
+        return availability(type, rec.name, function () { return checkBuff(rec); });
+    }
+
+    function timedAvail(type, def, levelOf) {
+        return availability(type, def.name_string, function () { return checkTimed(def, levelOf); });
+    }
+
+    // A page title from LAB, or 'Group <page>' when the host has none (the
+    // locale wrapper returns the key on a miss).
+    function pageTitle(key, page) {
+        var t = key ? S.core.locale.lab(key) : '';
+        return (typeof t === 'string' && t && t !== key) ? t : 'Group ' + page;
+    }
+
+    function timedPage(def) {
+        var g;
+        try { g = call(def, 'GetGroup'); }
+        catch (e) { g = undefined; }
+        if (g === undefined || g === null) g = def.group;
+        return (typeof g === 'number' || (typeof g === 'string' && g)) ? String(g) : null;
+    }
+
     // The buffs a buff queue makes, straight from the buff table: a buff is
-    // made in the queue of its group, so no per-definition host call is
-    // needed here.
+    // made in the queue of its group, so its name and group need no further
+    // host call here.
     function buffItems(type) {
         var t = P().buffTable();
         if (t === null) return null;
         var out = [];
         for (var i = 0; i < t.list.length; i++) {
             var rec = t.list[i];
-            if (rec.queue === type) out.push({ name: rec.name, label: label(rec.name) });
+            if (rec.queue !== type) continue;
+            var page = rec.group || null;
+            out.push(itemEntry(rec.name, buffAvail(type, rec), page,
+                page === null ? null : pageTitle('BuffGroup' + page, page)));
+        }
+        return out;
+    }
+
+    function timedItems(type) {
+        var vec = timedDefs(type);
+        if (vec === null) return null;
+        var levelOf = levelOnce(type);
+        var en = typeName(type);
+        var out = [];
+        for (var i = 0; i < vec.length; i++) {
+            var def = vec[i];
+            var name = def ? def.name_string : null;
+            if (typeof name !== 'string' || !name) continue;
+            var page = timedPage(def);
+            out.push(itemEntry(name, timedAvail(type, def, levelOf), page,
+                page === null ? null : pageTitle(en === null ? '' : en + 'Group' + page, page)));
         }
         return out;
     }
@@ -466,13 +699,15 @@
         var out = [];
         for (var i = 0; i < vec.length; i++) {
             var name = vec[i] ? vec[i][key] : null;
-            if (typeof name === 'string' && name) out.push({ name: name, label: label(name) });
+            if (typeof name === 'string' && name) out.push(itemEntry(name));
         }
         return out;
     }
 
-    // The items a type's queue can make, [{ name, label }], or null when the
-    // list cannot be read. A cooldown building makes nothing to order.
+    // The items a type's queue can make in host order, [{ name, label,
+    // producible, why, page, pageLabel }], or null when the list cannot be
+    // read. A cooldown building makes nothing to order. Nothing is sorted or
+    // left out here: what to show is the caller's choice.
     function itemsOf(type) {
         return S.kernel.hostRead.cached('production.itemsOf|' + type, function () { return readItems(type); });
     }
@@ -486,9 +721,49 @@
             if (pr.kind === K.Buffs) return buffItems(type);
             if (pr.kind === K.Books) return namedItems(bookDefs(), 'id_string');
             if (pr.kind === K.Cooldown) return [];
-            return namedItems(timedDefs(type), 'name_string');
+            return timedItems(type);
         } catch (e) {
             S.kernel.warn('production', 'itemsOf(' + type + ') threw:', e);
+            return null;
+        }
+    }
+
+    function listed(list, item) {
+        if (list === null) return null;
+        for (var i = 0; i < list.length; i++) if (list[i].name === item) return true;
+        return false;
+    }
+
+    function timedProducible(type, item) {
+        var vec = timedDefs(type);
+        if (vec === null) return null;
+        for (var i = 0; i < vec.length; i++) {
+            if (vec[i] && vec[i].name_string === item) return timedAvail(type, vec[i], levelOnce(type)).producible;
+        }
+        return false;
+    }
+
+    // Whether one item can be ordered into a type's queue now: true, false,
+    // or null when that cannot be read. Only this item's checks run, so a
+    // planning pass never builds a whole list for it. An item the readable
+    // list does not hold is false.
+    function isProducible(type, item) {
+        var pr = profile(type);
+        if (!pr || typeof item !== 'string' || !item) return null;
+        var K = S.ProductionKind;
+        try {
+            if (pr.kind === K.Units || pr.kind === K.Books) return listed(itemsOf(type), item);
+            if (pr.kind === K.Cooldown) return false;
+            if (pr.kind === K.Buffs) {
+                var t = P().buffTable();
+                if (t === null) return null;
+                var rec = t.byName.hasOwnProperty(item) ? t.byName[item] : null;
+                if (!rec || rec.queue !== type) return false;
+                return buffAvail(type, rec).producible;
+            }
+            return timedProducible(type, item);
+        } catch (e) {
+            S.kernel.warn('production', 'isProducible(' + type + ', ' + item + ') threw:', e);
             return null;
         }
     }
@@ -639,7 +914,7 @@
 
     var P0 = S.core.production;
     P0.profile     = profile;
-    P0.keepMax     = keepMax;
+    P0.orderMax    = orderMax;
     P0.typeName    = typeName;
     P0.queueOf     = queueOf;
     P0.queueTypes  = queueTypes;
@@ -648,6 +923,7 @@
     P0.remainingMs = remainingMs;
     P0.cooldownMs  = cooldownMs;
     P0.itemsOf     = itemsOf;
+    P0.isProducible = isProducible;
     P0.itemInfo    = itemInfo;
     P0.yieldIn     = yieldIn;
     P0.bookInfo    = bookInfo;

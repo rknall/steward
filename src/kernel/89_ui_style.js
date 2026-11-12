@@ -341,6 +341,7 @@
                 'box-shadow:none;vertical-align:middle;}',
             '.steward-input{width:' + px(t.inputW) + ';padding:0 7px;text-align:right;}',
             '.steward-dropdown{max-width:100%;padding:0 5px;cursor:pointer;}',
+            '.steward-dropdown option.steward-opt-head{color:' + t.muted + ';font-weight:700;}',
             '.steward-input:focus,.steward-dropdown:focus{outline:0;border-color:' + t.brass + ';}',
             '.steward-input.steward-dirty,.steward-dropdown.steward-dirty{' + dirtyRing + '}',
             '.steward-input.steward-invalid,.steward-dropdown.steward-invalid{' +

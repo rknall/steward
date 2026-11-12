@@ -3,6 +3,7 @@
 var t = require('../runner');
 var harness = require('../harness');
 var AC = require('../stubs/actions');
+var PS = require('../stubs/production');
 
 var assert = t.assert;
 
@@ -266,13 +267,198 @@ t.test('typeName is read once per type', function () {
     assert.strictEqual(b.world.enumCalls, calls);
 });
 
-t.test('keepMax: 1 for books, 9999 for units, buffs and workshops', function () {
+t.test('orderMax: the host maximum for every kind, 1 only for books', function () {
     var b = setup();
-    assert.strictEqual(b.P.keepMax(2), 1);
-    assert.strictEqual(b.P.keepMax(0), 9999);
-    assert.strictEqual(b.P.keepMax(8), 9999);
-    assert.strictEqual(b.P.keepMax(1), 9999);
-    assert.strictEqual(b.P.keepMax(30), 9999);
+    assert.strictEqual(b.P.orderMax(0), 25);
+    assert.strictEqual(b.P.orderMax(8), 25);
+    assert.strictEqual(b.P.orderMax(1), 25);
+    assert.strictEqual(b.P.orderMax(6), 25);
+    assert.strictEqual(b.P.orderMax(11), 25);
+    assert.strictEqual(b.P.orderMax(2), 1);
+    assert.strictEqual(b.P.orderMax(30), 25);
+    assert.strictEqual(b.P.orderMax(7), 25);
+    assert.strictEqual(b.P.orderMax('2'), null);
+    assert.strictEqual(b.P.keepMax, undefined);
+});
+
+t.test('maxProductionAmount reads defines once and falls back to the stack size', function () {
+    var b = setup();
+    var game = b.H.host.game;
+    var calls = 0;
+    var value = null;
+    game.def = function (name) {
+        if (name !== 'defines') return null;
+        calls++;
+        return { MAX_PRODUCTION_AMOUNT: value };
+    };
+    assert.strictEqual(b.P.maxProductionAmount(), 25);
+    value = 40;
+    assert.strictEqual(b.P.maxProductionAmount(), 40);
+    value = 99;
+    assert.strictEqual(b.P.maxProductionAmount(), 40);
+    assert.strictEqual(b.P.orderMax(30), 40);
+    assert.strictEqual(calls, 2);
+});
+
+t.test('maxProductionAmount falls back when the read throws', function () {
+    var b = setup();
+    b.H.host.game.def = function () { throw new Error('no defines'); };
+    assert.strictEqual(b.P.maxProductionAmount(), 25);
+});
+
+// Availability runs on the shared production stub, which fakes the static
+// classes, the recipe locks, the skills and the LAB titles.
+var AVAIL_ENUMS = { 0: 'barracks', 1: 'provisionhouse', 2: 'bookbinder', 5: 'RareBuff', 6: 'fishhouse',
+    11: 'winery', 30: 'workshop' };
+
+function availSetup(opts) {
+    opts = opts || {};
+    if (!opts.enumNames) opts.enumNames = AVAIL_ENUMS;
+    var w = PS.world(opts);
+    var H = harness.boot({ sections: ['kernel', 'core'], host: { swmmo: w.swmmo } });
+    var sent = PS.install(H, w);
+    w.reset();
+    return { H: H, S: H.Steward, P: H.Steward.core.production, w: w, sent: sent };
+}
+
+function byName(list) {
+    var out = {};
+    for (var i = 0; i < list.length; i++) out[list[i].name] = list[i];
+    return out;
+}
+
+function buff(name, group) {
+    return { name: name, group: group, yield: 1, costs: [{ name_string: 'Gold', amount: 1 }] };
+}
+
+function timedDef(name, extra) {
+    var d = { name: name, yield: 1, costs: [{ name_string: 'Iron', amount: 1 }] };
+    Object.keys(extra || {}).forEach(function (k) { d[k] = extra[k]; });
+    return d;
+}
+
+t.test('a buff of an inactive adventure is not producible, a normal buff is', function () {
+    var b = availSetup({ buffs: [buff('BB_Adv', '3'), buff('BB_Plain', '3')],
+        adventureBuffs: { BB_Adv: false } });
+    var items = byName(b.P.itemsOf(1));
+    assert.strictEqual(items.BB_Adv.producible, false);
+    assert.strictEqual(items.BB_Adv.why, 'adventure');
+    assert.strictEqual(items.BB_Plain.producible, true);
+    assert.strictEqual(items.BB_Plain.why, null);
+});
+
+t.test('a recipe lock hides a buff; no lock is producible; a throwing lock is unreadable', function () {
+    var b = availSetup({ buffs: [buff('BB_Lock', '3'), buff('BB_Free', '3'), buff('BB_Bad', '3')],
+        requirements: { BB_Lock: false, BB_Bad: 'throw' } });
+    var items = byName(b.P.itemsOf(1));
+    assert.strictEqual(items.BB_Lock.producible, false);
+    assert.strictEqual(items.BB_Lock.why, 'recipe');
+    assert.strictEqual(items.BB_Free.producible, true);
+    assert.strictEqual(items.BB_Bad.producible, null);
+    assert.strictEqual(items.BB_Bad.why, 'unreadable');
+    b.w.requirements.BB_Lock = true;
+    assert.strictEqual(byName(b.P.itemsOf(1)).BB_Lock.producible, true);
+});
+
+t.test('a timed def needs its event and its level window', function () {
+    var b = availSetup({
+        timed: { 30: [
+            timedDef('EventSword', { requiresEvent: 'Halloween' }),
+            timedDef('LowSword', { requiresUpgradeLevelMax: 2 }),
+            timedDef('HighSword', { requiresUpgradeLevelMin: 4 }),
+            timedDef('MidSword', { requiresUpgradeLevelMin: 3, requiresUpgradeLevelMax: 3 }),
+            timedDef('NoBound', { requiresUpgradeLevelMin: 'x' })
+        ] },
+        buildings: [{ name: 'Workshop', grid: 5, level: 3, type: 30 }, { name: 'Workshop', grid: 6, level: 1, type: 30 }]
+    });
+    var items = byName(b.P.itemsOf(30));
+    assert.strictEqual(items.EventSword.producible, false);
+    assert.strictEqual(items.EventSword.why, 'event');
+    assert.strictEqual(items.LowSword.why, 'level');
+    assert.strictEqual(items.HighSword.producible, false);
+    assert.strictEqual(items.HighSword.why, 'level');
+    assert.strictEqual(items.MidSword.producible, true);
+    assert.strictEqual(items.NoBound.producible, true);
+    b.w.events.push('Halloween');
+    assert.strictEqual(byName(b.P.itemsOf(30)).EventSword.producible, true);
+});
+
+t.test('a missing RequirementsHelper or adventure class reads null, never false', function () {
+    var b = availSetup({ timed: { 30: [timedDef('EventSword', { requiresEvent: 'Halloween' })] },
+        buffs: [buff('BB_0', '3')] });
+    var game = b.H.host.game;
+    var def = game.def;
+    game.def = function (name) {
+        if (name === 'Utils::RequirementsHelper' || name === 'BuffSystem::BuffAdventureController') return null;
+        return def(name);
+    };
+    var sword = b.P.itemsOf(30)[0];
+    assert.strictEqual(sword.producible, null);
+    assert.strictEqual(sword.why, 'unreadable');
+    assert.strictEqual(b.P.itemsOf(1)[0].producible, null);
+    assert.strictEqual(b.P.isProducible(30, 'EventSword'), null);
+    assert.strictEqual(b.P.isProducible(1, 'BB_0'), null);
+});
+
+t.test('pages: buff group and BuffGroup title, timed GetGroup and enum title, Group fallback', function () {
+    var b = availSetup({
+        buffs: [buff('BB_A', '3'), buff('BB_B', '4')],
+        timed: { 5: [timedDef('Rare1', { group: 2 }), timedDef('Rare2', { group: 7 }), timedDef('Rare3')] },
+        labels: { BuffGroup3: 'Food', RareBuffGroup2: 'Common' }
+    });
+    var buffs = byName(b.P.itemsOf(1));
+    assert.strictEqual(buffs.BB_A.page, '3');
+    assert.strictEqual(buffs.BB_A.pageLabel, 'Food');
+    assert.strictEqual(buffs.BB_B.page, '4');
+    assert.strictEqual(buffs.BB_B.pageLabel, 'Group 4');
+    var rare = byName(b.P.itemsOf(5));
+    assert.strictEqual(rare.Rare1.page, '2');
+    assert.strictEqual(rare.Rare1.pageLabel, 'Common');
+    assert.strictEqual(rare.Rare2.page, '7');
+    assert.strictEqual(rare.Rare2.pageLabel, 'Group 7');
+    assert.strictEqual(rare.Rare3.page, null);
+    assert.strictEqual(rare.Rare3.pageLabel, null);
+});
+
+t.test('isProducible is true, false or null per item, and false for an unlisted item', function () {
+    var b = availSetup({
+        buffs: [buff('BB_Adv', '3'), buff('BB_Lock', '3'), buff('BB_Ok', '3'), buff('BB_Bad', '3'), buff('BB_Fish', '5')],
+        adventureBuffs: { BB_Adv: false },
+        requirements: { BB_Lock: false, BB_Bad: 'throw' },
+        timed: { 30: [timedDef('EventSword', { requiresEvent: 'Halloween' }), timedDef('Sword')] }
+    });
+    assert.strictEqual(b.P.isProducible(1, 'BB_Ok'), true);
+    assert.strictEqual(b.P.isProducible(1, 'BB_Adv'), false);
+    assert.strictEqual(b.P.isProducible(1, 'BB_Lock'), false);
+    assert.strictEqual(b.P.isProducible(1, 'BB_Bad'), null);
+    assert.strictEqual(b.P.isProducible(1, 'BB_Fish'), false, 'a buff of another queue');
+    assert.strictEqual(b.P.isProducible(1, 'BB_None'), false);
+    assert.strictEqual(b.P.isProducible(30, 'EventSword'), false);
+    assert.strictEqual(b.P.isProducible(30, 'Sword'), true);
+    assert.strictEqual(b.P.isProducible(30, 'Axe'), false);
+    assert.strictEqual(b.P.isProducible(41, 'Sword'), null, 'an unreadable list');
+    assert.strictEqual(b.P.isProducible('1', 'BB_Ok'), null);
+});
+
+t.test('isProducible for units and books follows the list, and a cooldown makes nothing', function () {
+    var b = setup();
+    assert.strictEqual(b.P.isProducible(0, 'Rifleman'), true);
+    assert.strictEqual(b.P.isProducible(0, 'Marksman'), false);
+    assert.strictEqual(b.P.isProducible(2, 'Manuscript'), true);
+    assert.strictEqual(b.P.isProducible(2, 'Codex'), false);
+    assert.strictEqual(b.P.isProducible(20, 'Anything'), false);
+});
+
+t.test('units and books entries are producible and have no page', function () {
+    var b = setup();
+    [0, 8, 7, 2].forEach(function (type) {
+        b.P.itemsOf(type).forEach(function (it) {
+            assert.strictEqual(it.producible, true, type + ' ' + it.name);
+            assert.strictEqual(it.why, null);
+            assert.strictEqual(it.page, null);
+            assert.strictEqual(it.pageLabel, null);
+        });
+    });
 });
 
 t.test('itemsOf 0 and 8 split by GetIsElite and use the production name', function () {
