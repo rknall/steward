@@ -5,7 +5,7 @@
  * ArriveHome to Next:
  *
  *   Muster -> Validate (-> Deploy) -> Snapshot -> Supply (-> Unload -> Supply)
- *   -> Load -> Verify -> StartMap -> Depart, then the island ...,
+ *   -> Load -> Verify -> StartBuffs -> StartMap -> Depart, then the island ...,
  *   ArriveHome -> Account -> Population -> Retrain -> Next.
  *
  * A scenario run has no generals: the run kind skips the general and
@@ -82,9 +82,12 @@
 
     // Built at call time: state.js fills S.RunStep and loads after this file
     // in name order.
-    function homeSteps() {
+    // A run with no start buffs goes from Verify straight to StartMap.
+    function homeSteps(r) {
         var RS = S.RunStep;
-        return { supply: RS.Supply, unload: RS.Unload, load: RS.Load, verify: RS.Verify, done: RS.StartMap };
+        var buffs = r && r.startBuffs && r.startBuffs.length;
+        return { supply: RS.Supply, unload: RS.Unload, load: RS.Load, verify: RS.Verify,
+            done: buffs ? RS.StartBuffs : RS.StartMap };
     }
 
     function specOf(key) {
@@ -509,26 +512,77 @@
         if (st().finishedRuns() >= 1) {
             opts.onShort = function (message) { st().stop(message + '; ' + shortHint()); };
         }
-        ld().supply(r, sup, inv, homeSteps(), opts);
+        ld().supply(r, sup, inv, homeSteps(r), opts);
     }
 
     function loadOrders(r, inv) {
         var sup = loadoutSupply(r);
-        if (sup) ld().load(r, sup, inv, homeSteps());
+        if (sup) ld().load(r, sup, inv, homeSteps(r));
     }
 
     function verifyStep(r, inv) {
         var sup = loadoutSupply(r);
-        if (sup) ld().verify(r, sup, inv, homeSteps());
+        if (sup) ld().verify(r, sup, inv, homeSteps(r));
     }
 
     function unloadStep(r, inv) {
-        ld().unload(r, inv, homeSteps());
+        ld().unload(r, inv, homeSteps(r));
     }
 
     function verifiedIn(round, key) {
         var res = ld().resultOf(round, key);
         return !!res && res.status === S.ActionResult.Verified;
+    }
+
+    // Optional, like the horseshoe, and before the map starts: a start buff
+    // has to be set on the home island. Each buff of the template's list that
+    // is in stock and not already running goes out once per run (sentOnce
+    // survives a Resume); one that is missing or refused only logs and the
+    // run moves on. An open map of the run's adventure has started already,
+    // so nothing is applied then.
+    function startBuffs(r) {
+        var RS = S.RunStep;
+        var round = ld().currentRound(r, RS.StartBuffs);
+        if (round && ld().complete(round)) {
+            for (var k in round.results) {
+                if (!Object.prototype.hasOwnProperty.call(round.results, k)) continue;
+                var res = round.results[k];
+                if (res.status === S.ActionResult.Verified) {
+                    ld().markSeen(r, k);
+                    log(k + ' applied');
+                } else {
+                    log(k + ' not applied: ' + res.reason);
+                }
+            }
+            st().go(RS.StartMap, 'start buffs done');
+            return;
+        }
+        if (typeof S.core.adventures.zoneIdOf(r.adventure) === 'number') {
+            st().go(RS.StartMap, 'map open, start buffs not applied');
+            return;
+        }
+        var names = [];
+        var list = Object.prototype.toString.call(r.startBuffs) === '[object Array]' ? r.startBuffs : [];
+        for (var i = 0; i < list.length; i++) {
+            var rec = ld().marked(r, 'start:' + list[i]);
+            if (rec && (rec.sentOnce || rec.seen)) continue;
+            if (S.core.buffs.isRunning(list[i]) === true) {
+                log(list[i] + ' already running');
+                continue;
+            }
+            names.push(list[i]);
+        }
+        if (!names.length) {
+            st().go(RS.StartMap, 'no start buff to apply');
+            return;
+        }
+        // A round lost before its send leaves no marker and is started again.
+        ld().dropOrphan(r);
+        round = ld().startRound(r, RS.StartBuffs, []);
+        for (var j = 0; j < names.length; j++) {
+            var key = 'start:' + names[j];
+            ld().attempt(round, key, ld().wrapSend(r, key, S.core.buffs.startBuff(names[j])));
+        }
     }
 
     // The map is open once it is listed among the player's adventures; its
@@ -1043,6 +1097,7 @@
             waveIndex:   0,
             step:        S.RunStep.Muster,
             speedBuff:   r.speedBuff,
+            startBuffs:  r.startBuffs,
             // A series keeps the start's switch, so a template edit mid-series
             // does not change the remaining runs.
             starAll:     r.starAll,
@@ -1075,6 +1130,7 @@
         if (step === RS.Unload)     return unloadStep;
         if (step === RS.Load)       return loadOrders;
         if (step === RS.Verify)     return verifyStep;
+        if (step === RS.StartBuffs) return startBuffs;
         if (step === RS.StartMap)   return startMap;
         if (step === RS.Depart)     return depart;
         if (step === RS.ArriveHome) return arriveHome;

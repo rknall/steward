@@ -1162,6 +1162,31 @@ t.test('Horseshoe: a reload after the send sends it at most once', function () {
     assert.strictEqual(speeds().length, 1);
 });
 
+t.test('StartBuffs: at home, before the map starts, a buff in stock goes out once', function () {
+    var w = homeWorld();
+    w.stock.push({ type: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', resource: '', amount: 1, uid: 'bv' });
+    series(w, { step: w.S.RunStep.StartBuffs, speedBuff: 'SpeedBuffNone', run: { startBuffs: ['PropagationBuff_AdventureZoneTravelBoost_BlackTree'] } });
+    function sent() { return w.buffActions.filter(function (b) { return b.type === 'PropagationBuff_AdventureZoneTravelBoost_BlackTree'; }); }
+    tick(w);
+    play(w, function () { return sent().length === 1; });
+    reload(w);
+    tick(w);
+    drive(w, { until: at('Depart') });
+    assert.strictEqual(sent().length, 1);
+    assert.strictEqual(mapStarts(w).length, 1);
+});
+
+t.test('StartBuffs: a buff already running is not sent, the run goes on to StartMap', function () {
+    var w = homeWorld();
+    w.stock.push({ type: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', resource: '', amount: 1, uid: 'bv' });
+    w.H.host.game.gi.mZoneBuffManager = { isBuffRunning: function (n) { return n === 'PropagationBuff_AdventureZoneTravelBoost_BlackTree'; } };
+    series(w, { step: w.S.RunStep.StartBuffs, speedBuff: 'SpeedBuffNone', run: { startBuffs: ['PropagationBuff_AdventureZoneTravelBoost_BlackTree'] } });
+    tick(w);
+    assertStep(w, 'StartMap');
+    assert.strictEqual(w.buffActions.filter(function (b) { return b.type === 'PropagationBuff_AdventureZoneTravelBoost_BlackTree'; }).length, 0);
+    assert.ok(logged(w, /already running/));
+});
+
 // ---- 11. Waves and the watcher ---------------------------------------------------
 
 t.test('waves: hand over to PackStar and reach Clear; the watcher claims a non-last quest and never the last', function () {

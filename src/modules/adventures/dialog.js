@@ -874,6 +874,28 @@
         return $card;
     }
 
+    // One switch per start buff: on lists the buff in the draft, and the run
+    // applies it on the home island before the map starts.
+    function startBuffField(draft, b) {
+        var h = H();
+        var list = T().normStartBuffs(draft.startBuffs);
+        var title = 'Apply ' + b.label + ' before the map starts';
+        var stock = typeof b.amount === 'number' ? ' (' + b.amount + ' in stock)' : '';
+        return h.field(title, 'Set at home once per run, when in stock and not already running' + stock, h.toggle({
+            checked:  list.indexOf(b.name) !== -1,
+            label:    title,
+            onChange: function (on) {
+                var next = [];
+                for (var j = 0; j < list.length; j++) {
+                    if (list[j] !== b.name) next.push(list[j]);
+                }
+                if (on) next.push(b.name);
+                draft.startBuffs = next;
+                render();
+            }
+        }));
+    }
+
     function arrivalCard(draft) {
         var h = H();
         var $card = h.card({ title: 'On arrival' });
@@ -886,6 +908,10 @@
                     render();
                 }
             })));
+        var buffs = S.core.buffs.startBuffs();
+        for (var i = 0; i < buffs.length; i++) {
+            $card.append(startBuffField(draft, buffs[i]));
+        }
         return $card;
     }
 

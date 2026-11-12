@@ -223,6 +223,7 @@
             waveIndex:   waveIndex,
             step:        step,
             speedBuff:   S.modules.adventures.templates.speedBuffChoice(rec),
+            startBuffs:  S.modules.adventures.templates.normStartBuffs(rec.startBuffs),
             // A template without the field sends everyone to the star.
             starAll:     rec.starAll !== false
         });
