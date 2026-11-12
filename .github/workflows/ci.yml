@@ -1,21 +1,41 @@
 name: CI
 
+# Lint, build and test on every push to main and every PR (drafts included).
+# On a PR the bundle is uploaded as an artifact first, so it is ready to drop
+# into the TSO client even when lint or tests fail, and one sticky PR comment
+# (updated on each push) links to it with the build version. See
+# docs/RELEASING.md, "PR builds".
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+# A new push to a PR supersedes its running check; runs on main always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Lint and build bundle
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
 
     steps:
+      # A PR builds its head commit, not the synthetic merge commit, so the
+      # git describe version names a commit that exists on the branch.
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,19 +46,66 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint source (AIR ruleset)
-        run: npm run lint
+      - name: Resolve build version
+        id: version
+        run: echo "version=$(node -e "console.log(require('./scripts/version').read(process.cwd()))")" >> "$GITHUB_OUTPUT"
 
       - name: Build bundle
         run: npm run build
 
-      - name: Run tests
-        run: npm test
-
       - name: Upload bundle artifact
+        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: user_steward.js
+          name: user_steward-${{ steps.version.outputs.version }}
           path: build/user_steward.js
           if-no-files-found: error
           retention-days: 14
+
+      - name: Lint source (AIR ruleset)
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+  pr-comment:
+    name: Link bundle on the PR
+    needs: build
+    # Runs after a red lint or test too, as long as the bundle was uploaded.
+    # A fork PR gets a read-only token, so it keeps only the artifact.
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      needs.build.outputs.artifact-url != '' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Create or update the sticky comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ARTIFACT_URL: ${{ needs.build.outputs.artifact-url }}
+          RESULT: ${{ needs.build.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- steward-ci-bundle -->'
+          if [ "$RESULT" = "success" ]; then checks="lint, build and test passed"; else checks="**lint or test failed**, see the run"; fi
+          body="$marker
+          ### Bundle \`$VERSION\`
+
+          [Download user_steward.js]($ARTIFACT_URL) (zip, kept 14 days) from [this run]($RUN_URL), built from ${SHA:0:7}: $checks.
+
+          Unzip and copy \`user_steward.js\` into the TSO client's \`userscripts/\` directory, then reload scripts from the client menu."
+          id="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null
+          fi

@@ -29,7 +29,7 @@ Write or rewrite `analysis/specification/<task>/plan.md` (no line limit). It con
 3. **Slices** `s1, s2, …`. Each slice has:
    - `Files:`, the exact files it creates or edits. **Slices never share a file.**
    - `Change:`, what to do, concretely enough that the implementer needs nothing else.
-   - `Acceptance:`, checkable criteria (a test name, a lint result, a behaviour).
+   - `Acceptance:`, checkable criteria (a test name, a CI lint result, a behaviour).
    - `Tier:` `haiku` (mechanical), `sonnet` (normal), or `opus` (scheduler, queue,
      lifecycle or state logic, or anything subtle).
    - `Wave:` 1, 2, …. A slice depends only on slices in earlier waves.

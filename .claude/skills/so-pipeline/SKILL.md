@@ -50,9 +50,9 @@ one-line status, then read only the `## Next` section of the reported path.
 | plan | so-planner | opus | investigation(s), and findings on replan |
 | plan-review | so-plan-reviewer | opus | plan, all findings docs |
 | implement slice | so-implementer | the tier from the waves line | plan, slice id, review on reimplement |
-| implement build | so-implementer | sonnet | plan |
+| implement build | so-implementer | sonnet | plan; `local-build` only when the user needs a bundle before CI |
 | refactor | so-refactorer | sonnet; opus if more than 6 slices or more than 15 files | plan, base |
-| review | so-reviewer | opus | plan, implement and refactor docs, ledger, base |
+| review | so-reviewer | opus | plan, implement and refactor docs, ledger, base, PR number |
 | present | so-presenter | sonnet | plan, review, ledger, base |
 
 ## Routing on `## Next`
@@ -63,7 +63,8 @@ one-line status, then read only the `## Next` section of the reported path.
   round), then re-dispatch the investigation with the answers.
 - `plan-review` -> plan-review.
 - `implement waves: A | B` -> for each wave in order, dispatch **every slice of the
-  wave in one message** (parallel). After the last wave, dispatch `implement build`.
+  wave in one message** (parallel). After the last wave, dispatch `implement build`,
+  then Publish, then refactor.
   If a slice of a wave reports `review-set <path>`, finish the wave, run Review sets,
   and start the next wave only after its approval ruling.
 - `review-set <path>` -> run Review sets. Plan-review may report it before its waves
@@ -71,8 +72,22 @@ one-line status, then read only the `## Next` section of the reported path.
   report it before `done`: run it, then Finish (comments go into the report).
 - `refactor` -> refactor. `review` -> review.
 - `replan` -> plan (round+1) with the findings documents as input.
-- `reimplement: s2,s4` -> those slices only, with the review doc, then build, refactor, review.
+- `reimplement: s2,s4` -> those slices only, with the review doc, then build, Publish,
+  refactor, review.
 - `present` -> present. After present: Finish.
+
+## Publish (Draft PR)
+
+Testable code never stays only local. After each `implement build` result:
+`git add` the task's files (never `analysis/`), commit on the work branch (subject
+and trailers per CLAUDE.md, no `Bump:` unless it is a new module or redesign),
+`git push -u origin <branch>`, and on the first push open the PR with
+`"C:\Program Files\GitHub CLI\gh.exe" pr create --draft --base main`. Ledger:
+`Ruling: published <sha> to PR #<n> - testable work - cost if wrong: one more push`.
+CI attaches the bundle and its sticky comment links it; give the user that link.
+Never run lint or the full suite locally; a red CI run goes back to `implement
+build` with the failing log (`gh run view <id> --log-failed`). Build locally
+(`local-build`) only when the user needs the bundle before CI finishes.
 
 ## UI/UX gate
 
@@ -91,8 +106,9 @@ The gate is defined in `so-investigator.md`. A considerable UI/UX change waits o
 
 No check-ins between stages. When agents disagree or the plan has to choose,
 decide, and append a `Ruling:` line. Stop and ask only for destructive actions
-(deleting user content, history rewrites), security-relevant changes, or
-publishing (push, PR, release). Never commit or push: the user commits. Opening a
+(deleting user content, history rewrites), security-relevant changes, or a
+release or non-draft publish. Committing, pushing the work branch and the Draft
+PR need no ask (see Publish); the user marks it ready and merges. Opening a
 review set in the user's Chrome (the user's standing OK covers that one launch, no
 other desktop action) needs no ask, nor does publishing one as a private link when
 the user asks for it. Waiting on a review set is the one routine stop.
@@ -129,7 +145,8 @@ Template and capabilities JSON: `.claude/skills/so-pipeline/review-shell/` (see 
 1. Run `node .claude/pipeline/check_limits.mjs analysis/agents/<task>` and, if any
    CLAUDE.md, agent or skill file changed, those too. Re-dispatch the owning stage on
    violations.
-2. Report to the user: the final status, the `PRESENT.md` path, and every `Ruling:` line.
+2. Publish any change since the last push, then report to the user: the final status,
+   the Draft PR link, the `PRESENT.md` path, and every `Ruling:` line.
 
 ## Teardown
 

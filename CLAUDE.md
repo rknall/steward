@@ -13,8 +13,13 @@ transpiler.
 - `npm test` runs the zero-dependency runner over `tests/<area>/*.test.js`.
 - `npm run lint` runs ESLint with the AIR ruleset (`scripts/lint-air.js`).
   `npm run lint:fix` fixes what it can.
-- The husky pre-commit hook lints staged `src/**/*.js`, and CI runs lint, build
-  and test, so keep all three green.
+- CI runs lint, build and test on every push and PR and must end green. Locally,
+  never run lint (CI and the husky pre-commit hook on staged `src/**/*.js` cover
+  it) and run only the test files you added or changed (`node tests/runner.js
+  <file>`); CI runs the rest.
+- Build locally only when the user needs a bundle before CI finishes. Every PR's
+  CI attaches the bundle as an artifact, linked from a sticky PR comment with its
+  version (see [docs/RELEASING.md](docs/RELEASING.md), "PR builds").
 
 ## Hard rule: `src/` is ES5-era, AIR-safe JavaScript
 
@@ -57,7 +62,10 @@ orchestrator shows sets in the user's Chrome through `node scripts/review-set.js
 serve`, and the page's Submit writes the verdicts next to the set (Copy feedback
 pasted into the chat is the fallback; a published private link is optional).
 
-Agents never `git add`, commit or push; the user commits. Commit subjects are
+Agents commit and push testable work at once as a Draft PR against main, never
+leaving it only local: as soon as there is code for the user to test, commit it
+on the task branch, push it and open (or update) the Draft PR, whose CI comment
+carries the bundle. The user marks it ready and merges. Commit subjects are
 short and topic-prefixed (`mining: ...`) with no `; v0.x.y` suffix. Trailers, in
 order: `Fixes #N`/`Refs #N`, an optional `Bump:` line, then `Assisted-by: Claude`.
 main is protected: every change lands through a PR, squash-merged. Bring a
