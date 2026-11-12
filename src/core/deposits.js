@@ -110,6 +110,48 @@
         }, opts);
     }
 
+    // True for a "Depleted*" building whose name carries a managed deposit
+    // type name (for example DepletedIronOre). Anything else is never one.
+    function isManagedDepleted(b) {
+        if (!S.core.buildings) return false;
+        var bn = S.core.buildings.name(b);
+        if (typeof bn !== 'string' || bn.indexOf('Depleted') !== 0) return false;
+        var rows = S.core.deposits.types();
+        for (var i = 0; i < rows.length; i++) {
+            if (bn.indexOf(rows[i].name) > 0) return true;
+        }
+        return false;
+    }
+
+    function depletedManaged(opts) {
+        var all = depleted(opts);
+        var out = [];
+        for (var i = 0; i < all.length; i++) {
+            if (isManagedDepleted(all[i])) out.push(all[i]);
+        }
+        return out;
+    }
+
+    // Sends the destruct command for one depleted deposit on the home zone.
+    // The building is re-read from the zone by grid first and must still be a
+    // managed depleted deposit, so a stale reference never destroys something
+    // else. Returns true when the command was sent, false when it was refused;
+    // a host throw propagates. Whether the building went away is for the
+    // caller to verify on a later read.
+    function removeDepleted(b, opts) {
+        opts = opts || {};
+        if (!S.core.zone.isHome()) return false;
+        var zone = currentZone(opts.zone);
+        if (!zone || typeof zone.GetBuildingFromGridPosition !== 'function' ||
+            typeof zone.SendDestructBuildingCommand !== 'function') return false;
+        var g = S.core.buildings.grid(b);
+        if (g === null || typeof g === 'undefined') return false;
+        var live = zone.GetBuildingFromGridPosition(g);
+        if (!live || !isManagedDepleted(live)) return false;
+        zone.SendDestructBuildingCommand(live, 'minimalInfoPanel');
+        return true;
+    }
+
     // Property-by-property assignment so helpers attached by sibling
     // files in core/deposits/ (which load before this file by filename
     // sort) survive — same pattern specialists.js uses.
@@ -118,6 +160,9 @@
     S.core.deposits.byType   = byType;
     S.core.deposits.byGrid   = byGrid;
     S.core.deposits.depleted = depleted;
+    S.core.deposits.isManagedDepleted = isManagedDepleted;
+    S.core.deposits.depletedManaged   = depletedManaged;
+    S.core.deposits.removeDepleted    = removeDepleted;
     S.core.deposits.name     = name;
     S.core.deposits.grid     = grid;
     S.core.deposits.amount   = amount;

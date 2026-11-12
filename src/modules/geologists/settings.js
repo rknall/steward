@@ -6,9 +6,14 @@
  *   {
  *     enabled:       false,
  *     dispatchDelay: 1500,
+ *     removeDepleted: false,
  *     deposits:      { <Name>: { enabled: bool, max: int, kinds: [GetType] }, ... },
  *     overrides:     { '<geologist name>': ['Stone', 'Marble'] }
  *   }
+ *
+ * `removeDepleted` lets the module destroy depleted deposit buildings of
+ * the managed types on the home island, so their grid frees up for new
+ * searches. Deposits that still hold ore are never touched.
  *
  * Per-deposit `max` defaults mirror autoTSO's Deposits.data (user_auto.js
  * 1086-1095) — values shipped against the live host. Adjust per-zone
@@ -36,6 +41,7 @@
     S.modules.geologists.defaultSettings = {
         enabled:       false,
         dispatchDelay: 1500,
+        removeDepleted: false,
 
         deposits: {
             Stone:       { enabled: true, max:  8 },
