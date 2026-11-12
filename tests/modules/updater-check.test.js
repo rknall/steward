@@ -450,3 +450,23 @@ t.test('the boot check still runs after a notice when the last check is old', fu
     assert.strictEqual(s.notes.length, 1);
     assert.strictEqual(s.net.requests.length, 1);
 });
+
+t.test('showOldReleases defaults off and is seeded', function () {
+    var s = setup('0.12.0');
+    assert.strictEqual(s.U.config().showOldReleases, false);
+    s.S.kernel.settings.write('updater', { showOldReleases: 'yes' });
+    assert.strictEqual(s.U.config().showOldReleases, false);
+    var s2 = setup('0.12.0', { config: { checkOnStart: false } });
+    s2.U.seed();
+    var stored = s2.S.kernel.settings.read('updater');
+    assert.strictEqual(stored.showOldReleases, false);
+    assert.strictEqual(stored.checkOnStart, false);
+});
+
+t.test('showOldReleases is on only for a stored true', function () {
+    var s = setup('0.12.0');
+    assert.strictEqual(s.U.showOldReleases(undefined), false);
+    assert.strictEqual(s.U.showOldReleases({}), false);
+    assert.strictEqual(s.U.showOldReleases({ showOldReleases: 'yes' }), false);
+    assert.strictEqual(s.U.showOldReleases({ showOldReleases: true }), true);
+});

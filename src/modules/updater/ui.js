@@ -205,6 +205,12 @@
     // Options card
     // ---------------------------------------------------------------
 
+    // The old-releases toggle label; the Versions empty state quotes it, so both
+    // read it from here.
+    function oldReleasesLabel() {
+        return 'Show versions before ' + U().REPO.firstUpdaterVersion;
+    }
+
     function optionsCard(h) {
         var $card = h.card({ title: 'Update options' });
         $card.append(h.field('Check for updates when the client starts',
@@ -216,6 +222,10 @@
         $card.append(h.field('Show test releases',
             'Adds alpha and beta releases to the Versions list and to update checks.',
             h.toggle({ ns: 'updater', path: 'showPrereleases', label: 'Show test releases' })));
+        var oldLabel = oldReleasesLabel();
+        $card.append(h.field(oldLabel,
+            'They have no updater: after installing one, Steward cannot update itself.',
+            h.toggle({ ns: 'updater', path: 'showOldReleases', label: oldLabel })));
         $card.append(h.field('Settings backups to keep',
             'Older backups of this profile are deleted after each install.',
             h.number({
@@ -278,21 +288,41 @@
         };
     }
 
+    // Releases before the first updater are hidden unless the user opted in; the
+    // running row always stays so an unusual old build still shows where it is.
+    // hiddenOld counts only what the age rule removed, so the empty state can name it.
     function visibleReleases(status, cfg) {
         var showTests = U().showPrereleases(cfg, status.running);
+        var showOld = U().showOldReleases(cfg);
         var out = [];
+        var hiddenOld = 0;
         for (var i = 0; i < status.list.length; i++) {
-            if (showTests || !status.list[i].prerelease) out.push(status.list[i]);
+            var rel = status.list[i];
+            if (rel.prerelease && !showTests) continue;
+            var isRunning = !!status.running && S.kernel.semver.compare(rel.text, status.running) === 0;
+            if (!showOld &&!isRunning && U().predatesUpdater(rel.text)) {
+                hiddenOld++;
+                continue;
+            }
+            out.push(rel);
         }
-        return out;
+        return { list: out, hiddenOld: hiddenOld };
     }
 
     function versionsCard(h, status, cfg) {
         var $card = h.card({ title: 'Versions', meta: 'Settings backups are per profile' });
-        var releases = visibleReleases(status, cfg);
+        var visible = visibleReleases(status, cfg);
+        var releases = visible.list;
         if (!releases.length) {
-            $card.append(h.empty('No versions listed',
-                'Use Check now to load the release list from GitHub.'));
+            if (visible.hiddenOld > 0) {
+                var first = U().REPO.firstUpdaterVersion;
+                $card.append(h.empty('No versions listed', 'Versions before ' + first +
+                    ' are hidden. Turn on "' + oldReleasesLabel() +
+                    '" in Update options to list them.'));
+            } else {
+                $card.append(h.empty('No versions listed',
+                    'Use Check now to load the release list from GitHub.'));
+            }
             return $card;
         }
         var rows = [];
