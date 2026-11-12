@@ -24,7 +24,7 @@ function queue(over) {
             { kind: 'template', id: 't2', templateId: 't2', label: 'Short map', adventure: 'BlackKnights', count: 1 }
         ],
         index: 0, loop: false, passes: 0, pass: 0, early: false,
-        retrain: 'settings', noMap: 'pause', width: 3, skip: 0
+        retrain: 'settings', noMap: 'pause', width: 3, skip: 0, tried: null
     };
     for (var k in (over || {})) if (Object.prototype.hasOwnProperty.call(over, k)) q[k] = over[k];
     return q;
@@ -95,9 +95,17 @@ t.test('normRequest repairs a queue: counts, strings kept, no entries is no queu
     assert.strictEqual(got.passes, 0);
     assert.strictEqual(got.width, 1);
     assert.strictEqual(got.skip, 2);
+    assert.strictEqual(got.tried, null);
     assert.strictEqual(got.retrain, 'bogus');
     assert.strictEqual(got.noMap, '');
     assert.strictEqual(got.loop, false);
+
+    w.st.current().request.queue = queue({ tried: { index: 1.6, pass: 2 } });
+    w.st.save();
+    assert.deepStrictEqual(plain(reload(w).st.current().request.queue.tried), { index: 1, pass: 2 });
+    w.st.current().request.queue = queue({ tried: { index: 3, pass: 0 } });
+    w.st.save();
+    assert.strictEqual(reload(w).st.current().request.queue.tried, null, 'no such entry');
 
     w.st.current().request.queue = queue({ entries: [] });
     w.st.save();
@@ -151,7 +159,7 @@ t.test('queueNext is null when ended or without a queue; stepping over one entry
 
 t.test('enterEntry copies templateId empty for a scenario entry and resets skip', function () {
     var w = W.world({ home: true });
-    var req = request(queue({ skip: 1 }));
+    var req = request(queue({ skip: 1, tried: { index: 2, pass: 0 } }));
     req.finished = 1;
     req.closedAt = 500;
     assert.strictEqual(w.st.enterEntry(req, { index: 1, pass: 0 }), true);
@@ -164,6 +172,7 @@ t.test('enterEntry copies templateId empty for a scenario entry and resets skip'
     assert.strictEqual(req.closedAt, 500, 'the gap after the closed map still holds');
     assert.strictEqual(req.queue.index, 1);
     assert.strictEqual(req.queue.skip, 0);
+    assert.strictEqual(req.queue.tried, null);
     assert.strictEqual(w.st.enterEntry(req, { index: 2, pass: 1 }), true);
     assert.strictEqual(req.templateId, 't2');
     assert.strictEqual(req.queue.pass, 1);
@@ -280,4 +289,18 @@ t.test('queueTarget steps over queue.skip entries and counts the step-overs', fu
     assert.deepStrictEqual(plain(w.st.queueTarget(looped)), { at: { index: 0, pass: 1 }, stepped: 2 });
     req.ended = true;
     assert.deepStrictEqual(plain(w.st.queueTarget(req)), { at: null, stepped: 0 });
+});
+
+t.test('queueTried prefers queue.tried; queueSkipPast counts to past that entry', function () {
+    var w = W.world({ home: true });
+    var req = request(queue());
+    assert.deepStrictEqual(plain(w.st.queueTried(req)), { index: 1, pass: 0 }, 'queueTarget without tried');
+    req.queue.tried = { index: 2, pass: 0 };
+    assert.deepStrictEqual(plain(w.st.queueTried(req)), { index: 2, pass: 0 });
+    assert.strictEqual(w.st.queueSkipPast(req, { index: 1, pass: 0 }), 1);
+    assert.strictEqual(w.st.queueSkipPast(req, { index: 2, pass: 0 }), 2);
+    assert.strictEqual(w.st.queueSkipPast(req, { index: 0, pass: 0 }), null, 'behind the next entry');
+    var endless = request(queue({ loop: true, passes: 0 }));
+    assert.strictEqual(w.st.queueSkipPast(endless, { index: 0, pass: 1 }), 3);
+    assert.strictEqual(w.st.queueSkipPast(endless, { index: 0, pass: 9 }), null, 'bounded walk');
 });

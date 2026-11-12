@@ -35,8 +35,9 @@
  * A request may carry a queue (request.queue; null for a single run): the
  * running copy of a saved queue, taken at start, with each entry's
  * templateId, label, adventure and count already filled in, its position
- * (index, pass), the loop options and skip (the entries a Skip entry at the
- * hand-over steps over). The request's templateId, label, adventure, count,
+ * (index, pass), the loop options, skip (the entries a Skip entry at the
+ * hand-over steps over) and tried (the entry a paused hand-over could not
+ * begin). The request's templateId, label, adventure, count,
  * finished, closedAt and ended always describe the current entry, so the run
  * counters and the series test work unchanged inside a queue. enterEntry()
  * copies an entry's fields into the request as they are; a scenario entry
@@ -673,6 +674,29 @@
         return { at: at, stepped: stepped };
     }
 
+    // The entry a paused hand-over tried: queue.tried, which the hand-over
+    // sets when the entry it reached cannot begin, else queueTarget's. The
+    // two differ when entries with no map were stepped over on the way.
+    function queueTried(req) {
+        var q = req ? req.queue : null;
+        if (q && q.tried && isArray(q.entries) && q.entries[q.tried.index]) return q.tried;
+        return queueTarget(req).at;
+    }
+
+    // The queue.skip that makes the hand-over land past `at`: the step-overs
+    // from the next entry to `at`, plus one. Null when `at` is not on the
+    // way. The walk is bounded, since an endless queue never runs out.
+    function queueSkipPast(req, at) {
+        var pos = queueNext(req);
+        if (!pos || !at) return null;
+        var limit = count(req.queue.skip) + req.queue.entries.length + 1;
+        for (var n = 0; pos && n <= limit; n++) {
+            if (pos.index === at.index && pos.pass === at.pass) return n + 1;
+            pos = queueAt(req, pos);
+        }
+        return null;
+    }
+
     // Makes the entry at `at` the current one: the queue moves there, any
     // pending skip is used up, and the entry's fields become the request's,
     // with no run of it finished yet. closedAt stays, so the gap after the
@@ -686,6 +710,7 @@
         q.index = index;
         q.pass = count(at.pass);
         q.skip = 0;
+        q.tried = null;
         req.templateId = e.templateId;
         req.label = e.label;
         req.adventure = e.adventure;
@@ -1008,6 +1033,13 @@
     // as the single series of its current entry. retrain and noMap stay the
     // strings they were; the queue store owns their values and its readers
     // fall back on its defaults.
+    // The position a paused hand-over tried, or null when it names no entry.
+    function normTried(v, length) {
+        if (!isPlainObject(v)) return null;
+        var index = count(v.index);
+        return index < length ? { index: index, pass: count(v.pass) } : null;
+    }
+
     function normQueue(v) {
         if (!isPlainObject(v)) return null;
         var entries = [];
@@ -1039,7 +1071,8 @@
             retrain: str(v.retrain),
             noMap:   str(v.noMap),
             width:   w !== null && w >= 1 ? Math.floor(w) : 1,
-            skip:    count(v.skip)
+            skip:    count(v.skip),
+            tried:   normTried(v.tried, entries.length)
         };
     }
 
@@ -1734,6 +1767,8 @@
         queueAt:       queueAt,
         queueNext:     queueNext,
         queueTarget:   queueTarget,
+        queueTried:    queueTried,
+        queueSkipPast: queueSkipPast,
         enterEntry:    enterEntry,
         isWaveStep:    isWaveStep,
         partOf:        partOf,

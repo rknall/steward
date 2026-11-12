@@ -44,8 +44,9 @@ ignored, any valid file dropped in is a queue):
 - `noMap`: `pause` (default) or `skip`, see below.
 - A file that cannot be read is listed as a broken entry so it can be deleted.
 
-A queue that fails validation (empty label, label used by another queue,
-missing template or scenario, unknown kind, no entries) does not start.
+A queue that fails validation (empty label, missing template or scenario,
+unknown kind, no entries) does not start. A label used by another queue is
+refused at Save only; Start does not check it.
 
 ## Edit and start
 
@@ -102,13 +103,19 @@ and at home:
   neither a not-observed pause nor a seen map mark): the entry's remaining runs
   are dropped uncounted and the next entry begins. A scenario run paused at
   Produce qualifies.
-- At Next with a broken-entry pause: that entry is stepped over on Resume.
+- At Next with a broken-entry pause: that entry is stepped over and the run
+  resumes by itself, so no separate Resume is needed.
+
+In the first case the next entry must be able to begin. If it cannot (record
+not readable, start check failed), a notice says why and the run stays paused.
 
 ## Status
 
-The status text and title read `<queue label> <k>/<K>[, pass p[/P]]: ` before
-the run text. A queue with an entry left is never shown as settled. The run
-menu keeps one fixed row set for the whole queue (wave rows padded to the
+The status text and title read `<queue label> <k>/<K>[, pass p/P]: ` before
+the run text; the pass part appears only for a looping queue and reads `p/∞`
+without a pass limit. A queue with an entry or pass still to come is never
+settled, so its run file is kept (a restart resumes it) and a new start asks
+before replacing it. The run menu keeps one fixed row set for the whole queue (wave rows padded to the
 widest template entry).
 
 ## Restart
