@@ -255,6 +255,9 @@ var SITES = [
         name: 'Map start', mark: 'map', step: 'StartMap', next: 'Depart', wait: 'map start',
         reason: 'NotObserved', text: /map start sent but not seen/, failure: 'MapFailed', fail: /start map failed/,
         core: function (S) { return [S.core.buffs, 'map']; },
+        // A failed map send goes out once more after the stock shows no map
+        // started (#62).
+        failTries: 2,
         make: function () {
             var w = homeWorld();
             w.auto.map = false;
@@ -446,7 +449,9 @@ SITES.forEach(function (site) {
         assert.ok(w.t - from < orderWait(w), 'no wait before the pause');
     });
 
-    t.test(site.name + ': a send that fails pauses at once, with no second try', function () {
+    var tries = site.failTries || 1;
+    t.test(site.name + ': a send that fails pauses ' +
+            (tries > 1 ? 'after ' + tries + ' tries' : 'at once, with no second try'), function () {
         var w = site.make();
         sendFails(w, site);
         var from = w.t;
@@ -457,7 +462,7 @@ SITES.forEach(function (site) {
         assert.ok(logged(w, new RegExp(site.mark + ' sent')), 'the one try is logged');
         assert.strictEqual(w.H.logs().filter(function (l) {
             return new RegExp(site.mark + ' sent').test(l.args.join(' '));
-        }).length, 1);
+        }).length, tries);
     });
 });
 

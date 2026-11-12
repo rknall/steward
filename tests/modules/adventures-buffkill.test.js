@@ -214,17 +214,49 @@ t.test('buff-only wave: a buff that leaves its camp standing still confirms, wav
     assert.ok(steps.indexOf('0:Confirm') >= 0, 'wave 1 confirmed on the buff alone: ' + steps.join(' '));
 });
 
-t.test('buff-only wave: a buff not seen pauses BuffFailed and sends nothing of wave 2', function () {
+t.test('buff-only wave: a buff not seen is sent once, pauses NotObserved and sends nothing of wave 2', function () {
     var w = buffWorld();
     unseenBuffs(w);
     startRun(w, ['C:/b/w1.txt', 'C:/b/w2.txt']);
     trace(w, 80);
     var r = w.st.run();
     assert.strictEqual(r.status, w.S.RunStatus.Paused, 'status ' + r.status);
-    assert.strictEqual(r.pause.reason, w.S.RunPause.BuffFailed);
-    assert.ok(/buff Fire on .*100/.test(r.pause.message), r.pause.message);
+    assert.strictEqual(r.pause.reason, w.S.RunPause.NotObserved);
+    assert.ok(/buff Fire on .*100.* sent but not seen/.test(r.pause.message), r.pause.message);
     assert.strictEqual(r.waveIndex, 0);
+    assert.strictEqual(w.buffs.length, 1, 'the camp buff went out once, never twice (#63)');
     assert.strictEqual(attacksOf(w).length, 0, 'nothing of wave 2 sent');
+    // The pause holds the line as sent: more passes send nothing.
+    W.ticksFor(w, 120000);
+    play(w);
+    assert.strictEqual(w.buffs.length, 1, 'no send while paused');
+});
+
+t.test('buff-only wave: a buff not seen whose camp is gone counts as the kill, no pause, no resend', function () {
+    var w = buffWorld();
+    killingBuffs(w);
+    unseenBuffs(w);
+    startRun(w, ['C:/b/w1.txt', 'C:/b/w2.txt']);
+    trace(w, 120);
+    assertHandedOver(w);
+    assert.strictEqual(w.buffs.length, 1, 'one buff send');
+    assert.strictEqual(attacksOf(w, '1.1').length, 0, 'the beaten camp is not attacked');
+    assert.strictEqual(attacksOf(w, '1.2').length, 1);
+});
+
+t.test('buff line: a def that allows a retry is still sent once (the executor forces retries 0)', function () {
+    var w = buffWorld();
+    var base = w.S.core.buffs.camp;
+    w.S.core.buffs.camp = function (name, grid) {
+        var def = base(name, grid);
+        def.retries = 5;
+        def.check = function () { return false; };
+        return def;
+    };
+    startRun(w, ['C:/b/w1.txt', 'C:/b/w2.txt']);
+    trace(w, 80);
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Paused);
+    assert.strictEqual(w.buffs.length, 1);
 });
 
 // ---- one wave mixing Buff and Attack lines ------------------------------------

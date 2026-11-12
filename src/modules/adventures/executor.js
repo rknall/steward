@@ -719,8 +719,18 @@
                 continue;
             }
             if (!isAttack) {
+                // A camp buff is never sent twice (#63): a camp it emptied
+                // is its win, otherwise the run pauses with the line still
+                // marked sent, so nothing sends it again before a Resume.
+                if (goneAfterSend(r, l, inv)) continue;
+                if (!res || res.unseen) {
+                    pause(S.RunPause.NotObserved, 'buff ' + (l.name || l.key) + ' on ' + targetText(l) +
+                        ' sent but not seen (' + (res ? res.reason || res.status : 'sent before a reload') +
+                        '); check the camp and the buff stock: Resume sends it again', l, inv);
+                    return true;
+                }
                 pause(S.RunPause.BuffFailed, 'buff ' + (l.name || l.key) + ' on ' + targetText(l) +
-                    ' not seen: ' + (res ? res.reason || res.status : 'sent before a reload'), l, inv);
+                    ' not seen: ' + (res.reason || res.status), l, inv);
                 return true;
             }
             if (res && res.status !== S.ActionResult.Verified) {
@@ -742,6 +752,15 @@
         return false;
     }
 
+    // Whether a line whose sends made no host call has had its tries: the
+    // same bound as an item apply (trips NOT_SENT_MAX), read at call time.
+    function notSentOut(r, l, res) {
+        if (res.reason !== S.core.actions.NOT_SENT) return false;
+        var rec = r.lines && has(r.lines, l.key) ? r.lines[l.key] : null;
+        var max = S.modules.adventures.trips ? S.modules.adventures.trips.NOT_SENT_MAX : 0;
+        return !!rec && typeof rec.notSent === 'number' && rec.notSent >= max;
+    }
+
     function attackStep(r, w, inv) {
         if (resolveSent(r, w, inv)) return;
         var round = ld().currentRound(r, S.WaveStep.Attack);
@@ -753,7 +772,7 @@
             all = false;
             var res = ld().resultOf(round, l.key);
             if (res) {
-                if (ld().unreadable(res)) {
+                if (ld().unreadable(res) && !notSentOut(r, l, res)) {
                     retry = true;
                     continue;
                 }
@@ -894,9 +913,12 @@
         S.kernel.queue.add(PACE_ACTION, params, PACE_MS);
     }
 
+    // A buff line never goes out twice, whatever its def says (#63).
     function lineDef(l) {
-        if (l.kind === S.BattleLine.Buff) return S.core.buffs.camp(l.buffName, l.target);
-        return S.core.specialists.orders.attack(l.key, l.target, l.grid);
+        if (l.kind !== S.BattleLine.Buff) return S.core.specialists.orders.attack(l.key, l.target, l.grid);
+        var def = S.core.buffs.camp(l.buffName, l.target);
+        if (def && typeof def === 'object') def.retries = 0;
+        return def;
     }
 
     // Queue action: sends the next attack or buff line of the wave once its
@@ -952,12 +974,16 @@
         var runId = r.id;
         var key = line.key;
         // The marker is saved before the packet goes out, so a reload right
-        // after the send still knows the line went out.
+        // after the send still knows the line went out. A send that made no
+        // host call (NOT_SENT) gives the marker back, so the line is sent in
+        // a fresh round instead of being taken for one that went out.
         def.send = function (b) {
             var cur = st().run();
+            var was = null;
             if (cur && cur.id === runId) {
                 var rec = lineRec(cur, key);
                 if (rec.sentAt === null) {
+                    was = { sentOnce: rec.sentOnce };
                     rec.sentAt = now();
                     rec.sentOnce = true;
                     st().save();
@@ -966,9 +992,24 @@
                         ' (file: ' + line.timeMs + ')');
                 }
             }
-            return send(b);
+            var res = send(b);
+            if (was && res === S.core.actions.NOT_SENT) {
+                var c = st().run();
+                if (c && c.id === runId) {
+                    var back = lineRec(c, key);
+                    back.sentAt = null;
+                    back.sentOnce = was.sentOnce;
+                    back.notSent = (back.notSent || 0) + 1;
+                    st().save();
+                    S.kernel.log(CATEGORY, 'attack line ' + key + ' not sent (nothing went out)');
+                }
+            }
+            return res;
         };
         ld().attempt(round, key, def, function (result, cur) {
+            // A line has no loader mark, so the round drops unseen; it is put
+            // back here for resolveSent, which tells "not seen" from a failure.
+            if (result.unseen === true && has(round.results, key)) round.results[key].unseen = true;
             if (result.status !== S.ActionResult.Verified) return;
             lineRec(cur, key).seen = true;
             st().save();

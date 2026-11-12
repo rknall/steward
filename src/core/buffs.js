@@ -34,6 +34,8 @@
     var POPULATION_TYPE = 'AddResource';
 
     var BUFF_TIMEOUT_MS = 15000;
+    // A camp buff has no retry, so it gets the window of a send and a retry.
+    var CAMP_TIMEOUT_MS = 2 * BUFF_TIMEOUT_MS;
 
     // GetBuffType() of a buff that boosts the production of one building.
     // Zone (8), skin (4) and military (1) buffs also name buildings as their
@@ -294,23 +296,42 @@
 
     // Camp buff: sent to the grid of the camp it is meant for, never to the
     // player grid. Verified by the stock dropping below the baseline.
+    // Never sent twice: a second buff on a camp the first one already hit
+    // makes the client fail and close (#63). In place of a retry the stock is
+    // watched for CAMP_TIMEOUT_MS, the time a send and its retry had. The
+    // camp is checked in the precheck, right before the only send. As with
+    // an adventure item, the star menu is read once in the precheck and the
+    // send uses that entry; with no usable entry nothing goes out (NOT_SENT).
     function camp(name, grid) {
+        var found = null;
         return {
             label:     'camp buff ' + name + ' -> ' + grid,
             category:  'buffs',
-            timeoutMs: BUFF_TIMEOUT_MS,
+            timeoutMs: CAMP_TIMEOUT_MS,
+            retries:   0,
             precheck: function () {
                 if (!isNum(grid) || !(grid > 0)) return 'no target grid';
-                var n = stock(name, '');
+                found = null;
+                var raw = readEntries();
+                var n = raw ? stockIn(raw, name, '') : null;
                 if (!isNum(n)) return 'buff stock unreadable';
                 if (!(n > 0)) return 'no buff in stock';
                 S.core.buildings.invalidate();
                 var b = S.core.buildings.byGrid(grid);
                 if (!b || !S.core.buildings.isEnemy(b)) return 'no enemy building at grid';
+                found = entryIn(raw, name, '', 0);
                 return null;
             },
             baseline: function () { return { stock: stock(name, '') }; },
-            send: function () { return send(name, '', grid, 0); },
+            send: function () {
+                var e = found;
+                found = null;
+                if (!e || !e.uid) {
+                    S.kernel.warn('buffs', 'camp buff ' + name + ' -> ' + grid + ': not sent, no usable star-menu entry');
+                    return S.core.actions.NOT_SENT;
+                }
+                return sendEntry(e, grid, 0);
+            },
             check: function (base) {
                 var n = stock(name, '');
                 return !!base && isNum(base.stock) && isNum(n) && n < base.stock;
@@ -660,20 +681,45 @@
         return c;
     }
 
+    // Precheck refusals of a map start that only say a read failed: nothing
+    // went out, and a later look may read.
+    var MAP_STOCK_UNREADABLE = 'map stock unreadable';
+    var ADVENTURES_UNREADABLE = 'adventures unreadable';
+
+    // The read a map-start refusal names ('map stock', 'adventure list'), or
+    // null when the refusal is no failed read.
+    function mapReadRefusal(reason) {
+        if (reason === MAP_STOCK_UNREADABLE) return 'map stock';
+        if (reason === ADVENTURES_UNREADABLE) return 'adventure list';
+        return null;
+    }
+
+    // Map stock of one adventure: a number, or null when the star menu
+    // cannot be read.
+    function mapStock(name) {
+        return stock(ADVENTURE_MAP_TYPE, name);
+    }
+
     // Starts an adventure map from the star menu; only on the home island.
     // Verified by one more open adventure of that name or the map stock
-    // dropping below the baseline.
+    // dropping below the baseline. The star menu is read once, in the
+    // precheck, and the send uses that entry (see adventureItem); with no
+    // usable entry nothing goes out (NOT_SENT).
     function map(name) {
+        var found = null;
         return {
             label:     'start map ' + name,
             category:  'buffs',
             timeoutMs: MAP_TIMEOUT_MS,
             precheck: function () {
                 if (S.core.zone.isHome() !== true) return 'not on the home island';
-                var n = stock(ADVENTURE_MAP_TYPE, name);
-                if (!isNum(n)) return 'map stock unreadable';
+                found = null;
+                var raw = readEntries();
+                var n = raw ? stockIn(raw, ADVENTURE_MAP_TYPE, name) : null;
+                if (!isNum(n)) return MAP_STOCK_UNREADABLE;
                 if (!(n > 0)) return 'no map in stock';
-                if (!S.core.adventures.own()) return 'adventures unreadable';
+                if (!S.core.adventures.own()) return ADVENTURES_UNREADABLE;
+                found = entryIn(raw, ADVENTURE_MAP_TYPE, name, 0);
                 return null;
             },
             baseline: function () {
@@ -683,7 +729,15 @@
                     stock: stock(ADVENTURE_MAP_TYPE, name)
                 };
             },
-            send: function () { return send(ADVENTURE_MAP_TYPE, name, PLAYER_GRID, 0); },
+            send: function () {
+                var e = found;
+                found = null;
+                if (!e || !e.uid) {
+                    S.kernel.warn('buffs', 'start map ' + name + ': not sent, no usable star-menu entry');
+                    return S.core.actions.NOT_SENT;
+                }
+                return sendEntry(e, PLAYER_GRID, 0);
+            },
             check: function (base) {
                 if (!base) return false;
                 var list = S.core.adventures.own();
@@ -718,6 +772,8 @@
         population:    population,
         populationStock: populationStock,
         map:          map,
+        mapStock:      mapStock,
+        mapReadRefusal: mapReadRefusal,
         mapCounts:     mapCounts,
         definedNames:  definedNames,
         isSpeedBuff:   isSpeedBuff,
