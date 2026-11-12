@@ -304,6 +304,12 @@
             checked: !!shown(h, 'enabled'),
             label:   'Send geologists'
         })));
+        $card.append(h.field('Remove depleted deposits', 'Frees the grid for new searches', h.toggle({
+            ns:      'geologists',
+            path:    'removeDepleted',
+            checked: !!shown(h, 'removeDepleted'),
+            label:   'Remove depleted deposits'
+        })));
         $card.append(h.field('Delay between sends', null, h.number({
             ns:    'geologists',
             path:  'dispatchDelay',

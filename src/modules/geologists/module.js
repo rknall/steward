@@ -35,6 +35,9 @@
  * dispatch per intended slot the module is "busy" until the queue
  * drains. No second plan() call piles work on top.
  *
+ * With the removeDepleted setting on, plan() also removes depleted deposit
+ * buildings of the managed types, one per tick (see planRemoval).
+ *
  * Mine building / leveling / buffing is intentionally out of v1 scope
  * (see plan: defer to v2 once core/buildings.place() exists). v1 is
  * dispatch-only.
@@ -157,9 +160,64 @@
         return out;
     }
 
+    // Depleted-deposit removal. One removal per plan, spaced by the dispatch
+    // delay, each checked on a later plan: the grid must lose its depleted
+    // building. REMOVE_MISSES unverified removals in a row open the breaker
+    // (same pattern as the specialist send guard) and pause removal.
+    var REMOVE_VERIFY_MS = 30000;
+    var removePending = {};   // grid -> time the command was sent
+    var removeBreaker = S.core.breaker.create({
+        category:   'geologists',
+        label:      'depleted removal',
+        missText:   'removals in a row did not remove their deposit',
+        pausedText: 'depleted-deposit removal is paused',
+        resumeText: 'removal resumes'
+    });
+
+    function removeKey(g) { return String(g); }
+
+    function planRemoval(s, delay) {
+        if (!s || !s.removeDepleted) return;
+        if (!S.core.deposits || !S.core.deposits.depletedManaged) return;
+        var list;
+        try { list = S.core.deposits.depletedManaged(); }
+        catch (e) {
+            S.kernel.warn('geologists', 'depleted list failed:', e);
+            return;
+        }
+        var present = {};
+        var i;
+        for (i = 0; i < list.length; i++) {
+            present[removeKey(S.core.buildings.grid(list[i]))] = true;
+        }
+        var t = Date.now();
+        var waiting = false;
+        for (var k in removePending) {
+            if (!Object.prototype.hasOwnProperty.call(removePending, k)) continue;
+            if (!present[k]) {
+                delete removePending[k];
+                removeBreaker.verify('removal of grid ' + k);
+            } else if (t - removePending[k] >= REMOVE_VERIFY_MS) {
+                delete removePending[k];
+                removeBreaker.miss();
+            } else {
+                waiting = true;
+            }
+        }
+        if (waiting) return;
+        for (i = 0; i < list.length; i++) {
+            var key = removeKey(S.core.buildings.grid(list[i]));
+            if (removePending[key]) continue;
+            if (removeBreaker.admit(1) <= 0) return;
+            S.kernel.queue.add('geologists.removeDepleted', [S.core.buildings.grid(list[i])], delay);
+            return;
+        }
+    }
+
     function plan() {
         var c = S.core.specialists;
         var s = readSettings();
+        planRemoval(s, (s && typeof s.dispatchDelay === 'number') ? s.dispatchDelay : 0);
         if (!S.core.deposits || !S.core.deposits.types) {
             S.kernel.error('geologists', 'core.deposits.types unavailable — bundle order issue?');
             return;
@@ -275,6 +333,26 @@
         if (!S.kernel.settings.read('geologists')) {
             S.kernel.settings.write('geologists', S.modules.geologists.defaultSettings);
         }
+
+        S.kernel.queue.action('geologists.removeDepleted', function (params) {
+            var g = params[0];
+            var s = readSettings();
+            if (!s || !s.removeDepleted) return;
+            if (!S.core.zone.isHome()) return;
+            var b = S.core.buildings.byGrid(g);
+            if (!b || !S.core.deposits.isManagedDepleted(b)) return;
+            try {
+                if (S.core.deposits.removeDepleted(b)) {
+                    removePending[removeKey(g)] = Date.now();
+                    S.kernel.log('geologists', 'removing depleted deposit',
+                                 S.core.buildings.name(b), 'at grid', g);
+                } else {
+                    S.kernel.warn('geologists', 'removal refused for grid', g);
+                }
+            } catch (e) {
+                S.kernel.error('geologists', 'removal threw for grid', g, ':', e);
+            }
+        });
 
         S.kernel.queue.action('geologists.dispatch', function (params) {
             var uidKey = params[0];
