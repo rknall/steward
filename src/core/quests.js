@@ -63,6 +63,11 @@
  * needs an apply-type condition: buffappliedonadventure, onmap or
  * buildingdestroyed naming the item, or the building at the grid. A type-1
  * trigger that names the item itself is skipped there.
+ * itemWant() also takes opts.quest, a full quest name the item is bound to:
+ * only that quest counts, under opts.running it also needs the client's
+ * IsRunning() where present, and when its definition names neither the item
+ * nor the grid's building it counts by the binding (opts.unnamed, an array,
+ * then gets its name).
  *
  * Bundle slot: core, after production.js and before resources.js (core files
  * load in name order). Everything here runs at call time; the top level only
@@ -266,6 +271,13 @@
     // under opts.running.
     function isRunning(q) {
         return modeOf(q) === READ_MODE && isOpenActive(q);
+    }
+
+    // The strict gate for a quest an item is bound to. A binding spends the
+    // item only on that one quest, so the gate also needs the client's own
+    // running flag (IsRunning()) where the client has one.
+    function boundRunning(q) {
+        return isRunning(q) && (typeof q.IsRunning !== 'function' || q.IsRunning() === true);
     }
 
     // The quest's name, or '' when the read throws.
@@ -474,9 +486,18 @@
     // them counts as asking for the item, under the same gate, so a building
     // match can also yield 'done' (its condition closed or its quest finished)
     // where it used to be 'none'.
+    // opts.quest (a full quest name) binds the item to that quest: every other
+    // quest is skipped, so a missing bound quest gives 'none'. Under
+    // opts.running the bound quest also needs the client's IsRunning() where
+    // present. A bound quest whose definition names neither the item nor a
+    // building at the grid counts by the binding, since some conditions
+    // cannot be read: 'open' while it runs (its name goes to opts.unnamed,
+    // when that is an array), 'held' while it waits in the pool, 'done' once
+    // finished. Any value other than a non-empty string means unbound.
     function itemWant(name, targets, opts) {
         opts = opts || {};
         var strict = opts.running === true;
+        var bound = typeof opts.quest === 'string' && opts.quest.length > 0 ? opts.quest : null;
         var qs = readPool();
         if (qs === null) return null;
         var names = [name].concat(targets || []);
@@ -495,13 +516,30 @@
                 if (!strict && modeOf(q) === UNREAD_MODE) continue;
                 var qname = nameOf(q);
                 if (qname.indexOf(MAIN_QUEST_MARK) !== -1) continue;
+                if (bound !== null && qname !== bound) continue;
                 var fin = q.isFinished() === true;
-                var counts = fin || (strict ? isRunning(q) : isOpenActive(q));
+                var gate = strict ? (bound !== null ? boundRunning(q) : isRunning(q)) : isOpenActive(q);
+                var counts = fin || gate;
                 if (!counts && !strict) continue;
                 var def = definition(q).def;
                 if (!def) continue;
                 var cond = itemCondition(def, names, buildings, strict);
-                if (!cond) continue;
+                if (!cond) {
+                    if (bound === null) continue;
+                    // The binding stands in for a condition the definition
+                    // does not show.
+                    if (fin) {
+                        seenDone = true;
+                        continue;
+                    }
+                    if (!counts) {
+                        seenHeld = true;
+                        if (opts.held) opts.held.push({ quest: qname, mode: modeOf(q) });
+                        continue;
+                    }
+                    if (Object.prototype.toString.call(opts.unnamed) === '[object Array]') opts.unnamed.push(qname);
+                    return 'open';
+                }
                 var unmet = !fin && isTriggerOpen(toList(q.mQuestTriggersFinished_vector), cond);
                 if (!counts) {
                     if (!unmet) continue;

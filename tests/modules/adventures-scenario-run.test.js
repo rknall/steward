@@ -37,12 +37,19 @@ var MEDIUM = 'BattleBuffHurt_BuffAd_MediumDynamite';
 var BIG = 'BattleBuffHurt_BuffAd_BigDynamite';
 var STINKY = 'BattleBuffHurt_BuffAd_StinkyPotion';
 var DECOMP = 'BattleBuffHurt_BuffAd_Decomposer';
+var POISON = 'BattleBuffHurt_BuffAd_Poison';
+var SHOVEL = 'BattleBuffHurt_BuffAd_Shovel1';
+var SCHOOL = 'ChangeSkin_BuffAd_SchoolKit';
+var NOBLE = 'ChangeSkin_BuffAd_NobleResidenceKit';
+var TAVERN = 'ChangeSkin_BuffAd_TavernKit1';
+var RESID = 'ChangeSkin_BuffAd_ResidenceKit';
 
 var COST = [{ name_string: 'Wood', amount: 2 }];
 
 function items() {
     var out = {};
-    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT, MEDIUM, BIG, STINKY, DECOMP].forEach(function (b) {
+    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT, MEDIUM, BIG, STINKY, DECOMP,
+        POISON, SHOVEL, SCHOOL, NOBLE, TAVERN, RESID].forEach(function (b) {
         out[b] = { group: '0', yield: 1, costs: COST };
     });
     return out;
@@ -1168,35 +1175,202 @@ t.test('Apply: a stock-capped grid with no building name stays open and the run 
         JSON.stringify(transitions(w)));
 });
 
-// ---- a quest that only asks to make the items ---------------------------------------
+// ---- items bound to the quest they are for ----------------------------------------
 
-// Storm Recovery trip 3: the potions go to ruins; the running SubQuest03 only
-// asks to own 11 of each (and to pick 11 mushrooms and herbs elsewhere).
-var RUINS = {
-    id: 'ruins_test', label: 'Ruins (test)',
-    trips: [{ items: [{ buff: STINKY, grids: [5884, 5614] }, { buff: DECOMP, grids: [2342, 1880] }] }, {}]
+// Storm Recovery trip index 2 as scenarios/storm_recovery.json has it. Every
+// grid is a ruin; SubQuest04 asks for the ruins to be gone (onmap), so the
+// grid's building alone also matches the kits that SubQuest05 asks for later.
+var SQ4 = 'Buff_Adv_StormRecovery_SubQuest04';
+var SQ5 = 'Buff_Adv_StormRecovery_SubQuest05';
+var STORM3 = {
+    id: 'storm3_test', label: 'Storm trip 3 (test)',
+    trips: [{}, {}, { items: [
+        { buff: POISON, grids: [5884, 3988, 3387, 2150, 1880, 1935], amount: 20 },
+        { buff: SHOVEL, grids: [1880, 2424, 3387, 3988, 5884, 2342, 1935], amount: 16 },
+        { buff: STINKY, grids: [5884, 5614, 3321, 2150, 1935], amount: 11, quest: SQ4 },
+        { buff: DECOMP, grids: [2342, 1880, 2424, 3988], amount: 11, quest: SQ4 },
+        { buff: SCHOOL, grids: [5614], quest: SQ5 },
+        { buff: NOBLE, grids: [5884, 3988], quest: SQ5 },
+        { buff: TAVERN, grids: [3387, 2342], quest: SQ5 },
+        { buff: RESID, grids: [3321, 2424, 2150, 1880], quest: SQ5 }
+    ] }, {}]
 };
+var RUIN_AT = { 2150: 'BuffAd_Ruin_01', 2424: 'BuffAd_Ruin_01', 3321: 'BuffAd_Ruin_01', 3387: 'BuffAd_Ruin_01',
+    2342: 'BuffAd_Ruin_02', 3988: 'BuffAd_Ruin_02', 5884: 'BuffAd_Ruin_02',
+    1880: 'BuffAd_Ruin_03', 1935: 'BuffAd_Ruin_03', 5614: 'BuffAd_Ruin_04' };
+var SITE = 'BuffAd_Site';
+var DESTROY = [POISON, SHOVEL, STINKY, DECOMP];
+var KITS = [SCHOOL, NOBLE, TAVERN, RESID];
+// What each ruin takes of each destroy item; per item it sums to the trip total.
+var STORM3_NEED = {};
+STORM3_NEED[POISON] = { 5884: 4, 3988: 4, 3387: 3, 2150: 3, 1880: 3, 1935: 3 };
+STORM3_NEED[SHOVEL] = { 1880: 3, 2424: 2, 3387: 2, 3988: 3, 5884: 2, 2342: 2, 1935: 2 };
+STORM3_NEED[STINKY] = { 5884: 3, 5614: 2, 3321: 2, 2150: 2, 1935: 2 };
+STORM3_NEED[DECOMP] = { 2342: 3, 1880: 3, 2424: 2, 3988: 3 };
+var STORM3_STOCK = {};
+STORM3_STOCK[POISON] = 20;
+STORM3_STOCK[SHOVEL] = 16;
+STORM3_STOCK[STINKY] = 11;
+STORM3_STOCK[DECOMP] = 11;
+STORM3_STOCK[SCHOOL] = 1;
+STORM3_STOCK[NOBLE] = 2;
+STORM3_STOCK[TAVERN] = 2;
+STORM3_STOCK[RESID] = 4;
 
-t.test('Apply: a running produce-only quest never gets Stinky Potion or Decomposer', function () {
-    var w = scenWorld({
-        quests: [{ key: 'q3', produce: [STINKY, DECOMP], collect: ['BuildingStinkyMushroom', 'BuildingGlowingHerbs'] },
-            { key: 'q9', name: 'Final', last: true }],
-        gridNeed: {},
-        world: { gridBuildings: { 5884: 'BuffAd_Ruin_02', 5614: 'BuffAd_Ruin_04', 2342: 'BuffAd_Ruin_02',
-            1880: 'BuffAd_Ruin_03', 1215: 'BuildingStinkyMushroom', 2146: 'BuildingGlowingHerbs' } }
+// SubQuest05, the kits quest: the four kits with their counts and 8 unnamed
+// triggers; o is merged in (mode, running, unread).
+function kitQuest(o) {
+    var applied = {};
+    applied[TAVERN] = 2;
+    applied[RESID] = 4;
+    applied[NOBLE] = 2;
+    applied[SCHOOL] = 1;
+    var q = { key: 'q5', name: SQ5, applied: applied, extra: 8 };
+    for (var k in (o || {})) if (Object.prototype.hasOwnProperty.call(o, k)) q[k] = o[k];
+    return q;
+}
+
+function tookOf(w, buff) {
+    return sendsTo(w, buff).reduce(function (n, s) { return n + s.took; }, 0);
+}
+
+function destroyDone(w) {
+    return DESTROY.every(function (b) { return tookOf(w, b) >= STORM3_STOCK[b]; });
+}
+
+// The run at Apply of trip index 2 with SubQuest04 running and every ruin
+// standing. w.s3 records what the map hook saw.
+function storm3() {
+    var need = {};
+    DESTROY.forEach(function (b) {
+        Object.keys(STORM3_NEED[b]).forEach(function (g) { need[b + ':' + g] = STORM3_NEED[b][g]; });
     });
-    w.setStock(STINKY, 20);
-    w.setStock(DECOMP, 20);
-    onIsland(w, record(w, RUINS), 0);
-    passesFor(w, 120000);
+    var w = scenWorld({
+        quests: [{ key: 'q4', name: SQ4, onmap: ['BuffAd_Ruin_01', 'BuffAd_Ruin_02', 'BuffAd_Ruin_03', 'BuffAd_Ruin_04'] },
+            { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need, world: { gridBuildings: plain(RUIN_AT) }
+    });
+    Object.keys(STORM3_STOCK).forEach(function (b) { w.setStock(b, STORM3_STOCK[b]); });
+    onIsland(w, record(w, STORM3), 2);
+    w.s3 = { busy: [], holdAt: null, afterHold: null, ruin02Stood: false };
+    return w;
+}
+
+// The map's side of the trip: a ruin turns into a building site once every
+// destroy item owed there took its share, and SubQuest04 finishes once no ruin
+// is left. The 3988 ruin stands one pass longer than it is due, so one Apply
+// pass sees the Decomposer done while Ruin_02 still stands (17:00:53).
+function stormMap(w2) {
+    var s = w2.s3;
+    var b = w2.st.current().busy;
+    if (b && b.text) s.busy.push(b.text);
+    if (s.holdAt !== null && s.afterHold === null) {
+        s.afterHold = plain(w2.itemSends.slice(s.holdAt));
+        s.ruin02Stood = w2.gridBuildings[3988] === 'BuffAd_Ruin_02';
+    }
+    Object.keys(RUIN_AT).forEach(function (g) {
+        if (w2.gridBuildings[g] !== RUIN_AT[g]) return;
+        var owed = DESTROY.some(function (it) {
+            var k = it + ':' + g;
+            return typeof w2.gridNeed[k] === 'number' && w2.gridNeed[k] > 0;
+        });
+        if (owed) return;
+        if (g === '3988' && s.holdAt === null) {
+            s.holdAt = w2.itemSends.length;
+            return;
+        }
+        if (g === '3988' && s.afterHold === null) return;
+        w2.gridBuildings[g] = SITE;
+    });
+    var left = Object.keys(RUIN_AT).some(function (g) { return w2.gridBuildings[g] === RUIN_AT[g]; });
+    (w2.quests || []).forEach(function (q) { if (q.key === 'q4' && !left) q.finished = true; });
+}
+
+function claimedQ4(w) {
+    return w.claims.some(function (c) { return c.key === 'q4'; }) &&
+        !(w.quests || []).some(function (q) { return q.key === 'q4'; });
+}
+
+// storm3 driven until the destroy items are done and SubQuest04 is claimed.
+function stormDestroyed() {
+    var w = storm3();
+    drive(w, { max: 600, on: stormMap, until: function (w2) { return destroyDone(w2) && claimedQ4(w2); } });
+    assert.ok(destroyDone(w), 'destroy items done: ' + JSON.stringify(DESTROY.map(function (b) { return tookOf(w, b); })));
+    assert.ok(claimedQ4(w), 'SubQuest04 claimed');
     assertStep(w, 'Apply');
-    assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
-    assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_StinkyPotion/), logLines(w).join('\n'));
-    w.quests.push({ key: 'q4', name: 'Buff_Adv_StormRecovery_SubQuest04', item: STINKY, grids: [5884, 5614] });
-    passesFor(w, 120000);
-    assert.deepStrictEqual(sentTo(w, STINKY), [5884, 5614]);
-    assert.strictEqual(sendsTo(w, DECOMP).length, 0, 'Decomposer still waits');
-    assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_Decomposer/), logLines(w).join('\n'));
+    return w;
+}
+
+function kitSends(w) {
+    return w.itemSends.filter(function (s) { return KITS.indexOf(s.buff) >= 0; });
+}
+
+function assertNoKitMark(w) {
+    var r = w.st.run();
+    STORM3.trips[2].items.forEach(function (it) {
+        if (KITS.indexOf(it.buff) < 0) return;
+        it.grids.forEach(function (g) {
+            var m = (r.marks || {})[w.S.modules.adventures.trips.applyMark(r, it.buff, g)];
+            assert.ok(!(m && m.seen), it.buff + ' -> ' + g + ' is not marked');
+        });
+    });
+}
+
+t.test('Apply: Storm trip 3 sends the destroy items during SubQuest04 and holds the kits', function () {
+    var w = stormDestroyed();
+    drive(w, { max: 30, on: stormMap });
+    var s = w.s3;
+    assert.strictEqual(kitSends(w).length, 0, 'no kit sent: ' + JSON.stringify(plain(kitSends(w))));
+    DESTROY.forEach(function (b) { assert.strictEqual(tookOf(w, b), STORM3_STOCK[b], b + ' trip total'); });
+    assert.ok(!logged(w, /quest no longer wants ChangeSkin_/), logLines(w).join('\n'));
+    assertNoKitMark(w);
+    var re = /waiting for quest Buff_Adv_StormRecovery_SubQuest05 for ChangeSkin_/;
+    assert.ok(s.busy.some(function (x) { return re.test(x); }) || logged(w, re), s.busy.join('\n'));
+    // 17:00:53: the Decomposer at 3988 is the last destroy send, and Ruin_02
+    // still stands there for one pass after it.
+    var last = sendsTo(w, DECOMP).filter(function (x) { return x.took > 0; }).pop();
+    assert.strictEqual(last.grid, 3988, 'the 3988 Decomposer goes last');
+    assert.ok(s.afterHold !== null, 'a pass ran with the 3988 ruin due');
+    assert.ok(s.ruin02Stood, 'Ruin_02 still stood at 3988 for that pass');
+    assert.ok(!s.afterHold.some(function (x) { return x.buff === NOBLE; }), 'no Noble kit while Ruin_02 stands');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: the kits go once SubQuest05 runs, one per grid, after the settle', function () {
+    var w = stormDestroyed();
+    w.quests.push(kitQuest({ unread: true }));
+    var readAt = passUntilStamped(w, function () {
+        return w.reads.some(function (x) { return x.key === 'q5'; }) &&
+            !w.quests.some(function (q) { return q.key === 'q5' && q.unread; });
+    }, 120000);
+    drive(w, { max: 200, on: stormMap, until: at('Trip') });
+    assertStep(w, 'Trip');
+    var kits = kitSends(w);
+    assert.ok(kits.length > 0, 'kits sent');
+    kits.forEach(function (x) {
+        assert.ok(x.t >= readAt + settleMs(w), x.buff + ' -> ' + x.grid + ' at ' + x.t + ', inside the settle of ' + readAt);
+    });
+    STORM3.trips[2].items.forEach(function (it) {
+        if (KITS.indexOf(it.buff) < 0) return;
+        assert.deepStrictEqual(sentTo(w, it.buff), it.grids, it.buff + ' once per grid');
+    });
+    assert.deepStrictEqual(sentTo(w, NOBLE), [5884, 3988]);
+    assert.ok(!logged(w, /quest no longer wants ChangeSkin_/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a bound kit waits while SubQuest05 is in the pool but not running', function () {
+    [{ mode: 12 }, { running: false }].forEach(function (o) {
+        var w = stormDestroyed();
+        w.quests.push(kitQuest(o));
+        passesFor(w, 120000);
+        assertStep(w, 'Apply');
+        assert.strictEqual(kitSends(w).length, 0, JSON.stringify(o) + ': no kit sent');
+        assertNoKitMark(w);
+        var mode = typeof o.mode === 'number' ? o.mode : 3;
+        var re = new RegExp('ChangeSkin_BuffAd_\\w+: waiting for quest ' + SQ5 + ' to be running, mode ' + mode);
+        assert.ok(logged(w, re), JSON.stringify(o) + '\n' + logLines(w).join('\n'));
+    });
 });
 
 // ---- production -----------------------------------------------------------------

@@ -46,28 +46,34 @@
         {
           "buff": "BattleBuffHurt_BuffAd_StinkyPotion",
           "grids": [5884, 5614, 3321, 2150, 1935],
-          "amount": 11
+          "amount": 11,
+          "quest": "Buff_Adv_StormRecovery_SubQuest04"
         },
         {
           "buff": "BattleBuffHurt_BuffAd_Decomposer",
           "grids": [2342, 1880, 2424, 3988],
-          "amount": 11
+          "amount": 11,
+          "quest": "Buff_Adv_StormRecovery_SubQuest04"
         },
         {
           "buff": "ChangeSkin_BuffAd_SchoolKit",
-          "grids": [5614]
+          "grids": [5614],
+          "quest": "Buff_Adv_StormRecovery_SubQuest05"
         },
         {
           "buff": "ChangeSkin_BuffAd_NobleResidenceKit",
-          "grids": [5884, 3988]
+          "grids": [5884, 3988],
+          "quest": "Buff_Adv_StormRecovery_SubQuest05"
         },
         {
           "buff": "ChangeSkin_BuffAd_TavernKit1",
-          "grids": [3387, 2342]
+          "grids": [3387, 2342],
+          "quest": "Buff_Adv_StormRecovery_SubQuest05"
         },
         {
           "buff": "ChangeSkin_BuffAd_ResidenceKit",
-          "grids": [3321, 2424, 2150, 1880]
+          "grids": [3321, 2424, 2150, 1880],
+          "quest": "Buff_Adv_StormRecovery_SubQuest05"
         }
       ]
     },

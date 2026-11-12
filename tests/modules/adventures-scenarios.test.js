@@ -37,7 +37,7 @@ t.test('normTrips accepts the approved shape and visit-only trips', function () 
     var out = s.sc.normTrips(twins().trips);
     assert.strictEqual(out.length, 3);
     assert.deepStrictEqual(plain(out[0]), { items: [] });
-    assert.deepStrictEqual(plain(out[1].items[0]), { buff: 'BattleBuffHurt_Bridge', grids: [3], amount: null });
+    assert.deepStrictEqual(plain(out[1].items[0]), { buff: 'BattleBuffHurt_Bridge', grids: [3], amount: null, quest: null });
     assert.strictEqual(out[2].items[0].amount, 10);
 });
 
@@ -60,6 +60,24 @@ t.test('normTrips rejects bad shapes', function () {
     ];
     for (var i = 0; i < bad.length; i++) {
         assert.strictEqual(s.sc.normTrips(bad[i]), null, 'case ' + i);
+    }
+});
+
+t.test('normTrips keeps a trimmed quest binding and rejects a bad one', function () {
+    var s = setup();
+    var o = twins();
+    o.trips[1].items[0].quest = '  Buff_Adv_StormRecovery_SubQuest05 ';
+    var out = s.sc.normTrips(o.trips);
+    assert.strictEqual(out[1].items[0].quest, 'Buff_Adv_StormRecovery_SubQuest05');
+    assert.strictEqual(out[1].items[1].quest, null);
+
+    var bad = ['', '  ', 5, {}, []];
+    for (var i = 0; i < bad.length; i++) {
+        var b = twins();
+        b.trips[1].items[0].quest = bad[i];
+        assert.strictEqual(s.sc.normTrips(b.trips), null, 'case ' + i);
+        var r = s.sc.fromText('a', 'p', text(b), 'file');
+        assert.ok(/has a bad quest/.test(r.error), 'case ' + i + ' reason');
     }
 });
 

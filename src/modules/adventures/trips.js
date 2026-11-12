@@ -41,7 +41,12 @@
  * goes home for more and comes back to the same trip, rather than wait on
  * items no running quest wants yet. A send that made no host call (nothing
  * went out) keeps its grid open and is tried again after NOT_SENT_RETRY_MS,
- * up to NOT_SENT_MAX times per grid, then pauses.
+ * up to NOT_SENT_MAX times per grid, then pauses. An item with a quest
+ * (item.quest) is wanted only by that quest, which must also pass the
+ * client's own IsRunning(): the grid's building alone cannot tell which
+ * quest the item is for. Apply decides nothing within QUEST_SETTLE_MS of a
+ * quest read or claim on the island, so the next quest has appeared before
+ * any item is sent or any grid is closed.
  *
  * Trip lets the quests update (READ_LAG_MS from the step entry and
  * QUEST_SETTLE_MS from the last verified quest read or claim on the island),
@@ -141,6 +146,19 @@
         rs.tripNote = tag;
         var lines = typeof text === 'string' ? [text] : text;
         for (var i = 0; i < lines.length; i++) log(lines[i]);
+    }
+
+    // Logs once per run, trip and buff that the bound quest names no condition
+    // for the item, so the send rests on the scenario binding alone. A slot of
+    // its own: noteOnce holds one fact and the Apply pass logs others.
+    // Memory only, like noteOnce.
+    function bindNote(r, buff, quest) {
+        var rs = st().current();
+        if (!rs.bindNotes) rs.bindNotes = {};
+        var key = r.id + ':' + r.trip + ':' + buff;
+        if (rs.bindNotes[key]) return;
+        rs.bindNotes[key] = true;
+        log('quest ' + quest + ' names no condition for ' + buff + '; applying by the scenario binding');
     }
 
     // ---- Marks --------------------------------------------------------------
@@ -467,13 +485,28 @@
         return bound - gridTaken(r, item.buff, grid);
     }
 
-    // itemWant under the strict gate, for a send of buff to grid; the one place
-    // that composes the gate call. held gets the quests that want the item but
-    // are not running yet. Apply runs only while the run's island is viewed,
-    // so the building at grid is read in the viewed zone.
-    function want(r, buff, grid, held) {
-        return S.core.quests.itemWant(buff, S.core.buffs.targetsOf(buff),
-            { running: true, held: held, buildings: gridBuildings(r, grid) });
+    // itemWant under the strict gate, for a send of the item to grid; the one
+    // place that composes the gate call. held gets the quests that want the
+    // item but are not running yet. Apply runs only while the run's island is
+    // viewed, so the building at grid is read in the viewed zone. An item with
+    // a quest is asked of that quest only; when it names no condition for the
+    // item the binding stands in for one, and that is logged once.
+    function want(r, item, grid, held) {
+        var un = [];
+        var res = S.core.quests.itemWant(item.buff, S.core.buffs.targetsOf(item.buff),
+            { running: true, held: held, buildings: gridBuildings(r, grid),
+                quest: item.quest || null, unnamed: un });
+        if (un.length) bindNote(r, item.buff, un[0]);
+        return res;
+    }
+
+    // The trip item of buff, for a pending mark that holds only the buff: the
+    // first match (a trip lists each buff once), else an unbound stand-in.
+    function itemOf(items, buff) {
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].buff === buff) return items[i];
+        }
+        return { buff: buff, quest: null };
     }
 
     // The quest objects collect clicks on a scenario island (running quests
@@ -636,7 +669,7 @@
             var s = ld().staleMark(r, pending[i], 'item ' + pp.buff + ' -> ' + pp.grid);
             if (s === 'wait') return;
             if (s === 'stale') {
-                var w = want(r, pp.buff, Number(pp.grid), null);
+                var w = want(r, itemOf(items, pp.buff), Number(pp.grid), null);
                 if (w === null) {
                     ld().waitRead(r, 'quests');
                     return;
@@ -660,8 +693,16 @@
 
         closeFinished(r, items, openOf, pending);
 
+        // A quest read or claimed here shows the next quest some seconds
+        // later; until then a want read could send to the wrong quest or
+        // close a grid for good, so nothing is decided.
+        if (questSettling(r)) {
+            ld().waitBusy(r, null, 'waiting for the quests to settle after a quest read or claim');
+            return;
+        }
+
         var target = null;
-        var waitFor = null;
+        var waitItem = null;
         var held = [];
         var shorts = [];
         // Grids an earlier out-of-stock item still owes: a later item on the
@@ -679,7 +720,7 @@
             var skipped = 0;
             var doneHere = {};
             for (g = 0; g < openOf[i].length; g++) {
-                var w2 = want(r, buff, openOf[i][g], held);
+                var w2 = want(r, items[i], openOf[i][g], held);
                 if (w2 === 'done') {
                     ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
                     doneHere[openOf[i][g]] = true;
@@ -717,7 +758,7 @@
                 }
                 continue;
             }
-            if (waitFor === null) waitFor = buff;
+            if (waitItem === null) waitItem = items[i];
         }
 
         // Out of a wanted item and nothing else can go: home for more now,
@@ -738,21 +779,28 @@
         }
 
         if (!target) {
-            if (waitFor === null) {
+            if (waitItem === null) {
                 st().go(RS.Trip, 'items applied');
                 return;
             }
             // The watcher reads unread quests meanwhile, so they come to run.
             if (held.length) {
                 var ht = heldText(held);
-                noteOnce(r, 'held:' + ht, waitFor + ': ' + ht);
+                noteOnce(r, 'held:' + ht, waitItem.buff + ': ' + ht);
             }
             var q = ld().quietClock(r, questsQuiet(), 'applyClock');
-            ld().waitBusy(r, null, 'waiting for a quest that wants ' + waitFor + ', ' +
-                S.modules.adventures.away.quietText(q, APPLY_QUIET_MS));
+            var wq = waitItem.quest || null;
+            var qt = S.modules.adventures.away.quietText(q, APPLY_QUIET_MS);
+            ld().waitBusy(r, null, wq ?
+                'waiting for quest ' + wq + ' for ' + waitItem.buff + ', ' + qt :
+                'waiting for a quest that wants ' + waitItem.buff + ', ' + qt);
             if (q.ms < APPLY_QUIET_MS) return;
-            st().pause(S.RunPause.NotObserved, 'no open quest wants ' + waitFor + ' after ' +
-                Math.round(APPLY_QUIET_MS / 60000) + ' min; check the quest book, then Resume');
+            var mins = Math.round(APPLY_QUIET_MS / 60000);
+            st().pause(S.RunPause.NotObserved, wq ?
+                'quest ' + wq + ' does not want ' + waitItem.buff + ' after ' + mins +
+                    ' min; check the quest book, then Resume' :
+                'no open quest wants ' + waitItem.buff + ' after ' + mins +
+                    ' min; check the quest book, then Resume');
             return;
         }
 
