@@ -1162,6 +1162,21 @@ t.test('Horseshoe: a reload after the send sends it at most once', function () {
     assert.strictEqual(speeds().length, 1);
 });
 
+t.test('StartBuffs: a buff in stock goes out once and the run goes on', function () {
+    var w = homeWorld();
+    onIsland(w);
+    w.stock.push({ type: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', resource: '', amount: 1, uid: 'bv' });
+    series(w, { step: w.S.RunStep.StartBuffs, zoneId: ZONE, speedBuff: 'SpeedBuffNone',
+        run: { startBuffs: ['PropagationBuff_AdventureZoneTravelBoost_BlackTree'] } });
+    function sent() { return w.buffActions.filter(function (b) { return b.type === 'PropagationBuff_AdventureZoneTravelBoost_BlackTree'; }); }
+    tick(w);
+    play(w, function () { return sent().length === 1; });
+    reload(w);
+    tick(w);
+    assert.notStrictEqual(w.st.run().step, w.S.RunStep.StartBuffs);
+    assert.strictEqual(sent().length, 1);
+});
+
 // ---- 11. Waves and the watcher ---------------------------------------------------
 
 t.test('waves: hand over to PackStar and reach Clear; the watcher claims a non-last quest and never the last', function () {

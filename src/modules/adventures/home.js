@@ -1043,6 +1043,7 @@
             waveIndex:   0,
             step:        S.RunStep.Muster,
             speedBuff:   r.speedBuff,
+            startBuffs:  r.startBuffs,
             // A series keeps the start's switch, so a template edit mid-series
             // does not change the remaining runs.
             starAll:     r.starAll,

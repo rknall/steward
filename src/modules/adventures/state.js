@@ -123,13 +123,15 @@
 
     // The options that switch a row off, as named in the table below. A
     // template switches off the horseshoe, retraining and sending all to the
-    // star on arrival (its starAll switch). The run kind switches off the
+    // star on arrival (its starAll switch); with no startBuffs the start buffs
+    // row is off too. The run kind switches off the
     // rest: a scenario run sends no generals, so it skips the OPT_GENERALS
     // rows (and the horseshoe, the star and retraining, which need generals),
     // and a template run skips the OPT_SCENARIO rows.
     var OPT_HORSESHOE = 'horseshoe';
     var OPT_RETRAIN = 'retrain';
     var OPT_STARALL = 'starAll';
+    var OPT_STARTBUFFS = 'startBuffs';
     var OPT_GENERALS = 'generals';
     var OPT_SCENARIO = 'scenario';
 
@@ -166,6 +168,7 @@
         ['Depart',     'RunDepart',     HOME,      'Home',       'Send generals',              OPT_GENERALS],
         ['Jump',       'RunJump',       ANY,       'Travel',     'Jump to the map',            ''],
         ['Arrive',     'RunArrive',     ADVENTURE, 'Travel',     'Wait for all generals',      OPT_GENERALS,  true],
+        ['StartBuffs', 'RunStartBuffs', ADVENTURE, 'Travel',     'Start buffs',                OPT_STARTBUFFS],
         ['Apply',      'RunApply',      ADVENTURE, 'Travel',     'Apply items',                OPT_SCENARIO],
         ['Pickups',    'RunPickups',    ADVENTURE, 'Travel',     'Pick up items',              OPT_GENERALS],
         ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       OPT_STARALL],
@@ -260,6 +263,16 @@
 
     function str(v) {
         return typeof v === 'string' ? v : '';
+    }
+
+    // The non-empty strings of a list ([] for anything else).
+    function strList(v) {
+        var out = [];
+        if (!isArray(v)) return out;
+        for (var i = 0; i < v.length; i++) {
+            if (typeof v[i] === 'string' && v[i] !== '' && out.indexOf(v[i]) === -1) out.push(v[i]);
+        }
+        return out;
     }
 
     function num(v) {
@@ -489,7 +502,7 @@
         if (!r) return false;
         if (isScenario(r)) {
             return option === OPT_GENERALS || option === OPT_STARALL ||
-                option === OPT_HORSESHOE || option === OPT_RETRAIN;
+                option === OPT_HORSESHOE || option === OPT_RETRAIN || option === OPT_STARTBUFFS;
         }
         return option === OPT_SCENARIO;
     }
@@ -504,6 +517,7 @@
         if (kindOff(r, option)) return true;
         if (option === OPT_HORSESHOE) return r.speedBuff === S.SpeedBuffChoice.None;
         if (option === OPT_STARALL) return r.starAll === false;
+        if (option === OPT_STARTBUFFS) return !r.startBuffs || !r.startBuffs.length;
         if (option === OPT_RETRAIN) {
             var a = S.modules.adventures;
             return !(a.retrainOn && a.retrainOn()) ||
@@ -786,14 +800,16 @@
 
     // The only literal of the run object. start holds the facts fixed at
     // start: { id, templateId, label, adventure, zoneId, paths, loadoutPath,
-    // loadoutKeys, loadoutNames, waveIndex, speedBuff, starAll } and
+    // loadoutKeys, loadoutNames, waveIndex, speedBuff, startBuffs, starAll } and
     // optionally the first step (Gate when it is no step); every progress
     // field takes its start value. start may be omitted for the default shape.
     //
     // paths is the template's wave list in run order: battle file paths and
     // template step entries (plain objects, see steps.js) mixed, and
     // waveIndex indexes that mixed list. speedBuff is the template's choice
-    // as written and is resolved when it is used. starAll is the template's
+    // as written and is resolved when it is used. startBuffs is the template's
+    // list of zone buffs to apply on arrival when in stock ([]: none). starAll
+    // is the template's
     // switch for sending all generals to the star on arrival; only an explicit
     // false turns it off, so a template or run file without it keeps the old
     // behaviour, and every later run of the series copies it on. loadoutNames
@@ -838,6 +854,7 @@
             loadoutNames: normNames(s.loadoutNames),
             waveIndex:   count(s.waveIndex),
             speedBuff:   str(s.speedBuff),
+            startBuffs:  strList(s.startBuffs),
             starAll:     s.starAll !== false,
             scenarioId:  str(s.scenarioId),
             trips:       isArray(s.trips) ? s.trips.slice(0) : [],
@@ -1046,6 +1063,7 @@
             loadoutNames: normNames(v.loadoutNames),
             waveIndex:   count(v.waveIndex),
             speedBuff:   str(v.speedBuff),
+            startBuffs:  strList(v.startBuffs),
             starAll:     v.starAll !== false,
             scenarioId:  scenarioId,
             trips:       trips,

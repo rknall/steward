@@ -173,7 +173,7 @@ t.test('marks: Muster', function () {
     assert.strictEqual(list[1].label, 'Produce items');
     assert.strictEqual(list[2].label, 'Check generals and files');
     // A template run has no items to produce or apply, so those rows are skipped.
-    var scenarioRows = ['Produce items', 'Apply items', 'Quests and pick-ups'];
+    var scenarioRows = ['Produce items', 'Apply items', 'Quests and pick-ups', 'Start buffs'];
     list.slice(1).forEach(function (r) {
         assert.strictEqual(r.mark, scenarioRows.indexOf(r.label) >= 0 ? 'skip' : 'todo', r.label);
     });
@@ -226,7 +226,7 @@ t.test('marks: Done marks every row done, the not-used ones stay skipped', funct
     assert.strictEqual(w.st.run().status, w.S.RunStatus.Done);
     flat(w).forEach(function (r) {
         var skipped = r.label === 'Count lost troops' || r.label === 'Retrain' || r.label === 'Produce items' ||
-            r.label === 'Apply items' || r.label === 'Quests and pick-ups';
+            r.label === 'Apply items' || r.label === 'Quests and pick-ups' || r.label === 'Start buffs';
         if (skipped) assert.strictEqual(r.mark, 'skip', r.label);
         else assert.strictEqual(r.mark, 'done', r.label);
     });

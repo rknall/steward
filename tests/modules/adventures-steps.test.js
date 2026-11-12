@@ -210,6 +210,21 @@ t.test('templates: toFile and fromFile round trip items and starAll false', func
     assert.strictEqual(back.id, 't1');
 });
 
+t.test('templates: startBuffs round trip, dedupe and reject unknown names', function () {
+    var s = setup();
+    var rec = s.tpl.normalize({ label: 'L', adventure: 'adv', loadout: 'l', waves: ['w.txt'],
+        startBuffs: ['PropagationBuff_AdventureZoneTravelBoost_BlackTree', 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', '', 4] });
+    same(rec.startBuffs, ['PropagationBuff_AdventureZoneTravelBoost_BlackTree']);
+    same(s.tpl.fromFile('t1', 'p', s.tpl.toFile(rec)).startBuffs, ['PropagationBuff_AdventureZoneTravelBoost_BlackTree']);
+    same(s.tpl.normalize({}).startBuffs, []);
+    function bad() {
+        return s.tpl.validate(rec).filter(function (p) { return p.field === 'startBuffs'; });
+    }
+    assert.strictEqual(bad().length, 0);
+    rec.startBuffs = ['nope'];
+    assert.strictEqual(bad().length, 1);
+});
+
 t.test('templates: a file without starAll reads true, unknown kinds are dropped', function () {
     var s = setup();
     var text = JSON.stringify({ version: 1, label: 'L', adventure: 'a', loadout: 'l',

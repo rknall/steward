@@ -19,6 +19,14 @@
     // The only place the speed-buff name prefix exists.
     var SPEED_BUFF_PREFIX = 'GeneralSpeedBuff_';
 
+    // Zone-wide buffs a template may apply when an adventure starts, besides a
+    // horseshoe: the one list, in the order the dialog offers them. Each is
+    // sent like a speed buff (grid 0) and only when it is in stock. A new
+    // entry here is all it takes to offer another buff.
+    var START_BUFFS = [
+        { name: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', label: 'Black Vortex' }
+    ];
+
     // Star-menu type of adventure maps; the entry's resource is the adventure
     // name. The only place this type name exists.
     var ADVENTURE_MAP_TYPE = 'Adventure';
@@ -230,6 +238,30 @@
         return typeof name === 'string' && name.indexOf(SPEED_BUFF_PREFIX) === 0;
     }
 
+    function isStartBuff(name) {
+        for (var i = 0; i < START_BUFFS.length; i++) {
+            if (START_BUFFS[i].name === name) return true;
+        }
+        return false;
+    }
+
+    // The start buffs with their stock (null when unreadable) and label.
+    function startBuffs() {
+        return S.kernel.hostRead.pass(function () {
+            var out = [];
+            for (var i = 0; i < START_BUFFS.length; i++) {
+                var name = START_BUFFS[i].name;
+                var shown = S.core.locale.res(name);
+                out.push({
+                    name:   name,
+                    amount: amount(name),
+                    label:  shown && shown !== name ? shown : START_BUFFS[i].label
+                });
+            }
+            return out;
+        });
+    }
+
     function effectText(name) {
         var t = S.core.locale.text('DES', name);
         var cut = t.indexOf('Target');
@@ -269,15 +301,15 @@
     // The host's population resource name, owned by core/resources.js.
     function populationResource() { return S.core.resources.POPULATION; }
 
-    // Speed buff: zone-wide, so it targets grid 0. Verified by the buff running
-    // or by the stock dropping below the baseline.
-    function speed(name) {
+    // A zone-wide buff, so it targets grid 0. Verified by the buff running or
+    // by the stock dropping below the baseline.
+    function zoneWide(name, kind, allowed, refusal) {
         return {
-            label:     'speed buff ' + name,
+            label:     kind + ' ' + name,
             category:  'buffs',
             timeoutMs: BUFF_TIMEOUT_MS,
             precheck: function () {
-                if (!isSpeedBuff(name)) return 'not a speed buff';
+                if (!allowed(name)) return refusal;
                 var n = stock(name, '');
                 if (!isNum(n)) return 'buff stock unreadable';
                 if (!(n > 0)) return 'no buff in stock';
@@ -292,6 +324,15 @@
                 return !!base && isNum(base.stock) && isNum(n) && n < base.stock;
             }
         };
+    }
+
+    function speed(name) {
+        return zoneWide(name, 'speed buff', isSpeedBuff, 'not a speed buff');
+    }
+
+    // Start buff: a zone-wide buff of START_BUFFS, applied like a speed buff.
+    function startBuff(name) {
+        return zoneWide(name, 'start buff', isStartBuff, 'not a start buff');
     }
 
     // Camp buff: sent to the grid of the camp it is meant for, never to the
@@ -777,6 +818,9 @@
         mapCounts:     mapCounts,
         definedNames:  definedNames,
         isSpeedBuff:   isSpeedBuff,
+        isStartBuff:   isStartBuff,
+        startBuffs:    startBuffs,
+        startBuff:     startBuff,
         effectText:    effectText,
         speedBuffs:    speedBuffs
     };

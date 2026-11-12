@@ -13,9 +13,12 @@
  * ignored. Any file in the folder whose base name matches ID_RE and ends in
  * EXT is a template, so a file shared by someone else can simply be dropped
  * in. File format: JSON.stringify of
- *   { version, label, adventure, loadout, waves, speedBuff, starAll, saved }
+ *   { version, label, adventure, loadout, waves, speedBuff, startBuffs, starAll,
+ *     saved }
  * indented, so it stays readable and shareable. An older file may carry a
  * `retrain` key; it is ignored, because retraining is a module setting.
+ * `startBuffs` lists the zone buffs (S.core.buffs.startBuffs, e.g. the Black
+ * Vortex) applied once on arrival when in stock; a file without it applies none.
  *
  * `waves` lists, in run order, battle-file paths (strings) mixed with step
  * entries (plain objects such as { step: 'unload', generals: [...] }) that
@@ -162,6 +165,16 @@
         return st && st.waveCount ? st.waveCount(list) : list.length;
     }
 
+    // Pure. The distinct non-empty names of a startBuffs list, in order.
+    function normStartBuffs(v) {
+        var out = [];
+        if (!isArray(v)) return out;
+        for (var i = 0; i < v.length; i++) {
+            if (typeof v[i] === 'string' && v[i] !== '' && out.indexOf(v[i]) === -1) out.push(v[i]);
+        }
+        return out;
+    }
+
     function normalize(rec) {
         rec = rec || {};
         var waves = [];
@@ -183,6 +196,7 @@
             loadout:   str(rec.loadout),
             waves:     waves,
             speedBuff: speedBuffChoice(rec),
+            startBuffs: normStartBuffs(rec.startBuffs),
             starAll:   rec.starAll !== false,
             saved:     typeof rec.saved === 'number' ? rec.saved : null
         };
@@ -207,6 +221,7 @@
             loadout:   data.loadout,
             waves:     data.waves,
             speedBuff: data.speedBuff,
+            startBuffs: data.startBuffs,
             starAll:   data.starAll,
             saved:     data.saved
         });
@@ -223,6 +238,7 @@
             loadout:   rec.loadout,
             waves:     rec.waves,
             speedBuff: rec.speedBuff,
+            startBuffs: rec.startBuffs,
             starAll:   rec.starAll,
             saved:     rec.saved
         }, null, 2);
@@ -323,6 +339,12 @@
         if (sb !== S.SpeedBuffChoice.Default && sb !== S.SpeedBuffChoice.None &&
             !S.core.buffs.isSpeedBuff(sb)) {
             out.push({ field: 'speedBuff', message: 'Unknown horseshoe ' + sb });
+        }
+        var starts = normStartBuffs(rec.startBuffs);
+        for (var j = 0; j < starts.length; j++) {
+            if (!S.core.buffs.isStartBuff(starts[j])) {
+                out.push({ field: 'startBuffs', message: 'Unknown start buff ' + starts[j] });
+            }
         }
         return out;
     }
@@ -555,6 +577,7 @@
         save:                save,
         remove:              remove,
         speedBuffChoice:     speedBuffChoice,
+        normStartBuffs:      normStartBuffs,
         firstAvailable:      firstAvailable,
         resolveSpeedBuff:    resolveSpeedBuff,
         initialSpeedBuff:    initialSpeedBuff,
