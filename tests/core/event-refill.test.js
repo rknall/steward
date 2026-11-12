@@ -543,3 +543,88 @@ t.test('home zone fields carry the host output factor and buff end', function ()
         t.assert.strictEqual(tpl.rows[q].buffEndMs, null);
     }
 });
+
+// ---- rates12h: any placed building type, here the gem pits -------------------
+
+var GEM_WORK = 21600; // 6 h per cycle: 2 cycles per 12 h
+
+function bootPits(hostOpts) {
+    var H = harness.boot({ sections: ['kernel', 'core'], host: hostOpts || {} });
+    H.host.game.def = function (name) {
+        if (name !== 'ServerState::gEconomics') return null;
+        return {
+            GetResourcesCreationDefinitionForBuilding: function (b) {
+                return b === 'GemPit' ? { workTime: GEM_WORK, amountRemoved: 1 } : null;
+            }
+        };
+    };
+    return H;
+}
+
+t.test('GemPit is in the building enum with its host name', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    t.assert.strictEqual(H.Steward.Building.GemPit, 'GemPit');
+});
+
+t.test('rates12h gives one row per placed gem pit and the total per 12 h', function () {
+    var H = bootPits();
+    var z = H.zone.zone();
+    z.building(H.zone.building({ name: 'GemPit', grid: 300 }));
+    z.building(H.zone.building({ name: 'GemPit', grid: 100 }));
+    z.building(H.zone.building({ name: 'Friary', grid: 200 }));
+    H.installZone(z);
+
+    var res = H.Steward.core.events.refill.rates12h([H.Steward.Building.GemPit]);
+    t.assert.strictEqual(res.rows.length, 2);
+    t.assert.strictEqual(res.rows[0].grid, 100);
+    t.assert.strictEqual(res.rows[1].grid, 300);
+    t.assert.strictEqual(res.rows[0].building, 'GemPit');
+    t.assert.strictEqual(res.rows[0].rate12h, 2);
+    t.assert.strictEqual(res.rows[0].rate12hBuffed, null);
+    t.assert.strictEqual(res.totalRate12h, 4);
+    t.assert.strictEqual(res.totalRate12hBuffed, null);
+});
+
+t.test('rates12h counts the upgrade factor and an active production buff', function () {
+    var clockNow = 5000000;
+    var H = bootPits({
+        swmmo: { application: { mGameInterface: { GetClientTime: function () { return clockNow; } } } }
+    });
+    var z = H.zone.zone();
+    z.building(H.zone.building({
+        name: 'GemPit', grid: 10, outputFactor: 4, exactOutputFactor: 2,
+        buffs: [H.zone.buff({ pct: 100, duration: NINE_HOURS, start: clockNow - 3600000 })]
+    }));
+    z.building(H.zone.building({ name: 'GemPit', grid: 20, outputFactor: 1, exactOutputFactor: 1 }));
+    H.installZone(z);
+
+    var res = H.Steward.core.events.refill.rates12h(['GemPit']);
+    t.assert.strictEqual(res.rows[0].rate12h, 4);
+    t.assert.strictEqual(res.rows[0].rate12hBuffed, 8);
+    t.assert.strictEqual(res.rows[1].rate12h, 2);
+    t.assert.strictEqual(res.rows[1].rate12hBuffed, null);
+    t.assert.strictEqual(res.totalRate12h, 6);
+    t.assert.strictEqual(res.totalRate12hBuffed, 10);
+});
+
+t.test('rates12h is an empty list without a gem pit and null off the home island', function () {
+    var H = bootPits();
+    H.installZone(H.zone.zone().building(H.zone.building({ name: 'Friary', grid: 5 })));
+    var R = H.Steward.core.events.refill;
+    t.assert.strictEqual(R.rates12h(['GemPit']).rows.length, 0);
+    t.assert.strictEqual(R.rates12h(['GemPit']).totalRate12h, 0);
+
+    H.installZone(H.zone.zone().building(H.zone.building({ name: 'GemPit', grid: 5 })));
+    H.host.game.gi.isOnHomzone = function () { return false; };
+    t.assert.strictEqual(R.rates12h(['GemPit']), null);
+});
+
+t.test('rates12h leaves the rate empty when the work time is unknown', function () {
+    var H = bootPits();
+    H.host.game.def = function () { return null; };
+    H.installZone(H.zone.zone().building(H.zone.building({ name: 'GemPit', grid: 5 })));
+    var res = H.Steward.core.events.refill.rates12h(['GemPit']);
+    t.assert.strictEqual(res.rows.length, 1);
+    t.assert.strictEqual(res.rows[0].rate12h, null);
+    t.assert.strictEqual(res.totalRate12h, 0);
+});

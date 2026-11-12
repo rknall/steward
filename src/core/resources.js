@@ -15,6 +15,11 @@
  * eventName(name) reads the host's own event flag of one resource (a
  * non-empty string for an event resource), so callers never keep a list of
  * event resources themselves. Both answer null when the host cannot be read.
+ * uncategorized() lists the held resources the storehouse does not show: the
+ * ones whose economy default definition names no category. These are what
+ * the mayor's house holds (collectibles such as Barrel or Grain Sacks, star
+ * coins, manuscripts). The split is the game's own category, not a list kept
+ * here.
  *
  * Bundle slot: core, after packets.js and before specialists.js (core files
  * load in name order). Nothing here calls another core at load time; the top
@@ -93,10 +98,9 @@
         }
     }
 
-    // The event a resource belongs to, from the host's economy definition:
-    // a non-empty string for an event resource, '' for a plain one, null when
-    // the definition cannot be read.
-    function eventName(resName) {
+    // The economy default definition of one resource, or null when it cannot
+    // be read. The one host read behind eventName and categoryOf.
+    function defaultDefinition(resName) {
         if (typeof resName !== 'string' || !resName) return null;
         try {
             if (typeof game === 'undefined' || !game || typeof game.def !== 'function') return null;
@@ -104,10 +108,7 @@
             if (!econ) return null;
             var fn = econ.GetResourcesDefaultDefinition;
             if (typeof fn !== 'function') return null;
-            var def = fn.call(econ, resName);
-            if (!def) return null;
-            var ev = def.requiredEventName_string;
-            return typeof ev === 'string' ? ev : null;
+            return fn.call(econ, resName) || null;
         } catch (e) {
             if (!warnedThrow) {
                 warnedThrow = true;
@@ -117,6 +118,59 @@
         }
     }
 
+    // The event a resource belongs to, from the host's economy definition:
+    // a non-empty string for an event resource, '' for a plain one, null when
+    // the definition cannot be read.
+    function eventName(resName) {
+        var def = defaultDefinition(resName);
+        if (!def) return null;
+        try {
+            var ev = def.requiredEventName_string;
+            return typeof ev === 'string' ? ev : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // The storehouse category of a resource: '' for none, null when the
+    // definition cannot be read.
+    function categoryOf(resName) {
+        var def = defaultDefinition(resName);
+        if (!def) return null;
+        try {
+            var c = def.category_string;
+            return typeof c === 'string' ? c : '';
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Held resources without a storehouse category, as
+    // [{ name, label, amount }] sorted by label. Only amounts above zero; a
+    // resource whose definition cannot be read is left out. null when the
+    // resource list or every held resource's definition cannot be read, so
+    // a host hiccup does not look like an empty mayor's house.
+    function uncategorized() {
+        var held = list();
+        if (!held) return null;
+        var out = [];
+        var readable = false;
+        for (var i = 0; i < held.length; i++) {
+            var cat = categoryOf(held[i].name);
+            if (cat === null) continue;
+            readable = true;
+            var n = held[i].amount;
+            if (cat !== '' || n === null || n <= 0) continue;
+            out.push({ name: held[i].name, label: S.core.locale.res(held[i].name), amount: n });
+        }
+        out.sort(function (a, b) {
+            var x = a.label.toLowerCase();
+            var y = b.label.toLowerCase();
+            return x < y ? -1 : (x > y ? 1 : 0);
+        });
+        return (readable || !held.length) ? out : null;
+    }
+
     if (!S.core.resources) S.core.resources = {};
 
     S.core.resources.amount         = amount;
@@ -124,5 +178,6 @@
     S.core.resources.POPULATION     = POPULATION;
     S.core.resources.list           = list;
     S.core.resources.eventName      = eventName;
+    S.core.resources.uncategorized  = uncategorized;
 
 }(Steward));

@@ -457,3 +457,86 @@ t.test('tiles describe the zone and the adventure setting from the buffer', func
     r.H.Steward.core.buildings.collectiblesByName = function () { return []; };
     t.assert.strictEqual(r.mod.tiles(r.h)[0].lines[0], 'Nothing collectible on this zone');
 });
+
+// ---- gem pits and mayor's house -------------------------------------------------
+
+t.test('render adds the gem pit table with a total when a pit is placed', function () {
+    var r = uiRig([]);
+    r.H.Steward.core.events.refill.rates12h = function (names) {
+        t.assert.strictEqual(JSON.stringify(names), '["GemPit"]');
+        return {
+            rows: [{ building: 'GemPit', grid: 10, rate12h: 2, rate12hBuffed: 4 },
+                   { building: 'GemPit', grid: 20, rate12h: 2, rate12hBuffed: null }],
+            totalRate12h: 4, totalRate12hBuffed: 6
+        };
+    };
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    var $cards = $main.find('.steward-card');
+    t.assert.strictEqual($cards.length, 2);
+    var $pits = $cards.eq(1);
+    t.assert.strictEqual($pits.find('.steward-card-meta').text(), '2 gem pits');
+    var $rows = $pits.find('tbody tr');
+    t.assert.strictEqual($rows.length, 2);
+    t.assert.strictEqual($rows.eq(0).children('td').eq(0).text(), 'GemPit (grid 10)');
+    t.assert.strictEqual($rows.eq(0).children('td').eq(1).text(), '2 (4)');
+    t.assert.strictEqual($rows.eq(1).children('td').eq(1).text(), '2');
+    t.assert.strictEqual($pits.find('tfoot td').eq(1).text(), '4 (6)');
+});
+
+t.test('render shows no gem pit table without a pit or off the home island', function () {
+    var r = uiRig([]);
+    var R = r.H.Steward.core.events.refill;
+    R.rates12h = function () { return { rows: [], totalRate12h: 0, totalRate12hBuffed: null }; };
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-card').length, 1);
+
+    R.rates12h = function () { return null; };
+    $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-card').length, 1);
+});
+
+t.test('render lists the mayor house items less the population and the Events tab resources', function () {
+    var r = uiRig([]);
+    var S = r.H.Steward;
+    S.core.resources.uncategorized = function () {
+        return [
+            { name: 'CollectibleWineBarrel', label: 'Barrel', amount: 7515 },
+            { name: 'HalloweenResource', label: 'Pumpkins', amount: 30 },
+            { name: 'Population', label: 'Settlers', amount: 26104 }
+        ];
+    };
+    S.core.events.heldResources = function () {
+        return { source: 'host', rows: [
+            { resource: 'HalloweenResource', amount: 30, code: 'HW' },
+            { resource: 'CollectibleWineBarrel', amount: 7515, code: null }
+        ] };
+    };
+
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    var $mayor = $main.find('.steward-card').eq(1);
+    t.assert.strictEqual($mayor.find('.steward-card-meta').text(), '1 item');
+    var $rows = $mayor.find('tbody tr');
+    t.assert.strictEqual($rows.length, 1);
+    t.assert.strictEqual($rows.eq(0).children('td').eq(0).text(), 'Barrel');
+    t.assert.strictEqual($rows.eq(0).children('td').eq(1).text(), '7515');
+});
+
+t.test('the mayor house card shows the empty state, and is left out when unreadable', function () {
+    var r = uiRig([]);
+    var S = r.H.Steward;
+    S.core.resources.uncategorized = function () { return []; };
+    var $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-card').length, 2);
+    t.assert.strictEqual($main.find('.steward-card').eq(1).find('.steward-empty-title').text(),
+        'No items in the mayor\'s house.');
+
+    S.core.resources.uncategorized = function () { return null; };
+    $main = r.$('<div>');
+    r.mod.render($main, r.h);
+    t.assert.strictEqual($main.find('.steward-card').length, 1);
+});

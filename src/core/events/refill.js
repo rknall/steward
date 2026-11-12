@@ -34,6 +34,10 @@
  * time. Upgraded variants listed in depositInfo are read from the island but
  * never templated. When the real fields cannot be read (friend island, host hiccup)
  * rows() returns editable template rows instead of failing.
+ *
+ * rates12h(names) runs the same rate arithmetic for any other placed
+ * building type on the home island, with no deposit and no route: the
+ * collect section uses it for the gem pits' output per 12 h.
  */
 
 (function (S) {
@@ -164,11 +168,12 @@
         return { map: map, found: found };
     }
 
-    function gameRows(info, resource) {
-        var dm = depositMap(resource);
-        var readNow = new Date().getTime();
+    // One row per placed building of the named types on the current zone,
+    // in name order, then grid ascending: work time, output per cycle and
+    // the active buff. No deposit fields; gameRows adds those for event
+    // fields. A host read that fails yields no row for that building.
+    function placedRows(names, readNow) {
         var out = [];
-        var names = fieldNames(info);
         for (var b = 0; b < names.length; b++) {
             var name = names[b];
             var placed = [];
@@ -180,17 +185,12 @@
             for (var i = 0; i < placed.length; i++) {
                 var g = S.core.buildings.grid(placed[i]);
                 if (g === null || typeof g === 'undefined') continue;
-                var has = Object.prototype.hasOwnProperty.call(dm.map, g);
-                // A field whose deposit is unreadable is still a real
-                // building, so its buff is read all the same.
                 var prod = productionOf(amount, placed[i], readNow);
                 part.push({
                     key:            'g' + g,
                     building:       name,
                     grid:           g,
                     workTime:       wt,
-                    deposit:        has ? dm.map[g] : 0,
-                    source:         has ? 'game' : 'manual',
                     perCycle:       prod.perCycle,
                     buffedPerCycle: prod.buffedPerCycle,
                     buffEndMs:      prod.buffEndMs
@@ -198,6 +198,19 @@
             }
             part.sort(function (x, y) { return x.grid - y.grid; });
             for (var p = 0; p < part.length; p++) out.push(part[p]);
+        }
+        return out;
+    }
+
+    // A field whose deposit is unreadable is still a real building, so its
+    // buff is read all the same; it becomes a manual row with deposit 0.
+    function gameRows(info, resource) {
+        var dm = depositMap(resource);
+        var out = placedRows(fieldNames(info), new Date().getTime());
+        for (var i = 0; i < out.length; i++) {
+            var has = Object.prototype.hasOwnProperty.call(dm.map, out[i].grid);
+            out[i].deposit = has ? dm.map[out[i].grid] : 0;
+            out[i].source = has ? 'game' : 'manual';
         }
         return out;
     }
@@ -341,6 +354,23 @@
         };
     }
 
+    // Production per 12 h of every placed building of the named types on the
+    // home island (the collect section's gem pits): compute() over one 12 h
+    // window with no route, so a rate counts the work time alone and a buff
+    // the same way the event fields do. Null off the home island or when the
+    // host cannot be read; an empty row list when none is placed.
+    function rates12h(names) {
+        var now = new Date().getTime();
+        var list;
+        try {
+            if (!S.core.zone.isHome()) return null;
+            list = placedRows(names || [], now);
+        } catch (e) {
+            return null;
+        }
+        return compute(list, HALF_DAY_SEC, 0, 1, now);
+    }
+
     S.core.events.refill = {
         remainingSeconds: remainingSeconds,
         cycles:           cycles,
@@ -348,7 +378,8 @@
         items:            items,
         depositEvent:     depositEvent,
         rows:             rows,
-        compute:          compute
+        compute:          compute,
+        rates12h:         rates12h
     };
 
 }(Steward));

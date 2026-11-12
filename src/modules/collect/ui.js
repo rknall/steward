@@ -2,7 +2,12 @@
  * Dashboard surface for the collect module.
  *
  * Renders on the Buildings tab: a settings column and a card listing what
- * sits on the zone. The Discover button is a one-shot probe that walks the
+ * sits on the zone. Below it a card with the gem pits on the home island and
+ * their output per 12 h (S.core.events.refill.rates12h, buffs included; only
+ * when a pit is placed), and a card with the mayor's house items: the held
+ * resources without a storehouse category (S.core.resources.uncategorized),
+ * less the ones another steward view already shows (only when the list can
+ * be read). The Discover button is a one-shot probe that walks the
  * current zone and logs every candidate plus how it matched against the
  * user's patterns, useful for tuning the pattern list.
  */
@@ -106,7 +111,111 @@
         return n + ' collectible type' + (n === 1 ? '' : 's');
     }
 
-    // Main column: what sits on the zone, plus the one-shot log probe.
+    function buiName(building) {
+        try { return S.core.locale.bui(building); }
+        catch (e) { return building; }
+    }
+
+    // Gem pit rows with their rate per 12 h, or null when none is readable:
+    // off the home island, a failing host read or no pit placed.
+    function gemPits() {
+        var R = S.core.events && S.core.events.refill;
+        if (!R || typeof R.rates12h !== 'function') return null;
+        var res = null;
+        try { res = R.rates12h([S.Building.GemPit]); }
+        catch (e) { res = null; }
+        return (res && res.rows.length) ? res : null;
+    }
+
+    // A rate with the buffed rate in muted parentheses while a buff is active.
+    // Text only, so numbers from the host stay inert.
+    function rateCell(v, b) {
+        var $c = $('<span>').text((v === null || typeof v === 'undefined') ? '—' : String(v));
+        if (b !== null && typeof b !== 'undefined') {
+            $c.append($('<span>', { 'class': 'steward-muted' }).text(' (' + b + ')'));
+        }
+        return { cls: 'steward-num', $: $c };
+    }
+
+    function pitsText(n) {
+        return n + ' gem pit' + (n === 1 ? '' : 's');
+    }
+
+    function gemPitCard(h, res) {
+        var $card = h.card({ icon: '◆', title: 'Gem pits', meta: pitsText(res.rows.length) });
+        var rows = [];
+        for (var i = 0; i < res.rows.length; i++) {
+            var row = res.rows[i];
+            var label = buiName(row.building) + ' (grid ' + row.grid + ')';
+            rows.push([{ text: label, title: label }, rateCell(row.rate12h, row.rate12hBuffed)]);
+        }
+        $card.append(h.table({
+            cols: [
+                { label: 'Gem pit',  width: '70%' },
+                { label: 'Per 12 h', width: '30%', cls: 'steward-num' }
+            ],
+            rows: rows,
+            foot: ['Total', rateCell(res.totalRate12h, res.totalRate12hBuffed)]
+        }));
+        $card.append($('<div>', { 'class': 'steward-muted steward-note' }).text(
+            '(…) = with the active production buff. Work time only, without the walk to the storehouse.'));
+        return $card;
+    }
+
+    // Resources another steward view already shows: the population
+    // (adventures, production) and the event resources the Events tab lists
+    // (S.core.events.heldResources rows tied to a known event). Read at call
+    // time, so no list is kept here.
+    function shownElsewhere() {
+        var out = {};
+        try { out[S.core.resources.POPULATION] = true; }
+        catch (e) { /* no population name: nothing to leave out */ }
+        try {
+            var held = S.core.events.heldResources();
+            var rows = (held && held.rows) || [];
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i] && rows[i].code) out[rows[i].resource] = true;
+            }
+        } catch (e2) { /* no event resources readable */ }
+        return out;
+    }
+
+    // Mayor's house items not shown elsewhere, or null when unreadable.
+    function mayorItems() {
+        var all = null;
+        try { all = S.core.resources.uncategorized(); }
+        catch (e) { all = null; }
+        if (!all) return null;
+        var skip = shownElsewhere();
+        var out = [];
+        for (var i = 0; i < all.length; i++) {
+            if (!Object.prototype.hasOwnProperty.call(skip, all[i].name)) out.push(all[i]);
+        }
+        return out;
+    }
+
+    function itemsText(n) {
+        return n + ' item' + (n === 1 ? '' : 's');
+    }
+
+    function mayorCard(h, items) {
+        var $card = h.card({ icon: '⌂', title: "Mayor's house", meta: itemsText(items.length) });
+        if (!items.length) {
+            return $card.append(h.empty("No items in the mayor's house."));
+        }
+        var rows = [];
+        for (var i = 0; i < items.length; i++) {
+            rows.push([{ text: items[i].label, title: items[i].name }, String(items[i].amount)]);
+        }
+        $card.append(h.table({
+            cols: [{ label: 'Item', width: '70%' }, { label: 'Amount', width: '30%', cls: 'steward-num' }],
+            rows: rows
+        }));
+        return $card;
+    }
+
+    // Main column: what sits on the zone, plus the one-shot log probe, then
+    // the gem pits (when placed) and the mayor's house items.
     function render($main, h) {
         var groups = collectibleGroups(true);
 
@@ -130,6 +239,11 @@
             $('<span>').append(h.now()).append(h.button('Discover', { size: 'sm', onClick: discover })),
             { wide: true }));
         $main.append($card);
+
+        var pits = gemPits();
+        if (pits) $main.append(gemPitCard(h, pits));
+        var items = mayorItems();
+        if (items) $main.append(mayorCard(h, items));
     }
 
     function tiles(h) {
@@ -151,5 +265,7 @@
     S.modules.collect.render        = render;
     S.modules.collect.summary       = summary;
     S.modules.collect.tiles         = tiles;
+    S.modules.collect.gemPits       = gemPits;
+    S.modules.collect.mayorItems    = mayorItems;
 
 }(Steward));
