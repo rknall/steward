@@ -6,7 +6,14 @@
  * dashboard (Modal.show semantics), and a zone load closes host modals, so
  * an unsaved draft can never outlive the island it was edited on.
  *
- * Two views. The list shows every template file, broken ones included so
+ * Two kinds of view, picked by a Templates | Queues switch above each list.
+ * The Queues views (list and edit, `state.view` 'queues' and 'queueEdit')
+ * are drawn by queueview.js; this file hands it the window's helpers and
+ * keeps the view, the edit guard and the reset on leaving. A queue draft
+ * lives in queueview, never here, so leaving the window, opening it again
+ * or switching away resets it there.
+ *
+ * Template views: the list shows every template file, broken ones included so
  * they can be deleted, with Edit and a two-step Delete. The edit view holds
  * the template card (label, adventure, loadout), the speed card (horseshoe),
  * the arrival card (send all to the star) and the list of waves and steps,
@@ -59,6 +66,9 @@
 
     var modal = null;
     var state = null;
+
+    // The queue editor lives in another file; a build without it shows no switch.
+    function QV() { return S.modules.adventures.queueview || null; }
 
     // ---- Small helpers --------------------------------------------------------
 
@@ -203,9 +213,23 @@
         return JSON.stringify(T().normalize(draft));
     }
 
-    function isDirty() {
+    function templateDirty() {
         return !!(state && state.view === 'edit' && state.draft &&
             snapshot(state.draft) !== state.orig);
+    }
+
+    function queueDirty() {
+        var qv = QV();
+        return !!(state && state.view === 'queueEdit' && qv && qv.isDirty());
+    }
+
+    function isDirty() {
+        return templateDirty() || queueDirty();
+    }
+
+    function resetQueues() {
+        var qv = QV();
+        if (qv && typeof qv.reset === 'function') qv.reset();
     }
 
     // Shown as Bootstrap sees it: a window fading out after a hide reads closed.
@@ -276,7 +300,7 @@
     // Leaves the edit view; a changed draft is dropped with a notice, so a
     // click never loses work silently.
     function leaveEdit() {
-        if (isDirty()) notify('Template changes discarded');
+        if (templateDirty()) notify('Template changes discarded');
         state.draft = null;
         state.orig = null;
         state.recs = null;
@@ -302,9 +326,22 @@
         // window has no fill sizing, so its panel scrolls.
         var $panel = $('<div>', { 'class': 'steward-panel steward-compact' });
         var failed = false;
+        // Only a click on one of the queue list's own buttons (New queue,
+        // Edit) opens the queue editor; the editor has no other way to say so.
+        var goEdit = state.queueGo && state.view === 'queues';
+        state.queueGo = false;
+        if (goEdit) {
+            state.view = 'queueEdit';
+            state.queueId = null;
+        }
         try {
             if (state.view === 'edit') renderEdit($panel);
-            else renderList($panel);
+            else if (state.view === 'queueEdit') QV().renderEdit($panel, queueCtx(false), state.queueId);
+            else {
+                $panel.append(viewSwitch());
+                if (state.view === 'queues') QV().renderList($panel, queueCtx(true));
+                else renderList($panel);
+            }
         } catch (e) {
             S.kernel.error('adventures', 'render ' + state.view + ' view threw:', e);
             state.labelInput = null;
@@ -322,6 +359,8 @@
     // Leaves the broken view behind; it renders only on click, so a list that
     // throws again simply shows this view again instead of looping.
     function backToListFromFailure() {
+        resetQueues();
+        state.queueId = null;
         state.draft = null;
         state.orig = null;
         state.problems = null;
@@ -343,7 +382,9 @@
     // Hides only a dialog that is really shown: a second hide during the fade
     // would unbalance the host's stage swap and leave the game layer on top.
     function closeWindow() {
-        if (isDirty()) notify('Template changes discarded');
+        if (templateDirty()) notify('Template changes discarded');
+        if (queueDirty()) notify('Queue changes discarded');
+        resetQueues();
         var ui = S.kernel.ui;
         if (ui && typeof ui.hideModal === 'function') ui.hideModal(modal);
     }
@@ -351,6 +392,58 @@
     function backToList() {
         leaveEdit();
         render();
+    }
+
+    // The Templates | Queues switch of the two list views. It is absent
+    // without the queue editor, and never shown over an edit view, where the
+    // breadcrumb leads back.
+    function viewSwitch() {
+        var $tabs = $('<div>', { 'class': 'steward-tabs' });
+        if (!QV()) return $tabs;
+        var tabs = [{ view: 'list', label: 'Templates' }, { view: 'queues', label: 'Queues' }];
+        for (var i = 0; i < tabs.length; i++) {
+            (function (tab) {
+                var $a = $('<a>', { href: '#', 'class': 'steward-tab' }).text(tab.label);
+                if (state.view === tab.view) $a.addClass('active');
+                $a.on('click', function (e) {
+                    if (e && e.preventDefault) e.preventDefault();
+                    if (state.view === tab.view) return;
+                    act(function () {
+                        resetQueues();
+                        state.view = tab.view;
+                        render();
+                    })();
+                });
+                $tabs.append($a);
+            }(tabs[i]));
+        }
+        return $tabs;
+    }
+
+    // What queueview needs from the window. On the list the buttons also
+    // note the click, so render() can tell an Edit or New queue click from a
+    // delete or a refresh.
+    function queueCtx(onList) {
+        return {
+            btn: onList ? function (label, onClick) {
+                return btn(label, function () {
+                    state.queueGo = true;
+                    onClick();
+                });
+            } : btn,
+            iconBtn: iconBtn,
+            textEl: textEl,
+            act: act,
+            notify: notify,
+            syncMenu: syncMenu,
+            render: render,
+            backToList: function () {
+                state.queueGo = false;
+                state.queueId = null;
+                state.view = 'queues';
+                render();
+            }
+        };
     }
 
     // Built once per view kind: 'list', 'edit' or 'failed'.
@@ -374,6 +467,8 @@
         var $close = h.button('Close', { onClick: closeWindow });
         $close.addClass('steward-foot-right');
         $footer.append($close);
+        // The queue views name their own folder.
+        if (kind !== 'list') return;
         var folder = T().dirPath();
         $footer.append(folder
             ? textEl('span', 'steward-foot-note', 'Each template is a file in ' + folder)
@@ -420,8 +515,11 @@
             view: 'list', draft: null, orig: null, title: null, recs: null, problems: null,
             confirmDelete: null, error: null, labelInput: null, lastBuff: null, moved: -1,
             footKind: null, $save: null, $mid: null,
-            adding: null, $addStep: null, $addNote: null, seqProblems: [], files: {}
+            adding: null, $addStep: null, $addNote: null, seqProblems: [], files: {},
+            queueId: null, queueGo: false
         };
+        // A draft left in a window that was hidden never carries over.
+        resetQueues();
         try {
             modal = new Modal(MODAL_ID, TITLE, true);
             modal.create();

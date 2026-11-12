@@ -16,7 +16,7 @@ var assert = t.assert;
 
 var SCEN_DIR = 'C:/client/steward/adventures/scenarios';
 var ROOT = path.join(__dirname, '..', '..');
-var FIXED = 8; // command rows and their separator before the template part
+var FIXED = 9; // command rows and their separator before the template part
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
@@ -287,4 +287,113 @@ t.test('sync after load rebuilds once on a user action and then not again', func
     s.menu.items();
     assert.strictEqual(s.menu.sync(), false);
     assert.strictEqual(s.rebuilds, 1);
+});
+
+// ---- Queues folder ----------------------------------------------------------
+
+// Saves a queue of template entries [id, count] under `label`; returns its id.
+function saveQueue(s, label, entries, extra) {
+    var rec = s.S.modules.adventures.queues.normalize({
+        label: label,
+        entries: entries.map(function (e) { return { kind: 'template', id: e, count: 1 }; }),
+        noMap: extra && extra.noMap
+    });
+    var r = s.S.modules.adventures.queues.save(rec, 5000);
+    assert.ok(r.ok, JSON.stringify(r));
+    return r.id;
+}
+
+function saveTpl(s, label, adventure) {
+    return s.tpl.save({
+        label: label, adventure: adventure, loadout: 'C:/b/l.json',
+        waves: ['C:/b/w1.json'], speedBuff: 'SpeedBuffDefault'
+    }, 1000).id;
+}
+
+function queuesFolder(items) {
+    for (var i = 0; i < items.length; i++) if (items[i].label === 'Queues') return { at: i, item: items[i] };
+    return null;
+}
+
+t.test('no Queues folder without a queue', function () {
+    var s = setup({ defs: [def('AdvA', 'Mission')] });
+    save(s, 'Alpha', 'AdvA');
+    assert.strictEqual(queuesFolder(s.menu.items()), null);
+});
+
+t.test('the Skip entry command sits after End repetition', function () {
+    var s = setup({ defs: [def('AdvA', 'Mission')] });
+    var names = s.menu.COMMANDS.map(function (c) { return c.name; });
+    assert.deepStrictEqual(plain(names), ['pause', 'resume', 'endRepetition', 'skipEntry', 'stop']);
+    assert.strictEqual(plain(labels(s.menu.items()))[6], 'Skip entry');
+});
+
+t.test('the Queues folder follows Scenarios and its row shows entries and maps', function () {
+    var s = setup({
+        scenarios: { twins: builtin('twins') }, maps: { AdvA: 2, AdvB: 0 },
+        defs: [def('AdvA', 'Mission'), def('AdvB', 'Mission')]
+    });
+    var a = saveTpl(s, 'Alpha', 'AdvA');
+    var b = saveTpl(s, 'Beta', 'AdvB');
+    saveQueue(s, 'Long', [a, b]);
+    saveQueue(s, 'Dry', [b, a]);
+    var items = s.menu.items();
+    var q = queuesFolder(items);
+    assert.ok(q, 'folder');
+    assert.strictEqual(items[q.at - 1].label !== undefined && labelOf(items[q.at - 1]), 'Scenarios');
+    assert.deepStrictEqual(plain(labels(q.item.items)), ['Dry (2 entries) ×0', 'Long (2 entries) ×2']);
+    assert.deepStrictEqual(plain(q.item.items.map(function (it) { return enabledOf(it, {}); })), [false, true]);
+});
+
+t.test('a queue with no-map skip shows the maps of the first entry that has one', function () {
+    var s = setup({ maps: { AdvA: 3, AdvB: 0 }, defs: [def('AdvA', 'Mission'), def('AdvB', 'Mission')] });
+    var a = saveTpl(s, 'Alpha', 'AdvA');
+    var b = saveTpl(s, 'Beta', 'AdvB');
+    saveQueue(s, 'Skipper', [b, a], { noMap: 'skip' });
+    var q = queuesFolder(s.menu.items());
+    assert.deepStrictEqual(plain(labels(q.item.items)), ['Skipper (2 entries) ×3']);
+    assert.strictEqual(enabledOf(q.item.items[0], {}), true);
+});
+
+t.test('a queue row starts the queue and a broken file is a disabled row last', function () {
+    var s = setup({ maps: { AdvA: 1 }, defs: [def('AdvA', 'Mission')] });
+    var a = saveTpl(s, 'Alpha', 'AdvA');
+    var id = saveQueue(s, 'Solo', [a]);
+    var qs = s.S.modules.adventures.queues;
+    s.S.kernel.files.writeText(qs.pathOf('aaa-bad'), '{ nope');
+    var q = queuesFolder(s.menu.items());
+    assert.deepStrictEqual(plain(labels(q.item.items)), ['Solo (1 entry) ×1', 'aaa-bad.json (unreadable)']);
+    assert.strictEqual(enabledOf(q.item.items[1], {}), false);
+    var called = [];
+    s.S.modules.adventures.run.startQueue = function (x) { called.push(x); };
+    q.item.items[0].onSelect();
+    assert.deepStrictEqual(called, [id]);
+});
+
+t.test('queues show one greyed loading row until the definitions are readable', function () {
+    var s = setup({});
+    save(s, 'Alpha', 'AdvA');
+    var a = s.tpl.list()[0].id;
+    saveQueue(s, 'Solo', [a]);
+    var items = s.menu.items();
+    var q = queuesFolder(items);
+    assert.strictEqual(q, null);
+    var last = items[items.length - 1];
+    assert.strictEqual(labelOf(last, {}), 'Queues (loading…)');
+    assert.strictEqual(enabledOf(last, {}), false);
+});
+
+t.test('saving or removing a queue changes the signature, a status read does not rebuild', function () {
+    var s = setup({ maps: { AdvA: 1 }, defs: [def('AdvA', 'Mission')] });
+    var a = saveTpl(s, 'Alpha', 'AdvA');
+    s.menu.items();
+    assert.strictEqual(s.menu.sync(), false);
+    var id = saveQueue(s, 'Solo', [a]);
+    assert.strictEqual(s.menu.sync(), true);
+    var items = s.menu.items();
+    for (var i = 0; i < 3; i++) labels(items);
+    assert.strictEqual(s.menu.sync(), false);
+    assert.strictEqual(s.rebuilds, 1);
+    s.S.modules.adventures.queues.remove(id);
+    assert.strictEqual(s.menu.sync(), true);
 });

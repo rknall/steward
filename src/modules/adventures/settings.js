@@ -23,7 +23,8 @@
  * every run. It is read again each time a run reaches Snapshot, Account,
  * Population and Retrain, so a change takes effect in the middle of a run.
  * A `retrain` key in an older template file or run file is ignored, because
- * this setting alone decides. `retrainOn()` is its reader.
+ * this setting decides unless a running queue sets its own Retrain option.
+ * `retrainOn()` is its reader.
  *
  * `retrainSettlersOnly`, while retraining is on, skips retraining and moves
  * on instead of pausing when free settlers cannot cover the orders and

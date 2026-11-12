@@ -233,3 +233,8 @@ first, then the burst line, then this one.
 - Start refuses while the own adventures cannot be read.
 - A run file that cannot be read is left as it is until Start or Stop writes it.
   The map times of that session are then kept in memory only.
+
+## Scenarios in queues
+
+A scenario can be an entry of an adventure queue, mixed with templates; see
+[QUEUES.md](QUEUES.md).

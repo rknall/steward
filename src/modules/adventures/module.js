@@ -29,6 +29,15 @@
  * last trip ends the map like a template run. Scenarios are listed in their own
  * Scenarios folder of the native ~Steward~ menu, after the template folders.
  *
+ * A queue (queues.js) is a saved, ordered list of templates and scenarios,
+ * each with its own run count, that may loop. Starting one stores the
+ * request with a running copy of the queue; the run state machine stays the
+ * same, and at the hand-over home after an entry's last run the next entry
+ * begins as a fresh run of its own kind. The copy lives in the run state
+ * file, so a restart carries on mid-queue, and a saved edit only applies to
+ * the next start. Skip entry drops the current entry while its map is not
+ * out yet, or steps over an entry that cannot begin.
+ *
  * A run takes its next step as soon as the game allows: a pass that moved a
  * step or left queue work asks the scheduler for another at once, a short
  * wait polls every WAIT_MS, and a long wait stays on the scheduler tick.

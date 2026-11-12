@@ -122,9 +122,9 @@ function itemByLabel(w, label) {
 }
 
 var CONTROLS = [['Pause run', 'pause'], ['Resume run', 'resume'], ['End repetition', 'endRepetition'],
-    ['Stop run', 'stop']];
+    ['Skip entry', 'skipEntry'], ['Stop run', 'stop']];
 
-// The enabled flags of the four controls, in menu order, in one pass.
+// The enabled flags of the five controls, in menu order, in one pass.
 function enabledFlags(w) {
     var pass = {};
     return CONTROLS.map(function (c) { return enabledOf(itemByLabel(w, c[0]), pass); });
@@ -396,14 +396,14 @@ t.test('hint: no hint on the right zone, on an any-zone step, paused or done', f
 
 // The states of the investigation's table: [name, setup options, mutate, can()].
 var STATES = [
-    ['no request', { none: true }, null, [false, false, false, false]],
-    ['request without a run', { count: 3 }, function (w) { w.st.current().run = null; }, [false, false, false, true]],
-    ['running, one run', { count: 1 }, null, [true, false, false, true]],
-    ['running, run 1 of 3', { count: 3 }, null, [true, false, true, true]],
-    ['running, last of 3', { count: 3, finished: 2 }, null, [true, false, false, true]],
-    ['paused, run 1 of 3', { count: 3, paused: true }, null, [false, true, true, true]],
-    ['paused, one run', { count: 1, paused: true }, null, [false, true, false, true]],
-    ['done', { count: 1 }, function (w) { w.st.done(); }, [false, false, false, true]]
+    ['no request', { none: true }, null, [false, false, false, false, false]],
+    ['request without a run', { count: 3 }, function (w) { w.st.current().run = null; }, [false, false, false, false, true]],
+    ['running, one run', { count: 1 }, null, [true, false, false, false, true]],
+    ['running, run 1 of 3', { count: 3 }, null, [true, false, true, false, true]],
+    ['running, last of 3', { count: 3, finished: 2 }, null, [true, false, false, false, true]],
+    ['paused, run 1 of 3', { count: 3, paused: true }, null, [false, true, true, false, true]],
+    ['paused, one run', { count: 1, paused: true }, null, [false, true, false, false, true]],
+    ['done', { count: 1 }, function (w) { w.st.done(); }, [false, false, false, false, true]]
 ];
 
 function fresh(state) {
@@ -416,7 +416,7 @@ t.test('can table', function () {
     STATES.forEach(function (state) {
         var w = fresh(state);
         var can = w.run.can();
-        assert.deepStrictEqual(Object.keys(can).sort(), ['endRepetition', 'pause', 'resume', 'stop'], state[0]);
+        assert.deepStrictEqual(Object.keys(can).sort(), ['endRepetition', 'pause', 'resume', 'skipEntry', 'stop'], state[0]);
         var got = CONTROLS.map(function (c) { return can[c[1]]; });
         assert.deepStrictEqual(got, state[3], state[0]);
         got.forEach(function (v) { assert.strictEqual(typeof v, 'boolean', state[0]); });
@@ -456,8 +456,8 @@ t.test('controls exist once', function () {
         assert.strictEqual(typeof found[0].onSelect, 'function', c[0]);
         found[0].onSelect();
     });
-    assert.deepStrictEqual(calls, ['pause', 'resume', 'endRepetition', 'stop']);
-    assert.strictEqual(items.filter(function (it) { return typeof it.onSelect === 'function'; }).length, 4);
+    assert.deepStrictEqual(calls, ['pause', 'resume', 'endRepetition', 'skipEntry', 'stop']);
+    assert.strictEqual(items.filter(function (it) { return typeof it.onSelect === 'function'; }).length, 5);
 });
 
 // ---- title and status line ------------------------------------------------------------
@@ -490,7 +490,7 @@ t.test('status line paused, running and done', function () {
 
 t.test('idle items are title and controls only', function () {
     var w = setup({ none: true });
-    assert.deepStrictEqual(plain(labels(w)), ['No run', '---', 'Pause run', 'Resume run', 'End repetition', 'Stop run']);
+    assert.deepStrictEqual(plain(labels(w)), ['No run', '---', 'Pause run', 'Resume run', 'End repetition', 'Skip entry', 'Stop run']);
     assert.strictEqual(w.rm.signature(), 'idle');
 });
 
@@ -502,12 +502,12 @@ t.test('the top level is fixed whatever the wave count', function () {
     [two, four].forEach(function (w) {
         var items = w.rm.items();
         var groups = w.rm.rows();
-        assert.strictEqual(items.length, 13);
-        assert.strictEqual(items[7].separator, true);
+        assert.strictEqual(items.length, 14);
+        assert.strictEqual(items[8].separator, true);
         assert.strictEqual(groups.length, 5);
         for (var g = 0; g < groups.length; g++) {
-            assert.ok(Array.isArray(items[8 + g].items), 'entry ' + g);
-            assert.ok(items[8 + g].label({}).indexOf(groups[g].label) > 0, 'entry text ' + g);
+            assert.ok(Array.isArray(items[9 + g].items), 'entry ' + g);
+            assert.ok(items[9 + g].label({}).indexOf(groups[g].label) > 0, 'entry text ' + g);
         }
         assert.strictEqual(groupItems(w).length, groups.length);
     });
@@ -626,11 +626,11 @@ t.test('the todo mark is two no-break spaces', function () {
     assert.strictEqual(w.rm.MARK.todo.length, 2);
 });
 
-t.test('both menus take the four run commands from one table', function () {
+t.test('both menus take the five run commands from one table', function () {
     var w = setup({ waves: 2 });
     var table = w.S.modules.adventures.menu.COMMANDS;
     assert.deepStrictEqual(plain(table.map(function (c) { return c.name; })),
-        ['pause', 'resume', 'endRepetition', 'stop']);
+        ['pause', 'resume', 'endRepetition', 'skipEntry', 'stop']);
     table.forEach(function (c) {
         assert.ok(itemByLabel(w, c.label), c.label);
     });
@@ -682,4 +682,71 @@ t.test('a Pause x min row counts its minutes from the state clock and names no f
     var wait = list[at + 1];
     assert.strictEqual(wait.detail, '3 min left');
     assert.strictEqual(wait.file, '');
+});
+
+// ---- queue runs ----------------------------------------------------------------------
+
+// A queue run of o.waves waves, in a queue whose widest template entry has `width` waves.
+function queueWorld(o) {
+    var w = setup(o);
+    w.st.current().request.queue = {
+        id: 'q1', label: 'Long and short', index: 0, pass: 0, loop: false, passes: 0, early: false,
+        retrain: 'settings', noMap: 'pause', width: o.width, skip: 0,
+        entries: [{ kind: 'template', id: 't1', templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 1 }]
+    };
+    return w;
+}
+
+function counts(w) {
+    return w.rm.rows().map(function (g) { return g.rows.length; });
+}
+
+t.test('a queue run has one signature for the whole queue', function () {
+    var w = queueWorld({ waves: 2, width: 3 });
+    assert.strictEqual(w.rm.signature(), 'queue:3');
+    assert.strictEqual(setup({ waves: 2 }).rm.signature(), 'waves:2');
+});
+
+t.test('the waves group pads to the queue width with skip rows', function () {
+    var w = queueWorld({ waves: 2, width: 4 });
+    var group = w.rm.rows().filter(function (g) { return g.rows.some(function (r) { return /^Wave \d/.test(r.label); }); })[0];
+    assert.strictEqual(group.rows.length, 4);
+    assert.deepStrictEqual(plain(group.rows.map(function (r) { return r.mark; })).slice(2), ['skip', 'skip']);
+    assert.strictEqual(group.rows[3].detail, 'not used');
+});
+
+t.test('a queue run drops wave rows past its width', function () {
+    var w = queueWorld({ waves: 4, width: 2 });
+    var group = w.rm.rows().filter(function (g) { return g.rows.some(function (r) { return /^Wave \d/.test(r.label); }); })[0];
+    assert.strictEqual(group.rows.length, 2);
+});
+
+t.test('a hand-over from a 3-wave template to a scenario and a 1-wave template keeps the row set', function () {
+    var w = queueWorld({ waves: 3, width: 3 });
+    var calls = [];
+    w.S.kernel.ui = w.S.kernel.ui || {};
+    w.S.kernel.ui.refreshBarMenu = function (id) { calls.push(id); return true; };
+    w.S.kernel.ui.showBarMenu = function () { return true; };
+    var items = w.rm.items();
+    var before = counts(w);
+    var childCounts = function (list) { return list.filter(function (it) { return it.items; }).map(function (it) { return it.items.length; }); };
+    var itemChildren = childCounts(items);
+
+    var r = w.st.run();
+    r.scenarioId = 'twins';
+    r.paths = [];
+    assert.strictEqual(w.rm.signature(), 'queue:3');
+    assert.deepStrictEqual(counts(w), before);
+    assert.strictEqual(w.rm.sync(), false);
+
+    r.scenarioId = '';
+    r.paths = WAVES.slice(0, 1);
+    assert.strictEqual(w.rm.signature(), 'queue:3');
+    assert.deepStrictEqual(counts(w), before);
+    assert.strictEqual(w.rm.sync(), false);
+    assert.strictEqual(calls.length, 0);
+    assert.deepStrictEqual(childCounts(w.rm.items()), itemChildren);
+    var padded = w.rm.rows().filter(function (g) { return g.rows.length === 3; })[0].rows;
+    assert.strictEqual(padded[1].mark, 'skip');
+    assert.strictEqual(padded[2].mark, 'skip');
 });
