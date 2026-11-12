@@ -273,7 +273,7 @@
         var run = runFromTemplate(rec, chk, typeof zoneId === 'number' ? zoneId : null, 0, S.RunStep.Muster);
         store().begin(makeRequest(rec, count), run);
         wakeRun();
-        S.kernel.log('adventures', 'run started from home:', rec.label, 'x' + count, 'zone', zoneId,
+        S.kernel.log('adventures', 'run started from home:', rec.label, 'x' + count, zoneText(zoneId),
             '(' + warnings.length + ' warning(s))');
         notify('Run started from home: ' + rec.label + ' ×' + count + '.' +
             (warnings.length ? ' ' + warnings.length + ' warning(s) in the log.' : ''));
@@ -300,7 +300,12 @@
             return null;
         }
         var rs = store().current();
-        if (rs.request || rs.run) {
+        if (store().settled(rs)) {
+            // The last run is over (home, or done): nothing to ask about.
+            S.kernel.log('adventures', 'finished run replaced without asking:', rs.run.label);
+            cancelQueued();
+            store().dropRound();
+        } else if (rs.request || rs.run) {
             if (!agree(replaceQuestion(rs))) return null;
             // The old run must not act while the prompts below are answered. A
             // queued attack leaves its round half sent; later exits keep the
@@ -356,6 +361,18 @@
         return w.wave - 1;
     }
 
+    // Where a new scenario series starts, runs and trips named apart, since
+    // the trip count of the scenario is no run count: 'run 1 of 2, trip 1 of 3'.
+    function seriesText(runs, trip, trips) {
+        return 'run 1 of ' + runs + ', trip ' + (trip + 1) + ' of ' + trips;
+    }
+
+    // From home with no map of the adventure open yet, the zone id is unknown
+    // until StartMap opens one, so the log says so instead of 'zone null'.
+    function zoneText(zoneId) {
+        return typeof zoneId === 'number' ? 'zone ' + zoneId : 'no map open yet';
+    }
+
     function startScenario(id) {
         var p = startPrompts(S.modules.adventures.scenarios.get(id), id, 'Scenario');
         if (!p) return false;
@@ -403,10 +420,12 @@
         });
         store().begin(makeRequest({ id: '', label: rec.label, adventure: rec.adventure }, p.count), run);
         wakeRun();
-        S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + p.count, 'at trip',
-            trip + 1, 'of', rec.trips.length, 'zone', zoneId, '(' + warnings.length + ' warning(s))');
-        notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', trip ' + (trip + 1) +
-            ' of ' + rec.trips.length + '.' + (warnings.length ? ' Warning: ' + warnings.join('; ') + '.' : ''));
+        S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + p.count + ',',
+            seriesText(p.count, trip, rec.trips.length) + ',', zoneText(zoneId),
+            '(' + warnings.length + ' warning(s))');
+        notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', ' +
+            seriesText(p.count, trip, rec.trips.length) + '.' +
+            (warnings.length ? ' Warning: ' + warnings.join('; ') + '.' : ''));
         return true;
     }
 

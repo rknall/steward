@@ -2168,9 +2168,11 @@ t.test('Restart: in LastQuest resumes without a second claim', function () {
     assert.strictEqual(claimsOf(w, 'q9').length, 1);
 });
 
+// Run 1 of 2: the last run of a series is settled once home and is not
+// written to the file (next test).
 t.test('Restart: in Retrain resumes without a second order', function () {
     var w = retrainWorld();
-    series(w, { step: w.S.RunStep.Retrain, run: { snapshot: plain(RETRAIN_SNAPSHOT) } });
+    series(w, { step: w.S.RunStep.Retrain, count: 2, run: { snapshot: plain(RETRAIN_SNAPSHOT) } });
     tick(w);
     play(w, function () { return w.productionOrders.length === 1; });
     inFlight(w);
@@ -2181,6 +2183,15 @@ t.test('Restart: in Retrain resumes without a second order', function () {
     assert.deepStrictEqual(ordersOf(w), ['Knight 4', 'Rifle 10']);
     assert.strictEqual(w.productionOrders.length, 2, 'one order per unit across the restart');
     assert.ok(!logged(w, /retrain off/), 'the setting survived the restart');
+});
+
+t.test('Restart: the last run back home resumes nothing and the next start asks nothing (#64)', function () {
+    var w = retrainWorld();
+    series(w, { step: w.S.RunStep.Retrain, run: { snapshot: plain(RETRAIN_SNAPSHOT) } });
+    var file = JSON.parse(w.fs.disk[Object.keys(w.fs.disk).filter(function (k) { return /run\.json$/.test(k); })[0]]);
+    assert.strictEqual(file.run, null);
+    assert.strictEqual(file.request, null);
+    assert.ok(w.st.run(), 'the run goes on in memory');
 });
 
 // ---- 21. Kernel pause without a reload (B1) ------------------------------------------------

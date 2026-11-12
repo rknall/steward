@@ -365,6 +365,20 @@ t.test('folderPath puts a typed adventure in its folder and a campaign in a sub-
     assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Venture' }), false)), ['Ventures']);
 });
 
+t.test('folderPath reads the host type in any spelling, so Mini Missions sit next to Missions (#65)', function () {
+    var s = setup();
+    var a = s.adv;
+    ['MiniMission', 'MiniMissions', 'Mini_Mission', 'Mini-missions', 'minimission', 'Mini Missions']
+        .forEach(function (ty) {
+            assert.deepStrictEqual(plain(a.folderPath(def({ type: ty }), false)), ['Mini-missions'], ty);
+        });
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Missions' }), false)), ['Missions']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'CoopMission' }), false)), ['Co-op missions']);
+    assert.deepStrictEqual(plain(a.folderPath(def({ type: 'Ventures' }), false)), ['Ventures']);
+    var order = plain(a.folderOrder());
+    assert.strictEqual(order.indexOf('Mini-missions'), order.indexOf('Missions') + 1);
+});
+
 t.test('folderPath sends event adventures to Events and unknown types to Other under the raw value', function () {
     var s = setup();
     var a = s.adv;
