@@ -39,6 +39,11 @@
                 title: 'Event calculator',
                 icon:  '⚑',
                 render: function ($body, h) {
+                    // Every dashboard draw of the tab starts from fresh field
+                    // reads; edits last only across the card's own redraws.
+                    if (S.modules.eventcalc.resetSession) {
+                        S.modules.eventcalc.resetSession();
+                    }
                     if (S.modules.eventcalc.renderSection) {
                         return S.modules.eventcalc.renderSection($body, h);
                     }
@@ -54,11 +59,6 @@
                 {
                     label: 'Event calculator…',
                     onSelect: function () {
-                        // A fresh open re-reads the fields instead of
-                        // showing edits from an earlier session.
-                        if (S.modules.eventcalc.resetSession) {
-                            S.modules.eventcalc.resetSession();
-                        }
                         S.kernel.ui.openDashboard('events');
                     }
                 },
