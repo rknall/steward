@@ -607,6 +607,92 @@ t.test('StartMap: a reload after the send and before the verify sends no second 
     assert.strictEqual(mapStarts(w).length, 1);
 });
 
+// #62: the star menu that a map start reads is unreadable for a moment, and a
+// send fails. Breaks the star-menu read while on is true.
+function flakyMenu(w) {
+    var player = w.gi.mCurrentPlayer;
+    var vec = player.getAvailableBuffs_vector;
+    var ctl = { on: false };
+    player.getAvailableBuffs_vector = function () {
+        return ctl.on ? null : vec.apply(this, arguments);
+    };
+    return ctl;
+}
+
+t.test('StartMap: an unreadable map stock waits and re-reads instead of pausing, then one start goes out', function () {
+    var w = homeWorld();
+    var menu = flakyMenu(w);
+    series(w, { step: w.S.RunStep.StartMap });
+    menu.on = true;
+    drive(w, { max: 20 });
+    assertStep(w, 'StartMap');
+    assert.strictEqual(mapStarts(w).length, 0, 'nothing sent while unreadable');
+    menu.on = false;
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+});
+
+t.test('StartMap: a precheck that cannot read the stock drops its round and waits, no MapFailed', function () {
+    var w = homeWorld();
+    var menu = flakyMenu(w);
+    series(w, { step: w.S.RunStep.StartMap });
+    // The step's own read passes; the queued precheck finds the menu gone.
+    tick(w);
+    menu.on = true;
+    play(w);
+    menu.on = false;
+    assertStep(w, 'StartMap');
+    assert.strictEqual(mapStarts(w).length, 0);
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+});
+
+t.test('StartMap: a map stock unreadable for good pauses after READ_MAX_MS, nothing sent', function () {
+    var w = homeWorld();
+    var menu = flakyMenu(w);
+    series(w, { step: w.S.RunStep.StartMap });
+    menu.on = true;
+    drive(w, { max: 200 });
+    assertPaused(w, w.S.RunPause.NotObserved, /map stock still not readable/);
+    assert.strictEqual(mapStarts(w).length, 0);
+});
+
+t.test('StartMap: a send that failed is sent once more when the stock shows no map started', function () {
+    var w = homeWorld();
+    w.buffSendThrows = true;
+    series(w, { step: w.S.RunStep.StartMap });
+    tick(w);
+    play(w);
+    w.buffSendThrows = false;
+    assertStep(w, 'StartMap');
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1, 'one map started');
+    assert.ok(logged(w, /no map started .*sending once more/), 'the retry is logged');
+});
+
+t.test('StartMap: a send that failed but spent the map is never sent again', function () {
+    var w = homeWorld();
+    w.auto.map = false;
+    // The packet goes out and the map is spent, but the call reports failure.
+    var send = w.gi.SendServerAction;
+    var lie = true;
+    w.gi.SendServerAction = function () {
+        send.apply(this, arguments);
+        if (lie) {
+            lie = false;
+            throw new Error('lost reply');
+        }
+    };
+    series(w, { step: w.S.RunStep.StartMap });
+    drive(w, { max: 400 });
+    assertPaused(w, w.S.RunPause.MapFailed, /map started but not listed/);
+    assert.strictEqual(mapStarts(w).length, 1, 'never a second map start');
+    assert.ok(logged(w, /map stock dropped/), w.H.logs().map(function (l) { return l.args.join(' '); }).join('\n'));
+});
+
 // ---- 7. Depart ------------------------------------------------------------------
 
 t.test('Depart: one sendToZone per general, then Jump with no arrival deadline', function () {

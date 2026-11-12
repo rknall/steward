@@ -568,12 +568,89 @@
                 'map start sent but not seen; check the star menu, then Resume');
             return;
         }
-        var next = ld().settleRound(r, RS.StartMap, function (f) {
-            st().pause(S.RunPause.MapFailed, 'start map failed: ' + f.reason);
-        }, 'map start');
-        if (next !== 'new') return;
+        var res = round && ld().complete(round) ? ld().resultOf(round, 'map') : null;
+        var unsent = res ? nothingSent(res) : null;
+        if (unsent) {
+            // Nothing went out: no failure, only a read to try again (#62).
+            st().dropRound('map start: ' + res.reason);
+            mapReadWait(r, unsent);
+            return;
+        }
+        var again = false;
+        if (res && res.status === S.ActionResult.Failed && res.reason === S.core.actions.SEND_FAILED &&
+                !resentInStep(r, m)) {
+            var how = afterSendFailed(r, round);
+            if (how === 'wait') return;
+            again = how === 'send';
+        }
+        if (!again) {
+            var next = ld().settleRound(r, RS.StartMap, function (f) {
+                st().pause(S.RunPause.MapFailed, 'start map failed: ' + f.reason);
+            }, 'map start');
+            if (next !== 'new') return;
+        }
+        var n = S.core.buffs.mapStock(r.adventure);
+        if (n === null) {
+            mapReadWait(r, 'map stock');
+            return;
+        }
         var nr = ld().startRound(r, RS.StartMap, []);
+        nr.mapStock = n;
+        if (again) {
+            ld().mark(r, 'map').resentAt = now();
+            st().save();
+        }
         ld().attempt(nr, 'map', ld().wrapSend(r, 'map', S.core.buffs.map(r.adventure)), ld().seenOnVerified('map'));
+    }
+
+    // Whether this step already sent a map start again after a failed send:
+    // that happens once per step (a Resume starts the step anew).
+    function resentInStep(r, m) {
+        return !!m && typeof m.resentAt === 'number' && m.resentAt >= r.since;
+    }
+
+    // A map start refused before anything went out (a read failed in its
+    // precheck, or its send found no usable star-menu entry): the read to
+    // wait for, else null.
+    function nothingSent(res) {
+        if (res.status !== S.ActionResult.Refused) return null;
+        if (res.reason === S.core.actions.NOT_SENT) return 'map star-menu entry';
+        return S.core.buffs.mapReadRefusal(res.reason);
+    }
+
+    // A read the map start needs failed: waits like any read, but only for
+    // READ_MAX_MS from the step's first such wait, then pauses (#62).
+    function mapReadWait(r, what) {
+        ld().waitRead(r, what);
+        ld().hold(r, 'start map: ' + what + ' still not readable after ' +
+            Math.round(ld().READ_MAX_MS / 1000) + ' s; check the star menu, then Resume');
+    }
+
+    // A send that failed (the host call was made, so the packet may still
+    // have gone out) is sent once more, but only when the own adventures read
+    // (checked by the caller: no map of that name is listed) and the map stock
+    // has not dropped below the round's own read once the round settled. A
+    // dropped stock means the map started: it is marked seen and waits to be
+    // listed, never sent again. Returns 'wait', 'send' or 'fail' (pause).
+    function afterSendFailed(r, round) {
+        if (ld().roundSettling(round)) {
+            ld().waitSent(r, 'map start');
+            return 'wait';
+        }
+        var n = S.core.buffs.mapStock(r.adventure);
+        if (n === null) {
+            mapReadWait(r, 'map stock');
+            return 'wait';
+        }
+        if (typeof round.mapStock !== 'number') return 'fail';
+        if (n < round.mapStock) {
+            ld().markSeen(r, 'map');
+            log('map start send failed but the map stock dropped (' + round.mapStock + ' -> ' + n +
+                '); waiting for the map to be listed');
+            return 'wait';
+        }
+        log('map start send failed and no map started (stock ' + n + '); sending once more');
+        return 'send';
     }
 
     // Sends every loadout general to the island once. A general counts as

@@ -1014,3 +1014,95 @@ t.test('building precheck and check read live after a pass', function () {
     s.mine.productionBuff = {};
     assert.strictEqual(def.check(), true);
 });
+
+// ---- #63: a camp buff never goes out twice --------------------------------------
+
+function campActing(buff) {
+    var s = acting({ buffs: [buff] });
+    s.env.buildings[500] = { getPlayerID: function () { return -1; } };
+    return s;
+}
+
+t.test('camp buff not observed fails after one send, never a second, and says unseen', function () {
+    var s = campActing({ type: 'CampBuff', amount: 3 });
+    var def = s.buffs.camp('CampBuff', 500);
+    assert.strictEqual(def.retries, 0);
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Failed);
+    assert.strictEqual(res.sends, 1);
+    assert.strictEqual(res.unseen, true);
+    assert.strictEqual(s.sent.actions.length, 1, 'one buff packet only');
+});
+
+t.test('camp buff watches the stock for twice the buff window, so a late drop still verifies', function () {
+    var buff = { type: 'CampBuff', amount: 3 };
+    var s = campActing(buff);
+    var def = s.buffs.camp('CampBuff', 500);
+    assert.strictEqual(def.timeoutMs, 30000);
+    // The drop shows only after the first 15 s, where a retry used to go out.
+    var polls = 0;
+    var check = def.check;
+    def.check = function (base) {
+        polls++;
+        if (polls * s.S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS > 20000) buff.amount = 2;
+        return check(base);
+    };
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions.length, 1);
+});
+
+t.test('camp buff with no usable star-menu entry sends nothing (NOT_SENT)', function () {
+    var buff = { type: 'CampBuff', amount: 3 };
+    var s = campActing(buff);
+    // The stock reads, but the entry the precheck finds has no unique id.
+    s.H.host.game.gi.mCurrentPlayer.getAvailableBuffs_vector = function () {
+        return [{ amount: 3, GetType: function () { return 'CampBuff'; },
+            GetResourceName_string: function () { return ''; }, GetUniqueId: function () { return null; } }];
+    };
+    var res = run(s, s.buffs.camp('CampBuff', 500));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, s.S.core.actions.NOT_SENT);
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+// ---- #62: map start reads --------------------------------------------------------
+
+t.test('map start sends the entry its precheck read, even when a re-read misses the menu', function () {
+    var buff = { type: 'Adventure', resource: 'AdvA', amount: 1 };
+    var s = acting({ buffs: [buff] });
+    s.env.onSend = function () { s.env.own = [{ name: 'AdvA', zoneId: 1 }]; };
+    var def = s.buffs.map('AdvA');
+    var pre = def.precheck;
+    var gi = s.H.host.game.gi;
+    var vec = gi.mCurrentPlayer.getAvailableBuffs_vector;
+    def.precheck = function () {
+        var out = pre();
+        gi.mCurrentPlayer.getAvailableBuffs_vector = function () { return null; };
+        return out;
+    };
+    def.baseline = function () {
+        gi.mCurrentPlayer.getAvailableBuffs_vector = vec;
+        return { open: 0, stock: 1 };
+    };
+    var send = def.send;
+    def.send = function (b) {
+        gi.mCurrentPlayer.getAvailableBuffs_vector = function () { return null; };
+        var out = send(b);
+        gi.mCurrentPlayer.getAvailableBuffs_vector = vec;
+        return out;
+    };
+    var res = run(s, def);
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions.length, 1);
+});
+
+t.test('mapReadRefusal names the read of a read refusal and nothing else', function () {
+    var s = acting({ buffs: [] });
+    assert.strictEqual(s.buffs.mapReadRefusal('map stock unreadable'), 'map stock');
+    assert.strictEqual(s.buffs.mapReadRefusal('adventures unreadable'), 'adventure list');
+    assert.strictEqual(s.buffs.mapReadRefusal('no map in stock'), null);
+    assert.strictEqual(s.buffs.mapStock('AdvA'), 0);
+    breakStock(s);
+    assert.strictEqual(s.buffs.mapStock('AdvA'), null);
+});

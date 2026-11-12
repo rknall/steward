@@ -69,6 +69,10 @@
     // no risk of a double send.
     var NOT_SENT = 'nothing sent';
 
+    // Reason of a Failed result whose last send returned false: the host call
+    // was made, so whether the packet went out is not known.
+    var SEND_FAILED = 'send failed';
+
     // Poll gap: the kernel's own spacing between queued actions, read at call
     // time. A non-positive value would make the window never close, so it is
     // floored at 1 ms.
@@ -187,7 +191,7 @@
                 S.kernel.warn(categoryOf(state.def), labelOf(state.def) + ': send failed, retrying');
                 enqueue(state);
             } else {
-                finish(state, S.ActionResult.Failed, 'send failed');
+                finish(state, S.ActionResult.Failed, SEND_FAILED);
             }
             return;
         }
@@ -248,6 +252,7 @@
         RETRIES:  RETRIES,
         STEP:     STEP,
         NOT_SENT: NOT_SENT,
+        SEND_FAILED: SEND_FAILED,
         attempt:  attempt,
         step:     step
     };
