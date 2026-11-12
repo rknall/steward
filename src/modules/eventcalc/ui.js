@@ -9,7 +9,8 @@
  *     its production per 12 h, the buffed rate in its own column while some
  *     field is buffed, and the refills still needed until the event shop
  *     closes, plus a total row.
- *   - Event resources held (held.js), whether or not an event is live.
+ *   - Event resources held (held.js): the live event's by default, every
+ *     event's when its toggle is off.
  *
  * The card has no controls: the time left is the shop close the event
  * reports, and route seconds and units per item are the saved settings.
@@ -318,7 +319,7 @@
             if (liveEvents().length) $wrap.append(estimateCard(h));
             $wrap.append(refillCard(h, redraw));
             if (S.modules.eventcalc.heldCard) {
-                try { $wrap.append(S.modules.eventcalc.heldCard(h)); }
+                try { $wrap.append(S.modules.eventcalc.heldCard(h, redraw)); }
                 catch (e) { S.kernel.warn('eventcalc', 'heldCard threw:', e); }
             }
         }

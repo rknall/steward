@@ -1,8 +1,10 @@
 /*
  * Held event resources for the eventcalc module's Events tab.
  *
- * heldCard(h) draws one flat table (Resource, Event, Amount) of the event
- * resources the player holds, whether or not an event is live: the live
+ * heldCard(h, redraw) draws one flat table (Resource, Event, Amount) of the
+ * event resources the player holds. Under it a toggle bound to the setting
+ * heldActiveOnly (on by default) limits the table to the live event's
+ * resources; off lists every event's, whether or not it is live. The live
  * event's row carries a Live badge, a zero amount is greyed, an unreadable
  * amount shows a muted dash (never 0). Only resources that belong to a
  * known event (a base code in the data table) are listed; the host also flags
@@ -42,24 +44,57 @@
         return (entry && entry.name) || row.code || '';
     }
 
-    // Rows the card lists: a resource tied to a known event only.
-    function shownRows() {
+    // Whether the table lists only the live event's resources. Read from the
+    // dashboard buffer so an unsaved toggle shows at once; a stored object
+    // without the key falls back to the default.
+    function activeOnly(h) {
+        var s = (h && h.settings('eventcalc')) || {};
+        var v = s.heldActiveOnly;
+        if (typeof v !== 'boolean') {
+            var d = S.modules.eventcalc.defaultSettings || {};
+            v = d.heldActiveOnly;
+        }
+        return v === true;
+    }
+
+    // Rows the card lists: a resource tied to a known event only, and with
+    // onlyLive only the live event's.
+    function shownRows(onlyLive) {
         var all = held();
         var out = [];
         for (var i = 0; i < all.length; i++) {
-            if (all[i] && all[i].code) out.push(all[i]);
+            if (!all[i] || !all[i].code) continue;
+            if (onlyLive && !all[i].live) continue;
+            out.push(all[i]);
         }
         return out;
+    }
+
+    // The filter toggle under the table; a change redraws the card.
+    function filterField(h, redraw) {
+        return h.field('Only the active event',
+            'Off lists the resources of every event',
+            h.toggle({
+                ns: 'eventcalc', path: 'heldActiveOnly', label: 'Only the active event',
+                // A stored object without the key still shows the default.
+                checked: activeOnly(h),
+                onChange: function () { if (typeof redraw === 'function') redraw(); }
+            }));
     }
 
     function muted(text) {
         return $('<span>', { 'class': 'steward-muted' }).text(text);
     }
 
-    function heldCard(h) {
+    function heldCard(h, redraw) {
         var $card = h.card({ title: 'Event resources' });
-        var rows = shownRows();
-        if (!rows.length) return $card.append(h.empty('No event resources held.'));
+        var onlyLive = activeOnly(h);
+        var rows = shownRows(onlyLive);
+        if (!rows.length) {
+            $card.append(h.empty(onlyLive ? 'No resources of an active event held.'
+                                          : 'No event resources held.'));
+            return $card.append(filterField(h, redraw));
+        }
 
         var body = [];
         for (var i = 0; i < rows.length; i++) {
@@ -76,7 +111,7 @@
                            : muted('—') }
             ]);
         }
-        return $card.append(h.table({
+        $card.append(h.table({
             cols: [
                 { label: 'Resource' },
                 { label: 'Event' },
@@ -84,6 +119,7 @@
             ],
             rows: body
         }));
+        return $card.append(filterField(h, redraw));
     }
 
     function heldTile() {

@@ -460,7 +460,7 @@ t.test('tiles describe the zone and the adventure setting from the buffer', func
 
 // ---- gem pits and mayor's house -------------------------------------------------
 
-t.test('render adds the gem pit table with a total when a pit is placed', function () {
+t.test('the settings column shows the gem pit table with a total under the settings card', function () {
     var r = uiRig([]);
     r.H.Steward.core.events.refill.rates12h = function (names) {
         t.assert.strictEqual(JSON.stringify(names), '["GemPit"]');
@@ -470,10 +470,11 @@ t.test('render adds the gem pit table with a total when a pit is placed', functi
             totalRate12h: 4, totalRate12hBuffed: 6
         };
     };
-    var $main = r.$('<div>');
-    r.mod.render($main, r.h);
-    var $cards = $main.find('.steward-card');
+    var $side = r.$('<div>');
+    r.mod.side($side, r.h);
+    var $cards = $side.find('.steward-card');
     t.assert.strictEqual($cards.length, 2);
+    t.assert.ok($cards.eq(0).text().indexOf('Collect pickups') >= 0, 'settings card first');
     var $pits = $cards.eq(1);
     t.assert.strictEqual($pits.find('.steward-card-meta').text(), '2 gem pits');
     var $rows = $pits.find('tbody tr');
@@ -484,18 +485,29 @@ t.test('render adds the gem pit table with a total when a pit is placed', functi
     t.assert.strictEqual($pits.find('tfoot td').eq(1).text(), '4 (6)');
 });
 
-t.test('render shows no gem pit table without a pit or off the home island', function () {
+t.test('the settings column shows no gem pit table without a pit or off the home island', function () {
     var r = uiRig([]);
     var R = r.H.Steward.core.events.refill;
     R.rates12h = function () { return { rows: [], totalRate12h: 0, totalRate12hBuffed: null }; };
-    var $main = r.$('<div>');
-    r.mod.render($main, r.h);
-    t.assert.strictEqual($main.find('.steward-card').length, 1);
+    var $side = r.$('<div>');
+    r.mod.side($side, r.h);
+    t.assert.strictEqual($side.find('.steward-card').length, 1);
 
     R.rates12h = function () { return null; };
-    $main = r.$('<div>');
+    $side = r.$('<div>');
+    r.mod.side($side, r.h);
+    t.assert.strictEqual($side.find('.steward-card').length, 1);
+});
+
+t.test('the main column no longer holds the gem pit table', function () {
+    var r = uiRig([]);
+    r.H.Steward.core.events.refill.rates12h = function () {
+        return { rows: [{ building: 'GemPit', grid: 10, rate12h: 2, rate12hBuffed: null }],
+                 totalRate12h: 2, totalRate12hBuffed: null };
+    };
+    var $main = r.$('<div>');
     r.mod.render($main, r.h);
-    t.assert.strictEqual($main.find('.steward-card').length, 1);
+    t.assert.strictEqual($main.text().indexOf('Gem pits'), -1);
 });
 
 t.test('render lists the mayor house items less the population and the Events tab resources', function () {

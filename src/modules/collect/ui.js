@@ -2,10 +2,11 @@
  * Dashboard surface for the collect module.
  *
  * Renders on the Buildings tab: a settings column and a card listing what
- * sits on the zone. Below it a card with the gem pits on the home island and
- * their output per 12 h (S.core.events.refill.rates12h, buffs included; only
- * when a pit is placed), and a card with the mayor's house items: the held
- * resources without a storehouse category (S.core.resources.uncategorized),
+ * sits on the zone. The settings column also holds, under the settings card,
+ * the gem pits on the home island and their output per 12 h
+ * (S.core.events.refill.rates12h, buffs included; only when a pit is placed).
+ * Below the zone card the main column lists the mayor's house items: the
+ * held resources without a storehouse category (S.core.resources.uncategorized),
  * less the ones another steward view already shows (only when the list can
  * be read). The Discover button is a one-shot probe that walks the
  * current zone and logs every candidate plus how it matched against the
@@ -93,6 +94,9 @@
             'Clicks quest objects and collectibles while a run is on the map',
             h.toggle({ ns: 'collect', path: 'adventureZones', label: 'Also on adventure maps' })));
         $side.append($card);
+
+        var pits = gemPits();
+        if (pits) $side.append(gemPitCard(h, pits));
     }
 
     // Collectibles currently on the zone; a failing host read counts as none.
@@ -215,7 +219,7 @@
     }
 
     // Main column: what sits on the zone, plus the one-shot log probe, then
-    // the gem pits (when placed) and the mayor's house items.
+    // the mayor's house items.
     function render($main, h) {
         var groups = collectibleGroups(true);
 
@@ -240,8 +244,6 @@
             { wide: true }));
         $main.append($card);
 
-        var pits = gemPits();
-        if (pits) $main.append(gemPitCard(h, pits));
         var items = mayorItems();
         if (items) $main.append(mayorCard(h, items));
     }
