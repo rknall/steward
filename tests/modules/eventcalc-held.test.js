@@ -11,8 +11,14 @@ function withJq(H) {
 }
 
 // Stubs heldResources with fixed rows and draws the card into a fresh div.
-function draw(rows, boot) {
+// The filter is off unless activeOnly is given, so every event's rows show.
+function draw(rows, boot, activeOnly) {
     var H = withJq(boot || harness.boot());
+    if (activeOnly !== undefined) {
+        if (activeOnly !== null) H.settings.write('eventcalc', { heldActiveOnly: activeOnly });
+    } else {
+        H.settings.write('eventcalc', { heldActiveOnly: false });
+    }
     H.Steward.core.events.heldResources = function () {
         return { source: 'host', rows: rows };
     };
@@ -64,6 +70,7 @@ t.test('heldCard shows the empty state with no rows or when heldResources throws
     var d = draw([]);
     t.assert.strictEqual(d.$p.find('.steward-empty-title').text(), 'No event resources held.');
     var H = withJq(harness.boot());
+    H.settings.write('eventcalc', { heldActiveOnly: false });
     H.Steward.core.events.heldResources = function () { throw new Error('boom'); };
     var $p = H.$('<div>');
     $p.append(H.Steward.modules.eventcalc.heldCard(H.Steward.kernel.ui.helpers));
@@ -72,7 +79,7 @@ t.test('heldCard shows the empty state with no rows or when heldResources throws
 
 t.test('heldCard renders a host name containing markup as text', function () {
     var d = draw([row('<b>x</b>', 'HW', 3)]);
-    t.assert.strictEqual(d.$p.find('b').length, 0);
+    t.assert.strictEqual(d.$p.find('tbody b').length, 0);
     t.assert.ok(d.$p.text().indexOf('<b>x</b>') >= 0);
 });
 
@@ -82,4 +89,45 @@ t.test('heldTile is null with and without a live event', function () {
     t.assert.strictEqual(tile(), null);
     H.host.game.gi.mEventManager.GetActiveEventNames = function () { return ['HW2017plus_Content']; };
     t.assert.strictEqual(tile(), null);
+});
+
+// ---- active event filter ------------------------------------------------------
+
+t.test('by default heldCard lists only the live event resources', function () {
+    var d = draw([row('HalloweenResource', 'HW', 12, true), row('WMShoulderPad', 'WM', 5, false)], null, null);
+    t.assert.strictEqual(d.H.Steward.modules.eventcalc.defaultSettings.heldActiveOnly, true);
+    t.assert.strictEqual(d.$p.find('tbody tr').length, 1);
+    t.assert.strictEqual(d.$p.text().indexOf('5'), -1);
+    t.assert.strictEqual(d.$p.find('input[type=checkbox]').length, 1, 'toggle under the table');
+    t.assert.strictEqual(d.$p.find('input[type=checkbox]').attr('checked'), 'checked');
+});
+
+t.test('with the filter off heldCard lists every event resource', function () {
+    var d = draw([row('HalloweenResource', 'HW', 12, true), row('WMShoulderPad', 'WM', 5, false)], null, false);
+    t.assert.strictEqual(d.$p.find('tbody tr').length, 2);
+    t.assert.strictEqual(d.$p.find('input[type=checkbox]').attr('checked'), undefined);
+});
+
+t.test('without a live event the default shows its own empty state and the toggle', function () {
+    var d = draw([row('WMShoulderPad', 'WM', 5, false)], null, null);
+    t.assert.strictEqual(d.$p.find('tbody tr').length, 0);
+    t.assert.strictEqual(d.$p.find('.steward-empty-title').text(), 'No resources of an active event held.');
+    t.assert.strictEqual(d.$p.find('input[type=checkbox]').length, 1);
+});
+
+t.test('switching the toggle writes the buffer and redraws', function () {
+    var H = withJq(harness.boot());
+    H.Steward.core.events.heldResources = function () {
+        return { source: 'host', rows: [row('HalloweenResource', 'HW', 12, true), row('WMShoulderPad', 'WM', 5, false)] };
+    };
+    var h = H.Steward.kernel.ui.helpers;
+    var redraws = 0;
+    var $p = H.$('<div>');
+    $p.append(H.Steward.modules.eventcalc.heldCard(h, function () { redraws++; }));
+    $p.find('input[type=checkbox]').prop('checked', false).trigger('change');
+    t.assert.strictEqual(redraws, 1);
+    t.assert.strictEqual(h.settings('eventcalc').heldActiveOnly, false);
+    var $q = H.$('<div>');
+    $q.append(H.Steward.modules.eventcalc.heldCard(h));
+    t.assert.strictEqual($q.find('tbody tr').length, 2);
 });

@@ -5,7 +5,8 @@
  *
  *   {
  *     routeSeconds: 6,
- *     unitsPerItem: 1
+ *     unitsPerItem: 1,
+ *     heldActiveOnly: true
  *   }
  *
  * `routeSeconds` is the one-way walk in seconds between an event field and
@@ -15,6 +16,9 @@
  * `unitsPerItem` is how many deposit units one "Fill up" item adds to a
  * field. The in-client buff text says 1; it stays editable in case an
  * event ships a bigger refill item.
+ *
+ * `heldActiveOnly` limits the Event resources table to the live event's
+ * resources; off lists every event's. Its toggle sits under that table.
  *
  * There is no `enabled` key: the module is a read-only calculator that
  * never runs on the scheduler tick, so it has nothing to switch on or off
@@ -31,7 +35,8 @@
 
     S.modules.eventcalc.defaultSettings = {
         routeSeconds: 6,
-        unitsPerItem: 1
+        unitsPerItem: 1,
+        heldActiveOnly: true
     };
 
 }(Steward));
