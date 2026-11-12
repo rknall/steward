@@ -937,6 +937,7 @@ t.test('Apply: one boulder kind cleared skips only that kind\'s grids', function
 
 t.test('Apply: an unread onmap quest holds the dynamite', function () {
     var w = stormBoulders({ unread: true });
+    w.auto.readFails = true;
     passesFor(w, 120000);
     assertStep(w, 'Apply');
     assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
