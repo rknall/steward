@@ -492,6 +492,7 @@
             out.push({
                 name:     nm,
                 label:    S.core.locale.res(nm),
+                effect:   effectText(nm),
                 amount:   amount(nm),
                 buffType: type,
                 // A copy, so a caller cannot change the shared table.

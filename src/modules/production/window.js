@@ -557,7 +557,8 @@
         for (var i = 0; i < list.length; i++) {
             var b = list[i];
             var known = typeof b.amount === 'number';
-            options.push({ label: labelOf(b) + ' (' + (known ? b.amount : '?') + ')', value: b.name });
+            var effect = b.effect ? ' - ' + b.effect : '';
+            options.push({ label: labelOf(b) + effect + ' (' + (known ? b.amount : '?') + ')', value: b.name });
             if (b.name === cfg.buff) listed = true;
         }
         return h.dropdown(options, {
