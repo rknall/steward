@@ -947,6 +947,148 @@ t.test('itemWant running: a type-1 trigger naming the item does not make it open
     }
 });
 
+// ---- itemWant bound to a quest (opts.quest) ----------------------------------------
+
+var SUB04 = 'Buff_Adv_StormRecovery_SubQuest04';
+var SUB05 = 'Buff_Adv_StormRecovery_SubQuest05';
+var KIT_PREFIX = 'ChangeSkin_BuffAd_';
+var NOBLE_KIT = KIT_PREFIX + 'NobleResidenceKit';
+var SCHOOL_KIT = KIT_PREFIX + 'SchoolKit';
+
+function zeroStatuses(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push({ status: 0 });
+    return out;
+}
+
+function setStatus(list, idx) {
+    list[idx] = { status: 1 };
+    return list;
+}
+
+function type45(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push({ triggerIdx: i, type: 45, condition: 0 });
+    return out;
+}
+
+// The sub-quest that asks for the four ruins by building (onmap). extra: mode
+// (default 3), finished.
+function ruinQuest(statuses, extra) {
+    extra = extra || {};
+    return itemQuest({
+        name: SUB04,
+        ends: [0, 1, 2, 3].map(function (k) { return endCond('BuffAd_Ruin_0' + (k + 1), k, 'onmap'); }),
+        triggers: type45(6),
+        statuses: statuses || zeroStatuses(6),
+        mode: extra.mode === undefined ? 3 : extra.mode,
+        finished: extra.finished
+    });
+}
+
+// The sub-quest that asks to apply the four kits. extra.hostRunning adds the
+// client's IsRunning method returning that value.
+function kitQuest(mode, statuses, extra) {
+    var q = itemQuest({
+        name: SUB05,
+        ends: [
+            endCond(KIT_PREFIX + 'TavernKit1', 0),
+            endCond(KIT_PREFIX + 'ResidenceKit', 1),
+            endCond(NOBLE_KIT, 2),
+            endCond(SCHOOL_KIT, 3)
+        ],
+        triggers: type45(8),
+        statuses: statuses || zeroStatuses(8),
+        mode: mode
+    });
+    q.GetQuestDefinition().endConditions_vector.forEach(function (e, k) {
+        e.min = [2, 4, 2, 1][k];
+    });
+    if (extra && extra.hostRunning !== undefined) {
+        q.IsRunning = function () { return extra.hostRunning; };
+    }
+    return q;
+}
+
+function boundWant(list, item, quest, opts) {
+    var o = { quest: quest };
+    for (var k in (opts || {})) o[k] = opts[k];
+    return itemWantOf(list, item, o);
+}
+
+var RUIN_2 = ['BuffAd_Ruin_02'];
+
+t.test('itemWant bound: unbound, the noble kit is open by the ruin building', function () {
+    t.assert.strictEqual(itemWantOf([ruinQuest()], NOBLE_KIT, { buildings: RUIN_2 }), 'open');
+});
+
+t.test('itemWant bound: bound to SubQuest05 the ruin quest cannot make it open', function () {
+    var held = [];
+    t.assert.strictEqual(boundWant([ruinQuest()], NOBLE_KIT, SUB05, { buildings: RUIN_2, held: held }), 'none');
+    t.assert.strictEqual(held.length, 0);
+});
+
+t.test('itemWant bound: a quest in the pool but not running is held', function () {
+    var held = [];
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(2)], NOBLE_KIT, SUB05, { buildings: RUIN_2, held: held }), 'held');
+    t.assert.strictEqual(JSON.stringify(held), JSON.stringify([{ quest: SUB05, mode: 2 }]));
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(12)], NOBLE_KIT, SUB05, { buildings: RUIN_2 }), 'held');
+});
+
+t.test('itemWant bound: open once the bound quest runs, and the client flag must agree', function () {
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(3)], NOBLE_KIT, SUB05, { buildings: RUIN_2 }), 'open');
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(3, null, { hostRunning: false })], NOBLE_KIT, SUB05,
+            { buildings: RUIN_2 }), 'held');
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(3, null, { hostRunning: true })], NOBLE_KIT, SUB05,
+            { buildings: RUIN_2 }), 'open');
+});
+
+t.test('itemWant bound: a met ruin reads done unbound and none when bound elsewhere', function () {
+    var met = setStatus(zeroStatuses(6), 1);
+    t.assert.strictEqual(itemWantOf([ruinQuest(met)], NOBLE_KIT, { buildings: RUIN_2 }), 'done');
+    t.assert.strictEqual(boundWant([ruinQuest(met)], NOBLE_KIT, SUB05, { buildings: RUIN_2 }), 'none');
+});
+
+t.test('itemWant bound: a met kit condition in the running bound quest is done', function () {
+    var st = setStatus(zeroStatuses(8), 2);
+    t.assert.strictEqual(
+        boundWant([ruinQuest(), kitQuest(3, st)], NOBLE_KIT, SUB05, { buildings: RUIN_2 }), 'done');
+});
+
+t.test('itemWant bound: a bound quest that names no condition counts by the binding', function () {
+    var unnamed = [];
+    var site = { buildings: ['BuffAd_Site'], unnamed: unnamed };
+    t.assert.strictEqual(boundWant([ruinQuest()], SCHOOL_KIT, SUB04, site), 'open');
+    t.assert.strictEqual(JSON.stringify(unnamed), JSON.stringify([SUB04]));
+    t.assert.strictEqual(
+        boundWant([ruinQuest(null, { finished: true })], SCHOOL_KIT, SUB04, { buildings: ['BuffAd_Site'] }),
+        'done');
+    var held = [];
+    t.assert.strictEqual(
+        boundWant([ruinQuest(null, { mode: 2 })], SCHOOL_KIT, SUB04, { buildings: ['BuffAd_Site'], held: held }),
+        'held');
+    t.assert.strictEqual(JSON.stringify(held), JSON.stringify([{ quest: SUB04, mode: 2 }]));
+});
+
+t.test('itemWant bound: a potion bound to SubQuest04 follows its ruin', function () {
+    var list = [ruinQuest(), kitQuest(3)];
+    var opts = { buildings: ['BuffAd_Ruin_04'] };
+    t.assert.strictEqual(boundWant(list, STINKY, SUB04, opts), 'open');
+    var met = setStatus(zeroStatuses(6), 3);
+    t.assert.strictEqual(
+        boundWant([ruinQuest(met), kitQuest(3)], STINKY, SUB04, { buildings: ['BuffAd_Ruin_04'] }), 'done');
+});
+
+t.test('itemWant bound: an empty or non-string quest is unbound', function () {
+    t.assert.strictEqual(boundWant([ruinQuest()], NOBLE_KIT, '', { buildings: RUIN_2 }), 'open');
+    t.assert.strictEqual(boundWant([ruinQuest()], NOBLE_KIT, 5, { buildings: RUIN_2 }), 'open');
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };

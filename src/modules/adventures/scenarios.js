@@ -6,7 +6,8 @@
  * file base name is the id. File format (version 1):
  *   { "version": 1, "label": str, "adventure": str,
  *     "trips": [ { "items": [ { "buff": str, "grids": [int>0, ...],
- *                               "amount": int>0 (optional) } ] } ] }
+ *                               "amount": int>0 (optional),
+ *                               "quest": str (optional) } ] } ] }
  * A trip without items (or {}) is a visit only. Unknown keys are ignored and
  * buff names are the full game names.
  *
@@ -25,6 +26,9 @@
  * wiki total such as 10 boulders over four grids); without it the total is one
  * per grid. Each grid is a group that takes only what it needs, so a send
  * offers at most `amount` and what the grid does not take stays in stock.
+ *
+ * Quest: `quest` is the full quest name. When it is set, only that quest can
+ * make the item wanted for Apply; production ignores it.
  *
  * Bundle slot: module file; top level only assigns
  * S.modules.adventures.scenarios; templates and the built-in table are read
@@ -80,7 +84,12 @@
             if (!posInt(v.amount)) return where + ' has a bad amount (' + String(v.amount) + ')';
             amount = v.amount;
         }
-        return { buff: v.buff, grids: grids, amount: amount };
+        var quest = null;
+        if (v.quest !== undefined && v.quest !== null) {
+            if (typeof v.quest !== 'string' || trim(v.quest) === '') return where + ' has a bad quest';
+            quest = trim(v.quest);
+        }
+        return { buff: v.buff, grids: grids, amount: amount, quest: quest };
     }
 
     // Pure. { trips } or { error }: at least one trip, each { items: [...] }

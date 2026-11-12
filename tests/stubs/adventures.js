@@ -62,6 +62,16 @@
  *     buff of produce a 'buffowned' end condition (min 11), each with an
  *     unnamed type-45 trigger. Every condition is open (met: all met); the
  *     quest never finishes. It names no grid, so no send meets it;
+ *   - a quest { key, name, applied, extra, unread, stayOpen } asks for items
+ *     applied anywhere on the map, the way Storm Recovery's
+ *     Buff_Adv_StormRecovery_SubQuest05 asks for the kits: per buff of
+ *     applied ({ buff: min }) a 'buffappliedonadventure' end condition (idx k,
+ *     with min), then `extra` unnamed type-45 triggers. A condition is met
+ *     (status 1) once the took of that buff over w.itemSends reaches min; the
+ *     quest is finished once all are met (not with stayOpen);
+ *   - every quest reads mQuestMode q.mode when that is a number, else 2 when
+ *     unread and 3 otherwise. Its IsRunning() is true while q.running is not
+ *     false, the mode is 3 and the quest is not finished;
  *   - w.gridBuildings[grid] (o.gridBuildings) names the building standing at
  *     grid: core.buildings.byGrid returns an object whose name reads it (a
  *     camp grid may carry a name too). Delete the entry and the grid is empty;
@@ -830,6 +840,11 @@ function installItems(w) {
         return false;
     }
 
+    // What the game took of an item over all sends so far.
+    function tookOf(buff) {
+        return w.itemSends.reduce(function (n, s) { return s.buff === buff ? n + s.took : n; }, 0);
+    }
+
     function hostQuest(q) {
         var ends = q.item ? [{ action_string: 'buffappliedonadventure', item_string: q.item, triggerIdx: 0 }] : [];
         var triggers = q.building ? [{ type: 1, condition: 12, name_string: q.building, amount: 1, triggerIdx: 0 }] : [];
@@ -857,12 +872,30 @@ function installItems(w) {
                 statuses.push({ status: q.met ? 1 : 0 });
             });
         }
-        var gone = onmap.length > 0 && !q.stayOpen && statuses.every(function (s) { return s.status === 1; });
+        var applied = q.applied ? Object.keys(q.applied) : [];
+        if (applied.length) {
+            ends = [];
+            triggers = [];
+            statuses = [];
+            applied.forEach(function (buff, k) {
+                ends.push({ action_string: 'buffappliedonadventure', item_string: buff, min: q.applied[buff], triggerIdx: k });
+                statuses.push({ status: tookOf(buff) >= q.applied[buff] ? 1 : 0 });
+            });
+            for (var x = 0; x < (q.extra || 0); x++) {
+                triggers.push({ type: 45, condition: 0, triggerIdx: x });
+                if (x >= statuses.length) statuses.push({ status: 0 });
+            }
+        }
+        var gone = (onmap.length > 0 || applied.length > 0) && !q.stayOpen &&
+            statuses.slice(0, Math.max(onmap.length, applied.length)).every(function (s) { return s.status === 1; });
         var name = q.name || (makes.length ? 'Buff_Adv_StormRecovery_SubQuest03' : '');
+        var mode = typeof q.mode === 'number' ? q.mode : (q.unread ? 2 : 3);
+        var finished = !!q.finished || gone;
         return {
-            isFinished: function () { return !!q.finished || gone; },
+            isFinished: function () { return finished; },
             getQuestName_string: function () { return name; },
-            mQuestMode: q.unread ? 2 : 3,
+            mQuestMode: mode,
+            IsRunning: function () { return q.running !== false && mode === 3 && !finished; },
             IsActive: function () { return true; },
             IsQuestActive: function () { return true; },
             GetUniqueId: function () { return { toKeyString: function () { return q.key; } }; },

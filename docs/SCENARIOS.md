@@ -41,7 +41,7 @@ then repeats maps like a template series.
 ```json
 { "version": 1, "label": "Storm Recovery", "adventure": "BuffAdventures_Storm_Recovery",
   "trips": [ { "items": [ { "buff": "BuffAdventure...", "grids": [1, 2, 3],
-                            "amount": 10 } ] },
+                            "amount": 10, "quest": "Buff_Adv_..." } ] },
              {} ] }
 ```
 
@@ -57,6 +57,13 @@ then repeats maps like a template series.
   the trip, stock)`, and the item is done once its grids together took the amount; without
   an amount each grid is offered `1 - taken`. What a grid does not take stays in stock.
   A return trip when stock runs out is only a fallback.
+- `quest` is an optional full quest name. When it is set, only that quest can
+  make the item wanted for Apply: the quest must be running, and where the
+  client has `IsRunning()` it must also report true. Production ignores it.
+  Use it when an item shares a grid with items of an earlier quest that asks
+  for the building by name, as the Storm Recovery kits share the ruins with
+  the dynamite quest. A value that is not a non-empty string makes the file a
+  broken entry ("has a bad quest").
 - The start check refuses a scenario whose buff is not a produceable buff
   definition and stores nothing.
 
@@ -88,7 +95,14 @@ then repeats maps like a template series.
   building standing at the item's grid (e.g. Riches `buffad_sabotage`), or when
   its open `onmap` or `buildingdestroyed` end condition names that building (e.g.
   Storm Recovery `buffad_boulder_01` and `buffad_boulder_02`, which the dynamite
-  clears).
+  clears). A binding (`quest`, see Format) narrows these rules to that quest. A
+  bound quest that names neither the item nor the grid's building still counts
+  while it runs, since some conditions cannot be read: it is held while it waits
+  in the pool and done once finished. While the bound quest is missing, the item
+  waits ("waiting for quest <name> for <buff>").
+- Settle: Apply decides nothing within QUEST_SETTLE_MS (20 s) of the last quest
+  the run read or claimed on the island. The next quest has then appeared before
+  any item is sent or any grid is closed.
 - While a scenario run (running or paused) has its island viewed, collect
   clicks only the quest objects and the collectibles that running quests count
   there, and no pattern collectibles. Apply and Trip log once "waiting for quest <name> to be
