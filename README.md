@@ -20,7 +20,7 @@ Releases are built and published by the Release workflow; the badge above shows 
 Steward stands on the work of others, and a big thank you goes to them:
 
 - [fedorovvl](https://github.com/fedorovvl), creator of the community [The Settlers Online client](https://github.com/fedorovvl/tso_client) that steward runs in.
-- [adly98](https://github.com/adly98), creator of the community project [autoTSO](https://github.com/adly98/autoTSO), which steward's updater is modelled on.
+- [adly98](https://github.com/adly98), creator of the community project [autoTSO](https://github.com/adly98/autoTSO), which steward is modelled after.
 - Blue Byte and ClipSoft, for creating The Settlers Online and keeping such a great game running.
 
 ## Modules
