@@ -652,12 +652,6 @@
         return 'drop';
     }
 
-    // The entry the paused hand-over tried (state.queueTarget).
-    function triedEntry(req) {
-        var at = store().queueTarget(req).at;
-        return at ? req.queue.entries[at.index] : null;
-    }
-
     function skipEntry() {
         var rs = store().current();
         var c = skipCase(rs);
@@ -669,9 +663,13 @@
         var q = req.queue;
         var r = rs.run;
         if (c === 'over') {
-            var tried = triedEntry(req);
-            var name = tried ? tried.label : '';
-            q.skip += 1;
+            // Past the entry the hand-over tried, so entries with no map it
+            // stepped over before it are not where the next try lands.
+            var tried = store().queueTried(req);
+            var past = store().queueSkipPast(req, tried);
+            var name = tried ? q.entries[tried.index].label : '';
+            q.skip = past !== null ? past : q.skip + 1;
+            q.tried = null;
             store().save();
             store().resume();
             wakeRun();

@@ -1242,6 +1242,7 @@
                 empty++;
                 at = st().queueAt(req, at);
                 if (at && empty >= q.entries.length) {
+                    q.tried = null;
                     st().pause(S.RunPause.QueueEntry, 'no map for any queue entry');
                     return;
                 }
@@ -1267,6 +1268,9 @@
                 return;
             }
             if (!e.ok) {
+                // Skip entry steps past this entry, which may lie beyond
+                // the one queue.skip reaches when no-map entries came first.
+                q.tried = { index: at.index, pass: at.pass };
                 st().pause(S.RunPause.QueueEntry, next.label + ': ' + e.message);
                 return;
             }

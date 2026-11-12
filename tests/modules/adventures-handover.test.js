@@ -218,6 +218,31 @@ t.test('skip 1 at that pause counts once and begins the entry after, or ends the
     assert.strictEqual(req(q2).queue.skip, 0);
 });
 
+t.test('skip at a pause behind a no-map entry steps past the entry tried, once', function () {
+    var q = setup();
+    var S = q.S;
+    startQueue(q, [['template', q.long, 1], ['template', q.short, 1], ['scenario', 'twins', 1],
+        ['template', q.long, 1]], { noMap: 'skip' });
+    q.maps.Bandits = 0;
+    q.known = false;
+    var r = next(q);
+    assert.strictEqual(r.pause.reason, S.RunPause.QueueEntry);
+    assert.ok(/^Twins: /.test(r.pause.message), r.pause.message);
+    assert.deepStrictEqual(plain(req(q).queue.tried), { index: 2, pass: 0 });
+
+    assert.strictEqual(q.run.skipEntry(), true);
+    assert.strictEqual(lastNotice(q), 'Entry skipped: Twins.');
+    assert.strictEqual(req(q).queue.skip, 2);
+    assert.strictEqual(req(q).queue.tried, null);
+    r = pass(q);
+    assert.strictEqual(r.status, S.RunStatus.Running);
+    assert.strictEqual(req(q).queue.index, 3);
+    assert.strictEqual(req(q).queue.skip, 0);
+    assert.strictEqual(r.templateId, q.long);
+    assert.strictEqual(countOf(logText(q), /run 1\/1 done: Long/), 1);
+    assert.ok(/entry 4\/4 begins: Long/.test(logText(q)), logText(q));
+});
+
 t.test('noMap skip drops the rest of an entry with no map left', function () {
     var q = setup();
     startQueue(q, [['template', q.long, 3], ['template', q.short, 1]], { noMap: 'skip' });
