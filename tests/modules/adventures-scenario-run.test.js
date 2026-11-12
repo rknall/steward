@@ -35,12 +35,16 @@ var BLAST = 'BattleBuffHurt_BuffAd_Explosive';
 var EXPERT = 'BattleBuffHurt_BuffAd_Specialist';
 var MEDIUM = 'BattleBuffHurt_BuffAd_MediumDynamite';
 var BIG = 'BattleBuffHurt_BuffAd_BigDynamite';
+var STINKY = 'BattleBuffHurt_BuffAd_StinkyPotion';
+var DECOMP = 'BattleBuffHurt_BuffAd_Decomposer';
 
 var COST = [{ name_string: 'Wood', amount: 2 }];
 
 function items() {
     var out = {};
-    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT, MEDIUM, BIG].forEach(function (b) { out[b] = { group: '0', yield: 1, costs: COST }; });
+    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT, MEDIUM, BIG, STINKY, DECOMP].forEach(function (b) {
+        out[b] = { group: '0', yield: 1, costs: COST };
+    });
     return out;
 }
 
@@ -54,7 +58,7 @@ var TWINS = {
     ]
 };
 
-// Storm-like: small dynamite amount 10 as the trip total over four grids that each need 4 (more than 10 in all, so the top-up trip is the fallback).
+// Storm-like: small dynamite amount 10 as the trip total over four grids.
 var STORM = {
     id: 'storm_test', label: 'Storm (test)',
     trips: [{ items: [{ buff: DYN, grids: [41, 42, 43, 44], amount: 10 }] }, {}]
@@ -650,15 +654,16 @@ t.test('Apply: out of stock with grids left goes home and comes back to the same
     assert.strictEqual(w.zoneSends.length, 0);
 });
 
-// Storm-like small dynamite: amount 10, four grids that each need 4, stock 10 (the wiki total over the four grids).
+// Storm-like small dynamite: amount 10 over four grids whose needs add up to
+// it (41:4, 42:3, 43:2, 44:1), stock 6, so the stock runs out on 42 and the
+// trip home brings the rest.
 function storm(o) {
     o = o || {};
-    var need = {};
-    [41, 42, 43, 44].forEach(function (g) { need[g] = 4; });
+    var need = { 41: 4, 42: 3, 43: 2, 44: 1 };
     for (var k in (o.need || {})) if (Object.prototype.hasOwnProperty.call(o.need, k)) need[k] = o.need[k];
     var w = scenWorld({ quests: [{ key: 'qd', name: 'Rocks', item: DYN, grids: [41, 42, 43, 44] },
         { key: 'q9', name: 'Final', last: true }], gridNeed: need });
-    w.setStock(DYN, 10);
+    w.setStock(DYN, typeof o.stock === 'number' ? o.stock : 6);
     onIsland(w, record(w, STORM), 0);
     return w;
 }
@@ -670,13 +675,15 @@ function dynSends(w) {
 t.test('grid-done rule: a capped grid stays open, the trip home orders for it, and the top-up fills it', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [41, 6, 0], [42, 6, 4], [42, 2, 0], [43, 2, 2], [43, 8, 2],
-        [43, 6, 0], [44, 8, 4]], JSON.stringify(dynSends(w)));
-    // The last grid met the quest, so its remainder is skipped, not sent.
-    assert.ok(logged(w, /quest no longer wants BattleBuffHurt_BuffAd_SmallDynamite; 1 grid\(s\) skipped/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 43: took all 2 offered \(up to 10\); grid stays open/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took 4 of 6, 4 of 10 so far; sending the other 6/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [41, 2, 0], [42, 2, 2], [42, 4, 1], [42, 3, 0], [43, 3, 2],
+        [43, 1, 0], [44, 1, 1]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 41: took 4 of 6, 4 of 10 so far; sending the other 6/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 42: took all 2 offered \(6 of 10 so far\); grid stays open/), logLines(w).join('\n'));
+    assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_SmallDynamite with 3 grid\(s\) left; going home for more/),
+        logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 42: took 1 of 4, 7 of 10 so far; sending the other 3/), logLines(w).join('\n'));
     assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/));
+    assert.ok(logged(w, /SmallDynamite -> 44: took 1 of 1; grid done/), logLines(w).join('\n'));
     var made = w.productionOrders.filter(function (o) { return o.unit === DYN; });
     assert.deepStrictEqual(plain(made.map(function (o) { return o.amount; })), [10], 'the trip total, not per grid');
     var q = w.quests.filter(function (x) { return x.key === 'qd'; })[0];
@@ -685,15 +692,15 @@ t.test('grid-done rule: a capped grid stays open, the trip home orders for it, a
 });
 
 t.test('grid-done rule: a capped grid that was already full takes nothing on the top-up and is done, no pause', function () {
-    var w = storm({ need: { 43: 2 } });
+    var w = storm({ need: { 42: 2 } });
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [41, 6, 0], [42, 6, 4], [42, 2, 0], [43, 2, 2], [43, 8, 0],
-        [44, 10, 4]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 43: took nothing more; grid done/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [41, 2, 0], [42, 2, 2], [42, 4, 0], [43, 4, 2], [43, 2, 0],
+        [44, 2, 1]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /run paused/), 'no pause');
     // The top-up after the trip home shows no drop; the next grid's send waits for its result.
     var s = sendsTo(w, DYN);
-    var gap = s[6].t - s[5].t;
+    var gap = s[4].t - s[3].t;
     assert.ok(gap >= 15000, 'the top-up result came in first: ' + gap);
     assert.ok(gap < w.S.modules.adventures.loader.ORDER_WAIT_MS, 'no order-wait stale wait: ' + gap);
 });
@@ -701,7 +708,7 @@ t.test('grid-done rule: a capped grid that was already full takes nothing on the
 t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2, name) {
-        return name === 'Apply' && sendsTo(w2, DYN).length === 5 && w2.stockOf(DYN) > 0;
+        return name === 'Apply' && sendsTo(w2, DYN).length === 3 && w2.stockOf(DYN) > 0;
     } });
     assertStep(w, 'Apply');
     // The top-up is planned, then the stock is gone before its precheck runs.
@@ -709,8 +716,19 @@ t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', fun
     w.setStock(DYN, 0);
     play(w);
     passesFor(w, 30000);
-    assertPaused(w, w.S.RunPause.BuffFailed, /apply BattleBuffHurt_BuffAd_SmallDynamite to 43 failed/);
-    assert.strictEqual(sendsTo(w, DYN).length, 5);
+    assertPaused(w, w.S.RunPause.BuffFailed, /apply BattleBuffHurt_BuffAd_SmallDynamite to 42 failed/);
+    assert.strictEqual(sendsTo(w, DYN).length, 3);
+});
+
+t.test('Apply: an item whose grids together took its amount is done, its other grids are not sent', function () {
+    var w = storm({ stock: 20, need: { 41: 10 } });
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 10]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 41: took 10 of 10; grid done/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite: trip total 10 taken; 3 grid\(s\) done/), logLines(w).join('\n'));
+    assert.strictEqual(w.stockOf(DYN), 10);
+    assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
 t.test('grid-done rule: a run landing in the stock during a capped send still leaves the grid open', function () {
@@ -734,7 +752,7 @@ t.test('grid-done rule: a run landing in the stock during a capped send still le
     play(w);
     assert.deepStrictEqual(dynSends(w), [[43, 2, 2]]);
     assert.strictEqual(w.stockOf(DYN), 1, 'the stock dropped by 1 only');
-    assert.ok(logged(w, /SmallDynamite -> 43: took all 2 offered \(up to 10\); grid stays open/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 43: took all 2 offered \(2 of 10 so far\); grid stays open/), logLines(w).join('\n'));
     var r = w.st.run();
     var m = r.marks[w.S.modules.adventures.trips.applyMark(r, DYN, 43)];
     assert.ok(!(m && m.seen), 'the grid is open');
@@ -877,12 +895,16 @@ var STORM_BOULDERS = {
 var BOULDERS_01 = [2070, 2152, 4394, 5680];
 var BOULDERS_02 = [2014, 2275, 5814];
 
+// o.rec replaces the record, o.need ({ buff: { grid: n } }) the needs of 1 per
+// grid, o.stock ({ buff: n }) the stock of 10 per item.
 function stormBoulders(o) {
     o = o || {};
+    var rec = o.rec || STORM_BOULDERS;
     var need = {};
     var buildings = {};
-    STORM_BOULDERS.trips[0].items.forEach(function (it) {
-        it.grids.forEach(function (g) { need[it.buff + ':' + g] = 1; });
+    rec.trips[0].items.forEach(function (it) {
+        var given = (o.need || {})[it.buff] || {};
+        it.grids.forEach(function (g) { need[it.buff + ':' + g] = typeof given[g] === 'number' ? given[g] : 1; });
     });
     BOULDERS_01.forEach(function (g) { buildings[g] = 'buffad_boulder_01'; });
     BOULDERS_02.forEach(function (g) { buildings[g] = 'buffad_boulder_02'; });
@@ -892,8 +914,10 @@ function stormBoulders(o) {
         { key: 'q9', name: 'Final', last: true }],
         gridNeed: need, world: { gridBuildings: buildings }
     });
-    [DYN, MEDIUM, BIG].forEach(function (b) { w.setStock(b, 10); });
-    onIsland(w, record(w, STORM_BOULDERS), 0);
+    [DYN, MEDIUM, BIG].forEach(function (b) {
+        w.setStock(b, o.stock && typeof o.stock[b] === 'number' ? o.stock[b] : 10);
+    });
+    onIsland(w, record(w, rec), 0);
     return w;
 }
 
@@ -942,6 +966,237 @@ t.test('Apply: an unread onmap quest holds the dynamite', function () {
     assertStep(w, 'Apply');
     assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
     assert.ok(logged(w, /waiting for quest Buff_Adv_StormRecovery_SubQuest02 to be running, mode 2/), logLines(w).join('\n'));
+});
+
+// ---- out of stock, other items first ----------------------------------------------
+
+// Storm Recovery trip 2 as the 15:16 log has it: the three dynamites with
+// their wiki totals as the trip amounts, over the boulders they clear.
+var STORM_TOTALS = {
+    id: 'storm_totals_test', label: 'Storm totals (test)',
+    trips: [{ items: [
+        { buff: DYN, grids: [5680, 4394, 2152, 2070], amount: 10 },
+        { buff: MEDIUM, grids: [5680, 2152, 2014, 5814], amount: 6 },
+        { buff: BIG, grids: [2275, 2014, 5814], amount: 5 }
+    ] }, {}]
+};
+
+function sendList(w, buff) {
+    return plain(sendsTo(w, buff).map(function (s) { return [s.grid, s.amount, s.took]; }));
+}
+
+// The steps a drive passes, as 'Step:trip', each change once.
+function stepRecorder(steps) {
+    return function (w2, name) {
+        var s = name + ':' + w2.st.run().trip;
+        if (steps[steps.length - 1] !== s) steps.push(s);
+    };
+}
+
+function totalsWorld(smallNeed, smallStock) {
+    var need = {};
+    need[DYN] = smallNeed;
+    need[MEDIUM] = { 5680: 2, 2152: 1, 2014: 2, 5814: 1 };
+    need[BIG] = { 2275: 2, 2014: 2, 5814: 1 };
+    var stock = {};
+    stock[DYN] = smallStock;
+    stock[MEDIUM] = 6;
+    stock[BIG] = 5;
+    return stormBoulders({ rec: STORM_TOTALS, need: need, stock: stock });
+}
+
+// No later item went to a grid before every earlier item on it was sent
+// there for the last time.
+function assertFileOrder(w, order) {
+    for (var a = 0; a < order.length; a++) {
+        var early = sendsTo(w, order[a]);
+        for (var b = a + 1; b < order.length; b++) {
+            sendsTo(w, order[b]).forEach(function (late) {
+                early.forEach(function (e) {
+                    if (e.grid === late.grid) {
+                        assert.ok(e.t < late.t, order[b] + ' -> ' + late.grid + ' before ' + order[a]);
+                    }
+                });
+            });
+        }
+    }
+}
+
+t.test('Apply: Storm Recovery 15:16 totals finish the trip without a home trip', function () {
+    var w = totalsWorld({ 5680: 2, 4394: 5, 2152: 2, 2070: 1 }, 10);
+    var steps = [];
+    drive(w, { max: 400, until: at('Trip'), on: stepRecorder(steps) });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(sendList(w, DYN), [[5680, 10, 2], [5680, 8, 0], [4394, 8, 5], [4394, 3, 0], [2152, 3, 2],
+        [2152, 1, 0], [2070, 1, 1]], JSON.stringify(sendList(w, DYN)));
+    assert.deepStrictEqual(sendList(w, MEDIUM), [[5680, 6, 2], [5680, 4, 0], [2152, 4, 1], [2152, 3, 0], [2014, 3, 2],
+        [2014, 1, 0], [5814, 1, 1]], JSON.stringify(sendList(w, MEDIUM)));
+    assert.deepStrictEqual(sendList(w, BIG), [[2275, 5, 2], [2275, 3, 0], [2014, 3, 2], [2014, 1, 0], [5814, 1, 1]],
+        JSON.stringify(sendList(w, BIG)));
+    assert.ok(logged(w, /SmallDynamite -> 2070: took 1 of 1; grid done/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /going home/), logLines(w).join('\n'));
+    assert.ok(steps.indexOf('JumpHome:0') < 0, 'no home trip: ' + steps.join(' '));
+    assertFileOrder(w, [DYN, MEDIUM, BIG]);
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: out of the first dynamite, the others go before the home trip', function () {
+    var w = totalsWorld({ 5680: 2, 4394: 5, 2152: 1, 2070: 2 }, 9);
+    var steps = [];
+    var home = null;
+    drive(w, { max: 600, until: function (w2) { return w2.st.run().trip === 1; }, on: function (w2, name) {
+        stepRecorder(steps)(w2, name);
+        if (home === null && name === 'JumpHome') home = w2.itemSends.length;
+    } });
+    assert.ok(home !== null, 'went home: ' + steps.join(' '));
+    var before = w.itemSends.slice(0, home);
+    var after = w.itemSends.slice(home);
+    [MEDIUM, BIG].forEach(function (b) {
+        assert.ok(before.some(function (s) { return s.buff === b; }), b + ' sent before the home trip');
+        assert.ok(!after.some(function (s) { return s.buff === b; }), b + ' all sent before the home trip');
+    });
+    assert.ok(after.length > 0 && after.every(function (s) { return s.buff === DYN && s.grid === 2070; }),
+        'after the return only Small to 2070: ' + JSON.stringify(plain(after)));
+    var lines = logLines(w);
+    assert.strictEqual(lines.filter(function (l) {
+        return /out of BattleBuffHurt_BuffAd_SmallDynamite with 1 grid\(s\) left; going home for more/.test(l);
+    }).length, 1, lines.join('\n'));
+    assert.strictEqual(lines.filter(function (l) {
+        return /out of BattleBuffHurt_BuffAd_SmallDynamite; continuing with the other items first/.test(l);
+    }).length, 1, lines.join('\n'));
+    assert.ok(steps.lastIndexOf('Apply:0') > steps.indexOf('JumpHome:0'), 'back to the same trip: ' + steps.join(' '));
+    assert.strictEqual(sendsTo(w, DYN).reduce(function (n, s) { return n + s.took; }, 0), 10, 'Small trip total');
+    assertFileOrder(w, [DYN, MEDIUM, BIG]);
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: an out-of-stock item holds its grid for later items on it (Riches 2631)', function () {
+    var w = sabotage();
+    w.setStock(GLUE, 0);
+    var steps = [];
+    var home = null;
+    drive(w, { max: 600, until: function (w2, name) { return name === 'Trip' && home !== null; }, on: function (w2, name) {
+        stepRecorder(steps)(w2, name);
+        if (home === null && name === 'JumpHome') home = w2.itemSends.length;
+    } });
+    assert.strictEqual(home, 0, 'nothing sent before the home trip: ' + steps.join(' '));
+    assertStep(w, 'Trip');
+    assert.strictEqual(w.st.run().trip, 0, 'the same trip');
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 1], [BLAST, 1, 1], [EXPERT, 1, 1]],
+        JSON.stringify(itemSends(w)));
+    assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_Glue with 1 grid\(s\) left; going home for more/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /continuing with the other items first/), 'nothing else could go');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: an out-of-stock wanted item goes home, never waits on held items', function () {
+    var rec = { id: 'held', label: 'Held (test)', trips: [{ items: [{ buff: SHEET, grids: [21] },
+        { buff: BRIDGE, grids: [11] }] }, {}] };
+    var w = scenWorld({ quests: [{ key: 'qs', name: 'Papers', item: SHEET, grids: [21], unread: true },
+        { key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11] }, { key: 'q9', name: 'Final', last: true }] });
+    w.auto.readFails = true;
+    w.setStock(SHEET, 5);
+    w.setStock(BRIDGE, 0);
+    onIsland(w, record(w, rec), 0);
+    drive(w, { max: 50, until: function (w2, name) { return name !== 'Apply'; } });
+    assert.ok(transitions(w).some(function (x) { return x.from === 'Apply' && x.to === 'JumpHome'; }),
+        JSON.stringify(transitions(w)));
+    assert.ok(logged(w, /out of ChangeSkin_BuffAd_Bridge with 1 grid\(s\) left; going home for more/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /waiting for a quest that wants/), logLines(w).join('\n'));
+    assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
+});
+
+// ---- a grid whose building is gone --------------------------------------------------
+
+var GONE = {
+    id: 'gone_test', label: 'Gone (test)',
+    trips: [{ items: [{ buff: DYN, grids: [5680], amount: 4 }] }, {}]
+};
+
+// One boulder at 5680 that needs 4 Small, stock 2. o.noBuilding: no name at
+// the grid, the item asked for by a quest that names it.
+function goneWorld(o) {
+    o = o || {};
+    var need = {};
+    need[DYN + ':5680'] = 4;
+    var buildings = {};
+    if (!o.noBuilding) buildings[5680] = 'buffad_boulder_01';
+    var quests = o.noBuilding ? [{ key: 'qd', name: 'Rocks', item: DYN, grids: [5680] }]
+        : [{ key: 'q2', name: 'Buff_Adv_StormRecovery_SubQuest02', onmap: ['buffad_boulder_01'], stayOpen: true }];
+    quests.push({ key: 'q9', name: 'Final', last: true });
+    var w = scenWorld({ quests: quests, gridNeed: need, world: { gridBuildings: buildings } });
+    w.setStock(DYN, 2);
+    onIsland(w, record(w, GONE), 0);
+    return w;
+}
+
+t.test('Apply: a stock-capped grid whose boulder is gone is done', function () {
+    var w = goneWorld();
+    drive(w, { max: 100, until: at('Trip'), on: function (w2) {
+        if (sendsTo(w2, DYN).length) delete w2.gridBuildings[5680];
+    } });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered \(2 of 4 so far\); grid stays open/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 5680: building gone after 2; grid done/), logLines(w).join('\n'));
+    assert.ok(!transitions(w).some(function (x) { return x.to === 'JumpHome'; }), JSON.stringify(transitions(w)));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a boulder gone during the capped send ends the grid at its check', function () {
+    var w = goneWorld();
+    var gi = w.H.host.game.gi;
+    var real = gi.SendServerAction;
+    gi.SendServerAction = function (id) {
+        real.apply(this, arguments);
+        if (id === 61) delete w.gridBuildings[5680];
+    };
+    drive(w, { max: 100, until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered; building gone, grid done/), logLines(w).join('\n'));
+    assert.ok(!transitions(w).some(function (x) { return x.to === 'JumpHome'; }), JSON.stringify(transitions(w)));
+});
+
+t.test('Apply: a stock-capped grid with no building name stays open and the run goes home', function () {
+    var w = goneWorld({ noBuilding: true });
+    drive(w, { max: 100, until: function (w2, name) { return name !== 'Apply'; } });
+    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered \(2 of 4 so far\); grid stays open/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /building gone/), logLines(w).join('\n'));
+    assert.ok(transitions(w).some(function (x) { return x.from === 'Apply' && x.to === 'JumpHome'; }),
+        JSON.stringify(transitions(w)));
+});
+
+// ---- a quest that only asks to make the items ---------------------------------------
+
+// Storm Recovery trip 3: the potions go to ruins; the running SubQuest03 only
+// asks to own 11 of each (and to pick 11 mushrooms and herbs elsewhere).
+var RUINS = {
+    id: 'ruins_test', label: 'Ruins (test)',
+    trips: [{ items: [{ buff: STINKY, grids: [5884, 5614] }, { buff: DECOMP, grids: [2342, 1880] }] }, {}]
+};
+
+t.test('Apply: a running produce-only quest never gets Stinky Potion or Decomposer', function () {
+    var w = scenWorld({
+        quests: [{ key: 'q3', produce: [STINKY, DECOMP], collect: ['BuildingStinkyMushroom', 'BuildingGlowingHerbs'] },
+            { key: 'q9', name: 'Final', last: true }],
+        gridNeed: {},
+        world: { gridBuildings: { 5884: 'BuffAd_Ruin_02', 5614: 'BuffAd_Ruin_04', 2342: 'BuffAd_Ruin_02',
+            1880: 'BuffAd_Ruin_03', 1215: 'BuildingStinkyMushroom', 2146: 'BuildingGlowingHerbs' } }
+    });
+    w.setStock(STINKY, 20);
+    w.setStock(DECOMP, 20);
+    onIsland(w, record(w, RUINS), 0);
+    passesFor(w, 120000);
+    assertStep(w, 'Apply');
+    assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
+    assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_StinkyPotion/), logLines(w).join('\n'));
+    w.quests.push({ key: 'q4', name: 'Buff_Adv_StormRecovery_SubQuest04', item: STINKY, grids: [5884, 5614] });
+    passesFor(w, 120000);
+    assert.deepStrictEqual(sentTo(w, STINKY), [5884, 5614]);
+    assert.strictEqual(sendsTo(w, DECOMP).length, 0, 'Decomposer still waits');
+    assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_Decomposer/), logLines(w).join('\n'));
 });
 
 // ---- production -----------------------------------------------------------------

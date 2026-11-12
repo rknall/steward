@@ -25,16 +25,23 @@
  * naming that building, as a quest that asks for the boulders dynamite
  * clears. The want is asked per grid: a grid whose quest condition is met is
  * skipped on its own while the item's other grids still go. Each grid has a
- * persisted send marker, so a reload never sends to it twice. The game may take less than it is offered, so only the stock drop
- * of a verified send counts: a seen 'part:' marker records what the grid has
- * taken so far, and while that is short of the item's amount the grid stays
- * open and the rest is offered to the same grid next, until the grid has
- * taken the amount, the quest no longer wants the item, or a send shows no
- * drop at all (the grid was already full). Out of stock with grids left,
- * the run goes home for more and comes back to the same trip. A send that
- * made no host call (nothing went out) keeps its grid open and is tried
- * again after NOT_SENT_RETRY_MS, up to NOT_SENT_MAX times per grid, then
- * pauses.
+ * persisted send marker, so a reload never sends to it twice. An item's
+ * amount is its total for the trip over all its grids (an item without one
+ * takes 1 per grid). The game may take less than it is offered, so only the
+ * stock drop of a verified send counts: a seen 'part:' marker records what
+ * each grid has taken so far, and while the item's grids together are short
+ * of the amount the grid stays open and the rest is offered to the same grid
+ * next, until the item has taken the amount, the quest no longer wants the
+ * item, a send shows no drop at all (the grid was already full), or the
+ * building first seen at the grid is gone or being destroyed after the grid
+ * took something (nothing is left there to take more). Out of stock, Apply
+ * first sends the other items a running quest wants that are in stock; a
+ * grid the out-of-stock item still owes is held back from every later item,
+ * so the file order on a shared grid holds. Once nothing else can go the run
+ * goes home for more and comes back to the same trip, rather than wait on
+ * items no running quest wants yet. A send that made no host call (nothing
+ * went out) keeps its grid open and is tried again after NOT_SENT_RETRY_MS,
+ * up to NOT_SENT_MAX times per grid, then pauses.
  *
  * Trip lets the quests update (READ_LAG_MS from the step entry and
  * QUEST_SETTLE_MS from the last verified quest read or claim on the island),
@@ -77,8 +84,9 @@
     var CATEGORY = 'adventures';
 
     // Mark name prefixes: one mark per item ordered, one per grid sent to,
-    // and one per grid that took less than the item's amount (written seen,
-    // never sent; its taken field is what the grid has taken so far). One
+    // and one per grid that took something (written seen, never sent; its
+    // taken field is what the grid has taken so far, so the item's part
+    // marks together hold what the trip has taken of it). One
     // per trip holds Produce's verdict that the next trip waits for
     // resources (seen, its text the shortfall), since the island cannot read
     // the home queues; one per trip counts the re-visits taken (seen, count).
@@ -388,9 +396,23 @@
     // Memory only: after a reload the gone building is not known any more and
     // the item waits as for any quest that does not want it.
     function gridBuildings(r, grid) {
+        var s = gridSeen(r, grid);
+        var out = [];
+        if (s.cur) out.push(s.cur);
+        if (s.first && s.first !== s.cur) out.push(s.first);
+        return out;
+    }
+
+    // { b, cur, first } at grid: the building standing there now (null when
+    // none), its name ('' when none) and the first name seen there on this
+    // run and trip ('' when none yet). The one read of the grid's building and
+    // of that memory; a name seen for the first time is recorded here.
+    function gridSeen(r, grid) {
+        var b = null;
         var cur = '';
         try {
-            cur = S.core.buildings.name(S.core.buildings.byGrid(grid));
+            b = S.core.buildings.byGrid(grid);
+            cur = S.core.buildings.name(b);
         } catch (e) {
             cur = '';
         }
@@ -400,10 +422,49 @@
         var key = r.id + ':' + r.trip + ':' + grid;
         if (cur && !has(rs.applyBuildings, key)) rs.applyBuildings[key] = cur;
         var first = has(rs.applyBuildings, key) ? rs.applyBuildings[key] : '';
-        var out = [];
-        if (cur) out.push(cur);
-        if (first && first !== cur) out.push(first);
-        return out;
+        return { b: b, cur: cur, first: first };
+    }
+
+    // Whether the building first seen at grid is gone: no named building
+    // stands there now, or the one there is being destroyed. A grid never
+    // named on this run and trip is never gone, since there is nothing to
+    // tell its building's end by (and after a reload that memory is empty).
+    function buildingGone(r, grid) {
+        var s = gridSeen(r, grid);
+        if (!s.first) return false;
+        if (s.cur === '') return true;
+        var bs = null;
+        try {
+            bs = S.core.buildings.buffState(s.b);
+        } catch (e) {
+            bs = null;
+        }
+        var list = bs && bs.blockers ? bs.blockers : [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].method === 'IsInDestruction' && list[i].value === true) return true;
+        }
+        return false;
+    }
+
+    // What grid has taken of buff on this trip so far (its part mark).
+    function gridTaken(r, buff, grid) {
+        var pm = ld().marked(r, partMark(r, buff, grid));
+        return pm && typeof pm.taken === 'number' ? pm.taken : 0;
+    }
+
+    // What the item's grids together have taken on this trip so far.
+    function tripTaken(r, item) {
+        var sum = 0;
+        for (var i = 0; i < item.grids.length; i++) sum += gridTaken(r, item.buff, item.grids[i]);
+        return sum;
+    }
+
+    // What a send of the item to grid may still offer: the rest of the
+    // item's trip total when it has an amount, else the rest of the grid's 1.
+    function stillNeeded(r, item, grid) {
+        var bound = sc().sendAmount(item);
+        if (item.amount !== null) return bound - tripTaken(r, item);
+        return bound - gridTaken(r, item.buff, grid);
     }
 
     // itemWant under the strict gate, for a send of buff to grid; the one place
@@ -473,11 +534,14 @@
     // Only a verified send decides here; the step reads any other result.
     // took is the stock drop the send's check saw, plus the queued items that
     // landed in the star menu during the send, which raised the stock. given
-    // is what the grid had taken before this send. A grid that has taken the
-    // amount (bound) is done; one that is still short stays open, with its
-    // total on the part mark, so the next round offers it the rest. A take of
+    // is what the grid had taken before this send, and before what the goal
+    // (the item's trip total, or the grid's 1) had got by then. Every take is
+    // added to the grid's part mark, so the item's marks sum to its trip
+    // total. A send that met the goal is done; one still short stays open, so
+    // the next round offers the rest, unless the grid took all it was offered
+    // and its building is gone (nothing left there to take more). A take of
     // nothing ends the grid as before, so a grid is never offered forever.
-    function applied(name, part, b, grid, amount, bound, given, q0, def) {
+    function applied(name, part, b, grid, offered, goal, before, given, q0, def) {
         return function (result, cur) {
             if (!result || result.status !== S.ActionResult.Verified) return;
             var took = def.dropped();
@@ -485,21 +549,32 @@
             if (typeof took === 'number' && typeof q0 === 'number' && typeof q1 === 'number' && q1 < q0) {
                 took += q0 - q1;
             }
-            var total = typeof took === 'number' ? given + took : null;
-            if (took === null || !(took > 0) || total >= bound) {
+            if (took === null || !(took > 0)) {
                 ld().markSeen(cur, name);
-                log(b + ' -> ' + grid + ': took ' + took + ' of ' + amount + '; grid done');
+                log(b + ' -> ' + grid + ': took ' + took + ' of ' + offered + '; grid done');
+                return;
+            }
+            ld().markSeen(cur, part);
+            ld().marked(cur, part).taken = given + took;
+            st().save();
+            var sofar = before + took;
+            if (sofar >= goal) {
+                ld().markSeen(cur, name);
+                log(b + ' -> ' + grid + ': took ' + took + ' of ' + offered + '; grid done');
+                return;
+            }
+            if (took >= offered && buildingGone(cur, grid)) {
+                ld().markSeen(cur, name);
+                log(b + ' -> ' + grid + ': took all ' + offered + ' offered; building gone, grid done');
                 return;
             }
             ld().dropMark(cur, name);
-            ld().markSeen(cur, part);
-            ld().marked(cur, part).taken = total;
-            st().save();
-            if (took >= amount) {
-                log(b + ' -> ' + grid + ': took all ' + amount + ' offered (up to ' + bound + '); grid stays open');
+            if (took >= offered) {
+                log(b + ' -> ' + grid + ': took all ' + offered + ' offered (' + sofar + ' of ' + goal +
+                    ' so far); grid stays open');
             } else {
-                log(b + ' -> ' + grid + ': took ' + took + ' of ' + amount + ', ' + total + ' of ' + bound +
-                    ' so far; sending the other ' + (bound - total));
+                log(b + ' -> ' + grid + ': took ' + took + ' of ' + offered + ', ' + sofar + ' of ' + goal +
+                    ' so far; sending the other ' + (goal - sofar));
             }
         };
     }
@@ -583,9 +658,16 @@
         }, 'item apply');
         if (next !== 'new') return;
 
+        closeFinished(r, items, openOf, pending);
+
         var target = null;
         var waitFor = null;
         var held = [];
+        var shorts = [];
+        // Grids an earlier out-of-stock item still owes: a later item on the
+        // same grid waits until that item is done there, so the file order on
+        // a shared grid holds while other grids go on.
+        var blocked = {};
         for (i = 0; i < items.length; i++) {
             if (!openOf[i].length) continue;
             var buff = items[i].buff;
@@ -593,24 +675,66 @@
             // can be done for one boulder kind while the item's grids of
             // another kind are still wanted, so a done grid skips only itself.
             var wants = 'done';
+            var at = null;
             var skipped = 0;
+            var doneHere = {};
             for (g = 0; g < openOf[i].length; g++) {
-                wants = want(r, buff, openOf[i][g], held);
-                if (wants !== 'done') break;
-                ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
-                skipped++;
+                var w2 = want(r, buff, openOf[i][g], held);
+                if (w2 === 'done') {
+                    ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
+                    doneHere[openOf[i][g]] = true;
+                    skipped++;
+                    continue;
+                }
+                if (w2 === null) {
+                    wants = null;
+                    break;
+                }
+                if (has(blocked, openOf[i][g])) continue;
+                wants = w2;
+                at = openOf[i][g];
+                break;
             }
             if (skipped) log('quest no longer wants ' + buff + '; ' + skipped + ' grid(s) skipped');
-            if (wants === 'done') continue;
             if (wants === null) {
                 ld().waitRead(r, 'quests');
                 return;
             }
+            if (at === null) continue;
             if (wants === 'open') {
-                target = { item: items[i], grid: openOf[i][g] };
-                break;
+                var have = S.core.buffs.stock(buff, '');
+                if (typeof have !== 'number') {
+                    ld().waitRead(r, 'item stock');
+                    return;
+                }
+                if (have > 0) {
+                    target = { item: items[i], grid: at, stock: have };
+                    break;
+                }
+                shorts.push({ buff: buff, left: openOf[i].length - skipped });
+                for (g = 0; g < openOf[i].length; g++) {
+                    if (!has(doneHere, openOf[i][g])) blocked[openOf[i][g]] = true;
+                }
+                continue;
             }
             if (waitFor === null) waitFor = buff;
+        }
+
+        // Out of a wanted item and nothing else can go: home for more now,
+        // since a held item's quest may never run before that item is applied.
+        if (!target && shorts.length) {
+            for (i = 0; i < shorts.length; i++) {
+                log('out of ' + shorts[i].buff + ' with ' + shorts[i].left + ' grid(s) left; going home for more');
+            }
+            newLeg(r);
+            st().go(RS.JumpHome, 'out of ' + shorts[0].buff);
+            return;
+        }
+        if (target && shorts.length) {
+            var sb = [];
+            for (i = 0; i < shorts.length; i++) sb.push(shorts[i].buff);
+            noteOnce(r, 'short:' + sb.join(','), 'out of ' + sb.join(', ') +
+                '; continuing with the other items first');
         }
 
         if (!target) {
@@ -651,32 +775,18 @@
             return;
         }
         var pn = partMark(r, b, tg);
-        // What the grid has taken of this item so far; the next send offers
-        // only the rest, so a grid never gets more than the item's amount.
-        var bound = sc().sendAmount(target.item);
-        var pm = ld().marked(r, pn);
-        var given = pm && typeof pm.taken === 'number' ? pm.taken : 0;
-        var remaining = bound - given;
+        // What the item still needs (its trip total over all its grids, or
+        // this grid's 1); the send offers only that, so the item never gets
+        // more than its amount.
+        var goal = sc().sendAmount(target.item);
+        var given = gridTaken(r, b, tg);
+        var remaining = stillNeeded(r, target.item, tg);
         if (remaining <= 0) {
             ld().markSeen(r, an);
             log(b + ' -> ' + tg + ': amount already taken; grid done');
             return;
         }
-        var stock = S.core.buffs.stock(b, '');
-        if (typeof stock !== 'number') {
-            ld().waitRead(r, 'item stock');
-            return;
-        }
-        if (stock <= 0) {
-            var left = 0;
-            for (i = 0; i < items.length; i++) {
-                if (items[i].buff === b) left += openOf[i].length;
-            }
-            log('out of ' + b + ' with ' + left + ' grid(s) left; going home for more');
-            newLeg(r);
-            st().go(RS.JumpHome, 'out of ' + b);
-            return;
-        }
+        var stock = target.stock;
         var amount = Math.min(remaining, stock);
         var q0 = S.core.production.queuedItems(b);
         log('apply ' + b + ' x' + amount + ' -> ' + tg + ' (stock ' + stock + ')');
@@ -685,7 +795,44 @@
         var def = S.core.buffs.adventureItem(b, tg, amount);
         var round = ld().startRound(r, RS.Apply, []);
         ld().attempt(round, an, ld().wrapSend(r, an, def),
-            applied(an, pn, b, tg, amount, bound, given, q0, def));
+            applied(an, pn, b, tg, amount, goal, goal - remaining, given, q0, def));
+    }
+
+    // Closes the open grids nothing is left to send to, before a target is
+    // picked: every grid of an item whose grids together took its trip total,
+    // and a grid that took something whose building is gone since (a send
+    // that took less than offered, or a building removed a moment after the
+    // check). A pending grid is left alone: its send's check may still drop
+    // or set its mark. openOf loses the closed grids.
+    function closeFinished(r, items, openOf, pending) {
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var grids = openOf[i];
+            if (!grids.length) continue;
+            var busy = false;
+            var g;
+            for (g = 0; g < grids.length; g++) {
+                if (pending.indexOf(applyMark(r, item.buff, grids[g])) !== -1) busy = true;
+            }
+            if (item.amount !== null && !busy && tripTaken(r, item) >= item.amount) {
+                for (g = 0; g < grids.length; g++) ld().markSeen(r, applyMark(r, item.buff, grids[g]));
+                log(item.buff + ': trip total ' + item.amount + ' taken; ' + grids.length + ' grid(s) done');
+                openOf[i] = [];
+                continue;
+            }
+            var keep = [];
+            for (g = 0; g < grids.length; g++) {
+                var an = applyMark(r, item.buff, grids[g]);
+                var taken = gridTaken(r, item.buff, grids[g]);
+                if (pending.indexOf(an) === -1 && taken > 0 && buildingGone(r, grids[g])) {
+                    ld().markSeen(r, an);
+                    log(item.buff + ' -> ' + grids[g] + ': building gone after ' + taken + '; grid done');
+                    continue;
+                }
+                keep.push(grids[g]);
+            }
+            openOf[i] = keep;
+        }
     }
 
     // ---- Trip ---------------------------------------------------------------
