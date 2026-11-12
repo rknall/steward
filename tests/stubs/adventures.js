@@ -50,6 +50,11 @@
  *     end condition and one type-1 trigger (condition 12, triggerIdx 0) on the
  *     building name, the way a quest asks for items by the building they go
  *     to. It is met once every item of items has a need of 0 on every grid;
+ *   - a quest { key, name, onmap, unread, stayOpen } names no item either: one
+ *     'onmap' end condition (min 0) and one unnamed type-45 trigger per name
+ *     of onmap, the way Storm Recovery asks for dynamite by the boulders it
+ *     clears. A condition is met (status 1) once no grid of w.gridBuildings
+ *     holds its name; the quest is finished once all are met (not with stayOpen);
  *   - w.gridBuildings[grid] (o.gridBuildings) names the building standing at
  *     grid: core.buildings.byGrid returns an object whose name reads it (a
  *     camp grid may carry a name too). Delete the entry and the grid is empty;
@@ -810,18 +815,39 @@ function installItems(w) {
         }
     });
 
+    // Whether a building of that name still stands on any grid.
+    function standing(name) {
+        for (var g in w.gridBuildings) {
+            if (Object.prototype.hasOwnProperty.call(w.gridBuildings, g) && w.gridBuildings[g] === name) return true;
+        }
+        return false;
+    }
+
     function hostQuest(q) {
         var ends = q.item ? [{ action_string: 'buffappliedonadventure', item_string: q.item, triggerIdx: 0 }] : [];
         var triggers = q.building ? [{ type: 1, condition: 12, name_string: q.building, amount: 1, triggerIdx: 0 }] : [];
+        var onmap = q.onmap || [];
+        var statuses = [{ status: q.met ? 1 : 0 }];
+        if (onmap.length) {
+            ends = [];
+            triggers = [];
+            statuses = [];
+            onmap.forEach(function (name, k) {
+                ends.push({ action_string: 'onmap', item_string: name, min: 0, triggerIdx: k });
+                triggers.push({ type: 45, condition: 0, triggerIdx: k });
+                statuses.push({ status: standing(name) ? 0 : 1 });
+            });
+        }
+        var gone = onmap.length > 0 && !q.stayOpen && statuses.every(function (s) { return s.status === 1; });
         return {
-            isFinished: function () { return !!q.finished; },
+            isFinished: function () { return !!q.finished || gone; },
             getQuestName_string: function () { return q.name || ''; },
             mQuestMode: q.unread ? 2 : 3,
             IsActive: function () { return true; },
             IsQuestActive: function () { return true; },
             GetUniqueId: function () { return { toKeyString: function () { return q.key; } }; },
             GetQuestDefinition: function () { return { endConditions_vector: ends, questTriggers_vector: triggers }; },
-            mQuestTriggersFinished_vector: [{ status: q.met ? 1 : 0 }]
+            mQuestTriggersFinished_vector: statuses
         };
     }
 

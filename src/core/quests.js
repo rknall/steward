@@ -411,12 +411,18 @@
     }
 
     // The condition of one quest that names one of the wanted items, or null.
-    // End conditions with an item action come first; the quest's triggers of
-    // type 1 are the fallback, and last come type-1 triggers that are not click
-    // triggers and name one of the buildings standing at the target grid: a
-    // quest like that asks for the item without naming it.
+    // In order: (1) an end condition with an item action naming the item or a
+    // target, (2) a type-1 trigger naming one of them, (3) an end condition with
+    // an item action naming a building standing at the target grid, (4) a type-1
+    // trigger that is not a click trigger and names such a building. Rules 3 and 4
+    // let a quest ask for the item without naming it. Rule 3 exists because a
+    // quest may ask for an item by the object it removes, naming the object's
+    // building in an onmap or buildingdestroyed condition (boulders that dynamite
+    // clears, say) and never the item.
     function itemCondition(def, names, buildings) {
         var ends = toList(def.endConditions_vector);
+        var trig = toList(def.questTriggers_vector);
+        var haveBuildings = buildings && buildings.length;
         var i;
         if (ends) {
             for (i = 0; i < ends.length; i++) {
@@ -424,19 +430,26 @@
                 if (en && inList(ITEM_ACTIONS, en.action_string) && inList(names, en.item_string)) return en;
             }
         }
-        var trig = toList(def.questTriggers_vector);
         if (trig) {
             for (i = 0; i < trig.length; i++) {
                 var t = trig[i];
                 if (t && t.type === 1 && inList(names, t.item_string || t.name_string || t.type_string)) return t;
             }
-            if (buildings && buildings.length) {
-                for (i = 0; i < trig.length; i++) {
-                    var b = trig[i];
-                    if (b && b.type === CLICK_TRIGGER_TYPE && b.condition !== CLICK_TRIGGER_CONDITION &&
-                        typeof b.name_string === 'string' && b.name_string.length > 0 &&
-                        inList(buildings, b.name_string)) return b;
-                }
+        }
+        if (ends && haveBuildings) {
+            for (i = 0; i < ends.length; i++) {
+                var eb = ends[i];
+                if (eb && inList(ITEM_ACTIONS, eb.action_string) &&
+                    typeof eb.item_string === 'string' && eb.item_string.length > 0 &&
+                    inList(buildings, eb.item_string)) return eb;
+            }
+        }
+        if (trig && haveBuildings) {
+            for (i = 0; i < trig.length; i++) {
+                var b = trig[i];
+                if (b && b.type === CLICK_TRIGGER_TYPE && b.condition !== CLICK_TRIGGER_CONDITION &&
+                    typeof b.name_string === 'string' && b.name_string.length > 0 &&
+                    inList(buildings, b.name_string)) return b;
             }
         }
         return null;
@@ -452,9 +465,10 @@
     // 'done' because the item is still needed, and opts.held (an array),
     // when given, gets { quest, mode } for each such quest.
     // opts.buildings (an array of names) lists the buildings at the target grid:
-    // a non-click type-1 trigger naming one of them counts as asking for the
-    // item, under the same gate, so a building match can also yield 'done'
-    // (its trigger closed or its quest finished) where it used to be 'none'.
+    // a non-click type-1 trigger or an item-action end condition naming one of
+    // them counts as asking for the item, under the same gate, so a building
+    // match can also yield 'done' (its condition closed or its quest finished)
+    // where it used to be 'none'.
     function itemWant(name, targets, opts) {
         opts = opts || {};
         var strict = opts.running === true;

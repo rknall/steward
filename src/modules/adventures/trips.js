@@ -21,8 +21,11 @@
  * is never sent to, and the wait for it is logged once. A quest also wants
  * the item when its open type-1 trigger, not a click trigger, names the
  * building standing at the grid: such a quest takes the item without naming
- * it. Each grid has a persisted send marker, so a reload never sends to it
- * twice. The game may take less than it is offered, so only the stock drop
+ * it. So does its open item-action end condition (onmap, buildingdestroyed)
+ * naming that building, as a quest that asks for the boulders dynamite
+ * clears. The want is asked per grid: a grid whose quest condition is met is
+ * skipped on its own while the item's other grids still go. Each grid has a
+ * persisted send marker, so a reload never sends to it twice. The game may take less than it is offered, so only the stock drop
  * of a verified send counts: a seen 'part:' marker records what the grid has
  * taken so far, and while that is short of the item's amount the grid stays
  * open and the rest is offered to the same grid next, until the grid has
@@ -586,18 +589,25 @@
         for (i = 0; i < items.length; i++) {
             if (!openOf[i].length) continue;
             var buff = items[i].buff;
-            var wants = want(r, buff, openOf[i][0], held);
+            // Asked per grid: a quest matched by the building at the grid
+            // can be done for one boulder kind while the item's grids of
+            // another kind are still wanted, so a done grid skips only itself.
+            var wants = 'done';
+            var skipped = 0;
+            for (g = 0; g < openOf[i].length; g++) {
+                wants = want(r, buff, openOf[i][g], held);
+                if (wants !== 'done') break;
+                ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
+                skipped++;
+            }
+            if (skipped) log('quest no longer wants ' + buff + '; ' + skipped + ' grid(s) skipped');
+            if (wants === 'done') continue;
             if (wants === null) {
                 ld().waitRead(r, 'quests');
                 return;
             }
-            if (wants === 'done') {
-                for (g = 0; g < openOf[i].length; g++) ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
-                log('quest no longer wants ' + buff + '; ' + openOf[i].length + ' grid(s) skipped');
-                continue;
-            }
             if (wants === 'open') {
-                target = { item: items[i], grid: openOf[i][0] };
+                target = { item: items[i], grid: openOf[i][g] };
                 break;
             }
             if (waitFor === null) waitFor = buff;

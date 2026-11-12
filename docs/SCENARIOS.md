@@ -77,7 +77,10 @@ then repeats maps like a template series.
   main quest is skipped. A pick-up or item spent on a quest that does not take
   it is lost, so the scenario could run short. An item also counts as asked for
   when a running quest's open type-1 trigger (not a click trigger) names the
-  building standing at the item's grid (e.g. Riches `buffad_sabotage`).
+  building standing at the item's grid (e.g. Riches `buffad_sabotage`), or when
+  its open `onmap` or `buildingdestroyed` end condition names that building (e.g.
+  Storm Recovery `buffad_boulder_01` and `buffad_boulder_02`, which the dynamite
+  clears).
 - While a scenario run (running or paused) has its island viewed, collect
   clicks only the quest objects and the collectibles that running quests count
   there, and no pattern collectibles. Apply and Trip log once "waiting for quest <name> to be
@@ -133,7 +136,11 @@ why.
   the drop was only missed by a read lag. The item's quest then stays open
   until Clear pauses.
 - Quest gating is per item, not per grid, so the grid order in the file decides
-  which grid goes first (same as autoTSO).
+  which grid goes first (same as autoTSO). A quest matched by the building at the
+  grid is read per grid instead: a grid whose building's condition is met is
+  skipped while the item's other grids still go. After a client reload mid-trip
+  a blasted grid's building is no longer known, so that grid waits like an item
+  no quest wants.
 - Quest objects of unread quests are no longer clicked by collect on any
   adventure until the quest is read.
 - Clear (after the last trip) still counts quest objects with the looser gate.

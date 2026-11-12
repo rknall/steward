@@ -799,6 +799,90 @@ t.test('itemWant running: a buff-named end condition wins over a closed building
     t.assert.strictEqual(runWant(q, { buildings: ['buffad_sabotage'] }), 'open');
 });
 
+// A quest that asks for the dynamite by the boulders it clears: the end conditions
+// name the boulders and the triggers are unnamed.
+var DYN = 'BattleBuffHurt_BuffAd_SmallDynamite';
+var BOULDER_1 = 'buffad_boulder_01';
+var BOULDER_2 = 'buffad_boulder_02';
+
+function boulderQuest(statuses, mode, action) {
+    return itemQuest({
+        name: 'Buff_Adv_StormRecovery_SubQuest02',
+        ends: [endCond(BOULDER_1, 0, action || 'onmap'), endCond(BOULDER_2, 1, action || 'onmap')],
+        triggers: [{ triggerIdx: 0, type: 45, condition: 0 }, { triggerIdx: 1, type: 45, condition: 0 }],
+        statuses: statuses || [{ status: 0 }, { status: 0 }],
+        mode: mode === undefined ? 3 : mode
+    });
+}
+
+function dynWant(q, opts) {
+    var o = { running: true };
+    for (var k in (opts || {})) o[k] = opts[k];
+    return bootClick([q]).Q.itemWant(DYN, [], o);
+}
+
+t.test('itemWant running: an open onmap end condition on the grid building makes the item open', function () {
+    var q = boulderQuest();
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'open');
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_2] }), 'open');
+});
+
+t.test('itemWant running: an end condition building needs an exact, non-empty match', function () {
+    var q = boulderQuest();
+    t.assert.strictEqual(dynWant(q), 'none');
+    t.assert.strictEqual(dynWant(q, { buildings: ['other'] }), 'none');
+    t.assert.strictEqual(dynWant(q, { buildings: [''] }), 'none');
+    t.assert.strictEqual(dynWant(q, { buildings: ['BuffAd_Boulder_01'] }), 'none');
+});
+
+t.test('itemWant running: an end condition building match on a mode-2 quest is held', function () {
+    var held = [];
+    var q = boulderQuest(null, 2);
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1], held: held }), 'held');
+    t.assert.strictEqual(JSON.stringify(held),
+        JSON.stringify([{ quest: 'Buff_Adv_StormRecovery_SubQuest02', mode: 2 }]));
+});
+
+t.test('itemWant running: an end condition building is done per kind and when the quest is finished', function () {
+    var q = boulderQuest([{ status: 1 }, { status: 0 }]);
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'done');
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_2] }), 'open');
+    var f = boulderQuest();
+    f.isFinished = function () { return true; };
+    t.assert.strictEqual(dynWant(f, { buildings: [BOULDER_1] }), 'done');
+});
+
+t.test('itemWant running: an end condition building match skips a Main quest', function () {
+    var q = boulderQuest();
+    q.getQuestName_string = function () { return 'Main quest'; };
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'none');
+});
+
+t.test('itemWant running: an end condition with a non-item action never matches the building', function () {
+    var q = boulderQuest(null, 3, 'kill');
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'none');
+});
+
+t.test('itemWant running: a buildingdestroyed end condition on the grid building makes the item open', function () {
+    var q = boulderQuest(null, 3, 'buildingdestroyed');
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'open');
+});
+
+t.test('itemWant running: an end condition naming the buff wins over a building end condition', function () {
+    var q = itemQuest({
+        name: 'Buff_Adv_StormRecovery_SubQuest02',
+        ends: [endCond(BOULDER_1, 0, 'onmap'), endCond(DYN, 1)],
+        statuses: [{ status: 1 }, { status: 0 }], mode: 3
+    });
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'open');
+});
+
+t.test('itemWant running: an end condition building match works without quest triggers', function () {
+    var q = boulderQuest();
+    delete q.GetQuestDefinition().questTriggers_vector;
+    t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'open');
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };
