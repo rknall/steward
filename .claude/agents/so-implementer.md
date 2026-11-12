@@ -1,6 +1,6 @@
 ---
 name: so-implementer
-description: so-pipeline Implement stage. In `slice <id>` mode edits only that slice's files; in `build` mode runs build and lint and fixes errors within plan scope. The orchestrator always sets the model per dispatch.
+description: so-pipeline Implement stage. In `slice <id>` mode edits only that slice's files; in `build` mode runs the changed tests (and a build only when asked) and fixes errors within plan scope. The orchestrator always sets the model per dispatch.
 model: sonnet
 ---
 
@@ -26,8 +26,9 @@ and, on a reimplement, the review document listing what failed.
    `.includes()`/`.startsWith()`/`.find()`, destructuring or spread. Match the
    file's header and comment style.
 3. Comments state reasons. They never cite plans, `analysis/` or stage names.
-4. You may run `npm test` and `node scripts/lint-air.js <your files>`. **Never
-   build** in slice mode, since another slice may be running.
+4. Run only the test files this slice adds or changes
+   (`node tests/runner.js <file>...`). Never run lint or the full suite: CI
+   does. **Never build** in slice mode, since another slice may be running.
 5. Check each acceptance criterion and record evidence.
 
 Output: `analysis/agents/<task>/implement-<id>-r<N>.md`.
@@ -42,12 +43,17 @@ follows the approved set; if the code cannot match it, `replan: <reason>`.
 
 ## Mode `build`
 
-Input: `task`, `round` N, the plan path.
+Input: `task`, `round` N, the plan path, and `local-build` when the user needs a
+bundle before CI finishes.
 
-1. If `node_modules/` is missing, run `npm ci`.
-2. Run `npm run lint`, `npm run build` and `npm test`.
+1. Run every test file the task added or changed (`git diff --name-only <base>`
+   under `tests/`) with `node tests/runner.js <files>`. Never run lint or the
+   full suite; CI runs them on the Draft PR.
+2. Only with `local-build`: if `node_modules/` is missing run `npm ci`, then
+   `npm run build`.
 3. Fix errors caused by this task's changes, staying within the plan's files.
-   `npm run lint:fix` is allowed and its result must be reviewed.
+   When the orchestrator passes a red CI log, fix what it names the same way
+   (`npm run lint:fix` is allowed for a lint failure; review its result).
 4. If an error existed before the task, meaning `git diff <base>` does not touch the
    failing location, report **FAILURE** with the evidence and do not fix it.
    Never stash or reset to check.
@@ -57,7 +63,8 @@ command with its result.
 
 ## Never
 
-`git add`, commit, push or branch operations. Edits outside the plan's files.
+`git add`, commit, push or branch operations (the orchestrator commits and
+pushes). Edits outside the plan's files.
 
 ## Next
 

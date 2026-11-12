@@ -52,6 +52,25 @@ then `scripts/release.js` decides.
 CI never commits or pushes to a branch. Only `contents: write` is granted, for
 the tag and release.
 
+## PR builds
+
+The CI workflow (`.github/workflows/ci.yml`) runs on every PR, drafts
+included. It builds the PR's head commit (not GitHub's merge commit), so the
+bundle's `git describe` version, for example `0.12.2-3-gabc1234`, names a commit
+on the branch. The bundle is uploaded before lint and tests run, as the
+artifact `user_steward-<version>` (a zip holding `user_steward.js`, kept 14
+days), so it can be tested in the client even while lint or a test is red.
+
+A second job keeps one comment on the PR, marked `<!-- steward-ci-bundle -->`
+and edited in place on every push, with the version, the artifact link, the run
+link and whether lint and tests passed. Only that job gets
+`pull-requests: write`. A PR from a fork gets a read-only token, so it skips the
+comment and keeps only the artifact on the run page. A new push cancels the
+PR's running check; runs on `main` always finish.
+
+Per-PR prereleases were rejected: they need `contents: write` on PR code, and
+the in-game updater reads this repository's releases.
+
 ## What the in-game updater depends on
 
 The updater module reads the GitHub Releases of this repository and installs the

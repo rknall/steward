@@ -28,15 +28,18 @@ Sections:
 4. **Watch for**: risks, behaviour changes, new or changed settings and their
    defaults, and log categories to keep an eye on (`docs/LOGGING.md`).
 5. **How to test**:
-   - Automated: `npm run lint`, `npm test`, `npm run build`, and which test files
-     cover the change.
-   - In the running Adobe AIR client: run `npm run build`, copy
-     `build/user_steward.js` into the TSO client's `userscripts/` directory
+   - Automated: the Draft PR's CI result (lint, build, test) and which test
+     files cover the change.
+   - In the running Adobe AIR client: download the bundle from the Draft PR's
+     sticky CI comment (artifact `user_steward-<version>`; or `npm run build`
+     when the user needs it before CI finishes), copy
+     `user_steward.js` into the TSO client's `userscripts/` directory
      (`C:\Users\Roland\AppData\Local\tso_portable\`), reload scripts from the
      client menu (or restart `client64.exe`), open the Steward menu, take the
      concrete steps for this change, and watch
      `tso_portable/steward/logs/console.log` for the expected lines.
-6. **Suggested commit message**: short, topic-prefixed (`mining: ...`), with no
+6. **Commit message**: the one the orchestrator used (or should use for the
+   squash): short, topic-prefixed (`mining: ...`), with no
    version suffix, ending with `Assisted-by: Claude`. Add `Bump: minor` (new
    module or redesign) or `Bump: major` above it when it applies. Never suggest
    editing package.json `version`.
@@ -45,7 +48,7 @@ Optional: when a visual explanation helps the user test or judge the change, wri
 an explainer set `analysis/agents/<task>/design/<task>-explainer.html` from the
 review shell and report `review-set <path>` in `## Next` before `done`.
 
-Do not edit code. Do not commit.
+Do not edit code. Do not commit (the orchestrator does).
 
 ## Output
 
