@@ -1420,21 +1420,174 @@ t.test('Produce: next-trip items that cannot be paid wait; this trip is ordered'
     assert.ok(logged(w, /next trip items wait for resources: Wood 14\/12/), logLines(w).join('\n'));
 });
 
-t.test('Produce: waits for the items of this trip only, then starts the map', function () {
+// The loader's READ_LAG_MS: the settle the home exit waits after it first
+// reads clear.
+function lagOf(w) {
+    return w.S.modules.adventures.loader.READ_LAG_MS;
+}
+
+function busyText(w) {
+    return w.st.current().busy.text;
+}
+
+// The run at Produce of trip 1 of TWINS with its orders sent and queued.
+function twinsOrdered(w) {
+    W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+    passesFor(w, 3 * PASS_MS);
+    assertStep(w, 'Produce');
+}
+
+t.test('Produce: waits for this and the next trip\'s production, then starts the map', function () {
     var w = scenWorld();
     W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
     passesFor(w, 60000);
     assertStep(w, 'Produce');
-    assert.ok(/waiting for production: ChangeSkin_BuffAd_Bridge 0\/3, ChangeSkin_BuffAd_Broadsheet 0\/3/
-        .test(w.st.current().busy.text), w.st.current().busy.text);
-    // Only this trip's items land; the next trip's stay queued.
+    assert.ok(/waiting for production: ChangeSkin_BuffAd_Bridge 0\/3 queued 3, ChangeSkin_BuffAd_Broadsheet 0\/3 queued 3/
+        .test(busyText(w)), busyText(w));
+    // This trip's items land; the next trip's stay queued.
     var rest = w.queues[1].entries.filter(function (e) { return e.type === RESCUE; });
     w.queues[1].entries = w.queues[1].entries.filter(function (e) { return e.type !== RESCUE; });
     w.produce();
     w.queues[1].entries = rest;
-    passesFor(w, PASS_MS);
+    passesFor(w, 60000);
+    assertStep(w, 'Produce');
+    assert.ok(/ChangeSkin_BuffAd_Rescueparty next queued 1/.test(busyText(w)), busyText(w));
+    assert.ok(!logged(w, /items ready/), 'not ready while RESCUE is queued');
+    w.produce();
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
     assert.ok(['StartMap', 'Jump', 'Apply'].indexOf(stepName(w)) >= 0, 'left Produce: ' + stepName(w));
     assert.strictEqual(w.productionOrders.length, 3, 'nothing ordered twice');
+});
+
+t.test('Produce: leftover stock never counts as done while the item is queued', function () {
+    var w = scenWorld();
+    w.setStock(BRIDGE, 3);
+    w.setStock(SHEET, 3);
+    W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+    passesFor(w, 120000);
+    assertStep(w, 'Produce');
+    assert.deepStrictEqual(made(w), { 'ChangeSkin_BuffAd_Rescueparty': 1 });
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    // RESCUE is done, but a BRIDGE entry is queued on top of the leftover stock.
+    w.queues[1].entries = [{ type: BRIDGE, amount: 3 }];
+    passesFor(w, 120000);
+    assertStep(w, 'Produce');
+    assert.ok(/ChangeSkin_BuffAd_Bridge 3\/3 queued 3/.test(busyText(w)), busyText(w));
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+});
+
+t.test('Produce: stock below the amount needed keeps the run home and orders the rest', function () {
+    var w = scenWorld();
+    var rec = record(w, { id: 'five', label: 'Five (test)',
+        trips: [{ items: [{ buff: DYN, grids: [41, 42, 43, 44], amount: 5 }] }, {}] });
+    w.setStock(DYN, 3);
+    W.startScenario(w, rec, { step: w.S.RunStep.Produce, trip: 0 });
+    passesFor(w, 60000);
+    assertStep(w, 'Produce');
+    assert.deepStrictEqual(made(w), { 'BattleBuffHurt_BuffAd_SmallDynamite': 2 });
+    // Nothing queued any more, yet 3 of 5 are in stock: never ready.
+    Object.keys(w.queues).forEach(function (id) { w.queues[id].entries = []; });
+    passesFor(w, 120000);
+    assertStep(w, 'Produce');
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    assert.ok(/SmallDynamite 3\/5/.test(busyText(w)), busyText(w));
+});
+
+t.test('Produce: accepted -> finished -> re-checked -> only then leaves', function () {
+    var w = scenWorld();
+    twinsOrdered(w);
+    assert.ok(w.queues[1].entries.length >= 3, 'orders accepted into the queue: ' + w.queues[1].entries.length);
+    assert.ok(!w.st.run().marks['ready:1'], 'no ready mark while queued');
+    w.produce();
+    passesFor(w, PASS_MS);
+    assertStep(w, 'Produce');
+    assert.strictEqual(busyText(w), 'production done, checking stock again');
+    assert.ok(w.st.run().marks['ready:1'], 'ready mark set');
+    assert.ok(!logged(w, /items ready/), 'not before the second read');
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce', 'left after the re-check');
+    assert.ok(logged(w, /items ready: .*ChangeSkin_BuffAd_Bridge 3\/3/), logLines(w).join('\n'));
+    assert.ok(!w.st.run().marks['ready:1'], 'ready mark dropped on leaving');
+});
+
+t.test('Produce: a queue that refills during the re-check restarts it', function () {
+    var w = scenWorld();
+    twinsOrdered(w);
+    w.produce();
+    passesFor(w, PASS_MS);
+    assert.ok(w.st.run().marks['ready:1'], 'ready mark set');
+    w.queues[1].entries.push({ type: BRIDGE, amount: 3 });
+    passesFor(w, PASS_MS);
+    assertStep(w, 'Produce');
+    assert.ok(!w.st.run().marks['ready:1'], 'mark dropped');
+    assert.ok(/^waiting for production: /.test(busyText(w)), busyText(w));
+    w.produce();
+    passesFor(w, PASS_MS);
+    assertStep(w, 'Produce');
+    assert.strictEqual(busyText(w), 'production done, checking stock again');
+    assert.ok(!logged(w, /items ready/), 'the settle starts again');
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
+    assert.ok(logged(w, /items ready/), logLines(w).join('\n'));
+});
+
+t.test('Produce: an order not yet seen in the queue holds the exit', function () {
+    var w = scenWorld();
+    w.setStock(BRIDGE, 3);
+    w.setStock(SHEET, 3);
+    W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+    tick(w);
+    play(w, function () { return w.productionOrders.length >= 1; });
+    Object.keys(w.queues).forEach(function (id) { w.queues[id].entries = []; });
+    passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS - PASS_MS);
+    assertStep(w, 'Produce');
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+});
+
+t.test('Produce: an unreadable queue holds, never leaves', function () {
+    var w = scenWorld();
+    w.setStock(BRIDGE, 3);
+    w.setStock(SHEET, 3);
+    w.setStock(RESCUE, 1);
+    var prod = w.S.core.production;
+    var real = prod.queuedItems;
+    prod.queuedItems = function () { return null; };
+    try {
+        W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+        passesFor(w, 120000);
+        assertStep(w, 'Produce');
+        assert.ok(/item stock or production queue not readable/.test(busyText(w)), busyText(w));
+        assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    } finally {
+        prod.queuedItems = real;
+    }
+});
+
+t.test('Produce: visit-only first trip waits for the next trip\'s production', function () {
+    var w = scenWorld();
+    W.startScenario(w, record(w, SHORTREC), { step: w.S.RunStep.Produce, trip: 0 });
+    passesFor(w, 60000);
+    assertStep(w, 'Produce');
+    assert.deepStrictEqual(made(w), { 'ChangeSkin_BuffAd_Bridge': 3, 'ChangeSkin_BuffAd_Broadsheet': 3 });
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    w.produce();
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
+    assert.ok(logged(w, /items ready/), logLines(w).join('\n'));
+});
+
+t.test('reload mid-wait at Produce: orders nothing twice and keeps waiting', function () {
+    var w = scenWorld();
+    twinsOrdered(w);
+    var before = JSON.stringify(made(w));
+    w = restart(w);
+    passesFor(w, 60000);
+    assertStep(w, 'Produce');
+    assert.strictEqual(JSON.stringify(made(w)), before, 'nothing ordered twice');
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    w.produce();
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
 });
 
 // ---- reload safety ------------------------------------------------------------------

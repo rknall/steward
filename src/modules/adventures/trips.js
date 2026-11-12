@@ -11,7 +11,10 @@
  * Produce orders what the current trip still needs (its open grids) plus
  * what the next trip needs (all its grids), minus the stock and what is
  * already queued, so the next trip's items are made while the current one
- * runs. It waits only until the current trip's items are in the star menu.
+ * runs. It leaves home only once no item of this or the next trip is in a
+ * production queue (whoever queued it), the current trip's items are in the
+ * star menu, and both read so again READ_LAG_MS later: stock already in the
+ * star menu never counts while an item of the trips is still queued.
  * An order that fails or does not show in the queue is tried again after a
  * while and never pauses the run: only missing resources do.
  *
@@ -95,11 +98,14 @@
     // per trip holds Produce's verdict that the next trip waits for
     // resources (seen, its text the shortfall), since the island cannot read
     // the home queues; one per trip counts the re-visits taken (seen, count).
+    // One per trip holds when the home exit first read clear (seen, field
+    // at), so the run leaves only after a second clear read READ_LAG_MS later.
     var MAKE    = 'make:';
     var APPLY   = 'apply:';
     var PART    = 'part:';
     var SHORT   = 'short:';
     var REVISIT = 'revisit:';
+    var READY   = 'ready:';
 
     function has(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj, key);
@@ -256,10 +262,16 @@
         st().save();
     }
 
-    function haveText(thisNeed, info) {
+    // One entry per item of this and the next trip: stock/need for this
+    // trip's items, "next" for an item only the next trip needs, and what is
+    // still queued of it.
+    function haveText(thisNeed, info, buffs) {
         var out = [];
-        for (var b in thisNeed) {
-            if (has(thisNeed, b)) out.push(b + ' ' + info[b].stock + '/' + thisNeed[b]);
+        for (var k = 0; k < buffs.length; k++) {
+            var b = buffs[k];
+            var t = has(thisNeed, b) ? b + ' ' + info[b].stock + '/' + thisNeed[b] : b + ' next';
+            if (info[b].q > 0) t += ' queued ' + info[b].q;
+            out.push(t);
         }
         out.sort();
         return out.join(', ');
@@ -267,6 +279,9 @@
 
     // Produce (home). Production runs yield y items each, so a need in items
     // becomes ceil(items / y) runs. A queued run counts as items on the way.
+    // The run leaves only on two clear reads READ_LAG_MS apart, clear meaning
+    // nothing of either trip queued and this trip's items in stock, since the
+    // queue entry may leave before the item shows in the star menu.
     function produce(r) {
         var RS = S.RunStep;
         var trips = r.trips || [];
@@ -344,9 +359,15 @@
             }
         }
 
-        var ready = true;
+        // Any queued entry of an item holds the exit, the run's own or a
+        // manual one: the queue cannot tell them apart, and leftover stock
+        // must not release the run while its own order is still being made.
+        var clear = true;
         for (b in thisNeed) {
-            if (has(thisNeed, b) && info[b].stock < thisNeed[b]) ready = false;
+            if (has(thisNeed, b) && info[b].stock < thisNeed[b]) clear = false;
+        }
+        for (k = 0; k < buffs.length; k++) {
+            if (info[buffs[k]].q !== 0) clear = false;
         }
 
         var list = all;
@@ -375,20 +396,41 @@
             }
         }
         noteShort(r, i, shortNext);
+        var readyName = READY + i;
         if (list.length) {
+            // A new order restarts the settle: the exit needs two clear reads
+            // with nothing ordered between them.
+            ld().dropMark(r, readyName);
             orderRuns(r, list, info);
             return;
         }
-        if (ready) {
-            var left = [];
-            for (name in (r.marks || {})) {
-                if (has(r.marks, name) && name.indexOf(MAKE) === 0) left.push(name);
-            }
-            for (k = 0; k < left.length; k++) ld().dropMark(r, left[k]);
-            st().go(RS.StartMap, 'items ready');
+        if (!clear) {
+            ld().dropMark(r, readyName);
+            ld().waitBusy(r, null, 'waiting for production: ' + haveText(thisNeed, info, buffs));
             return;
         }
-        ld().waitBusy(r, null, 'waiting for production: ' + haveText(thisNeed, info));
+        // The time lives in memory only (a reload reads the mark back without
+        // it), so a mark without one starts the settle afresh.
+        var rm = ld().marked(r, readyName);
+        if (!rm || typeof rm.at !== 'number') {
+            ld().markSeen(r, readyName);
+            ld().marked(r, readyName).at = now();
+            st().save();
+            ld().waitBusy(r, null, 'production done, checking stock again');
+            return;
+        }
+        if (now() - rm.at < ld().READ_LAG_MS) {
+            ld().waitBusy(r, null, 'production done, checking stock again');
+            return;
+        }
+        var left = [];
+        for (name in (r.marks || {})) {
+            if (has(r.marks, name) && name.indexOf(MAKE) === 0) left.push(name);
+        }
+        for (k = 0; k < left.length; k++) ld().dropMark(r, left[k]);
+        ld().dropMark(r, readyName);
+        log('items ready: ' + haveText(thisNeed, info, buffs));
+        st().go(RS.StartMap, 'items ready');
     }
 
     // ---- Apply --------------------------------------------------------------
