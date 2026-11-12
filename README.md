@@ -7,13 +7,21 @@
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/rknall)](https://github.com/sponsors/rknall)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-rpk79-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rpk79)
 
-Modular automation framework for [The Settlers Online](https://www.thesettlersonline.com/), shipped as one userscript for the Adobe AIR 32 TSO client. It is a clean-sheet replacement for [autoTSO](https://github.com/rknall/autoTSO) with the same runtime constraints, split into three layers:
+Modular automation framework for [The Settlers Online](https://www.thesettlersonline.com/), shipped as one userscript for the Adobe AIR 32 TSO client. It is a clean-sheet replacement for [autoTSO](https://github.com/adly98/autoTSO) with the same runtime constraints, split into three layers:
 
 - **Kernel**: priority and cooperative round-robin task scheduler, action queue, settings store, logger and the in-game UI shell.
 - **Core library**: general TSO operations (zones, buildings, specialists, deposits, packets, locale, events) shared by every module.
 - **Modules**: opt-in automation. Each module declares `isReady` and `plan`, and the kernel runs it.
 
 Releases are built and published by the Release workflow; the badge above shows the latest one.
+
+## Thanks
+
+Steward stands on the work of others, and a big thank you goes to them:
+
+- [fedorovvl](https://github.com/fedorovvl), creator of the community [The Settlers Online client](https://github.com/fedorovvl/tso_client) that steward runs in.
+- [adly98](https://github.com/adly98), creator of the community project [autoTSO](https://github.com/adly98/autoTSO), which steward's updater is modelled on.
+- Blue Byte and ClipSoft, for creating The Settlers Online and keeping such a great game running.
 
 ## Modules
 
@@ -42,7 +50,7 @@ After the first install Steward updates itself. The controls are in the `~Stewar
 
 - **Check:** on start (on by default, at most once per hour) Steward looks for a newer release and posts a notice. Nothing installs without a confirm, unless the opt-in automatic install is on. Automatic install only replaces a plain release with a newer plain release.
 - **Install:** the bundle is downloaded from the `rknall/steward` release asset only. Its size, the SHA-256 digest GitHub publishes and the version banner in the bundle are verified. The current profile's settings are backed up to `steward/backups/` (20 kept per profile), the old bundle is kept as `userscripts/user_steward.js.backup`, then the new bundle is written and scripts are reloaded.
-- **Step down:** pick an older release from the version list. The settings backup taken when that version was left is restored; without an exact match the newest backup from an older version is used, and with none, settings stay as they are. Releases older than 0.12.0 have no updater, so stepping below it removes the updater.
+- **Step down:** pick an older release from the version list. The settings backup taken when that version was left is restored; without an exact match the newest backup from an older version is used, and with none, settings stay as they are. Releases older than 0.12.0 have no updater, so stepping below it removes the updater. They are listed only when the `showOldReleases` setting is on (off by default).
 - **Test releases** appear with the `showPrereleases` setting; a running test (prerelease) build always sees them.
 - **Development builds** (git describe ahead of a tag, or a dirty tree) are shown as such and are alerted to newer releases like any build, but are never installed automatically. An unversioned `0.0.0` / `0.0.0-git` build is never offered an update.
 

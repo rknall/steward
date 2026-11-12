@@ -27,6 +27,11 @@
         // as the latest version.
         showPrereleases: false,
 
+        // List releases older than REPO.firstUpdaterVersion (they have no
+        // updater) in the Versions list. Off by default: installing one stops
+        // Steward updating itself.
+        showOldReleases: false,
+
         // Settings backup files kept per profile in steward/backups/.
         keepBackups: 20
     };
@@ -128,6 +133,12 @@
             !!(running && running.kind === S.VersionKind.Prerelease);
     }
 
+    // Releases older than REPO.firstUpdaterVersion are listed only on opt-in.
+    // This is the only copy of the rule.
+    function showOldReleases(cfg) {
+        return !!(cfg && cfg.showOldReleases === true);
+    }
+
     // The version text a log line, a notice or a backup name uses; an
     // unparseable build shows its raw VERSION.
     function runningText(running) {
@@ -141,6 +152,7 @@
 
     S.modules.updater.config    = config;
     S.modules.updater.showPrereleases = showPrereleases;
+    S.modules.updater.showOldReleases = showOldReleases;
     S.modules.updater.runningText     = runningText;
     S.modules.updater.predatesUpdater = predatesUpdater;
     S.modules.updater.state     = state;

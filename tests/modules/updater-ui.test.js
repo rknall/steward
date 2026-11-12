@@ -204,17 +204,53 @@ t.test('the group renders with test releases and an empty backup folder', functi
     assert.ok($m.text().indexOf('No settings backups yet') >= 0);
 });
 
-t.test('the versions list marks the running version and the ones without an updater', function () {
+t.test('the versions list hides releases without an updater by default', function () {
     var s = setup('0.12.0');
+    check(s, [gh('v0.13.0'), gh('v0.12.0'), gh('v0.11.0')]);
+    var $m = render(s);
+    var text = $m.text();
+    assert.ok(text.indexOf('Running') >= 0);
+    assert.ok(text.indexOf('No updater') < 0);
+    assert.ok(text.indexOf('predate the updater') < 0);
+    assert.ok(text.indexOf('v0.11.0') < 0);
+    // The release card and the other listed row carry an Install button.
+    var installs = buttons($m).filter(function (b) { return /^Install/.test(b.text); });
+    assert.strictEqual(installs.length, 2);
+});
+
+t.test('with showOldReleases the versions list marks the ones without an updater', function () {
+    var s = setup('0.12.0');
+    s.S.kernel.settings.write('updater', { showOldReleases: true });
     check(s, [gh('v0.13.0'), gh('v0.12.0'), gh('v0.11.0')]);
     var $m = render(s);
     var text = $m.text();
     assert.ok(text.indexOf('Running') >= 0);
     assert.ok(text.indexOf('No updater') >= 0);
     assert.ok(text.indexOf('predate the updater') >= 0);
+    assert.ok(text.indexOf('are hidden') < 0);
     // The release card and the two other rows carry an Install button.
     var installs = buttons($m).filter(function (b) { return /^Install/.test(b.text); });
     assert.strictEqual(installs.length, 3);
+});
+
+t.test('a list of only old releases shows the hidden empty state', function () {
+    var s = setup('0.12.0');
+    check(s, [gh('v0.11.0'), gh('v0.10.0')]);
+    var text = render(s).text();
+    assert.ok(text.indexOf('No versions listed') >= 0);
+    assert.ok(text.indexOf('are hidden') >= 0);
+    assert.ok(text.indexOf('Use Check now') < 0);
+});
+
+t.test('the running row stays listed when it predates the updater', function () {
+    var s = setup('0.11.0');
+    check(s, [gh('v0.12.0'), gh('v0.11.0')]);
+    assert.ok(render(s).text().indexOf('Running') >= 0);
+});
+
+t.test('the options card has the old-releases toggle', function () {
+    var s = setup('0.12.0');
+    assert.ok(render(s).text().indexOf('Show versions before 0.12.0') >= 0);
 });
 
 t.test('the backup list shows this profile and mentions the other profiles', function () {
@@ -314,6 +350,7 @@ t.test('a confirmed upgrade installs with no restore', function () {
 
 t.test('a step-down from the versions list restores the backup written when leaving that version', function () {
     var s = setup('0.12.0');
+    s.S.kernel.settings.write('updater', { showOldReleases: true });
     s.H.host.settings.settings['steward.mining'] = { enabled: true };
     var made = s.U.backups.create('0.11.0', '0.12.0');
     check(s, [gh('v0.12.0'), gh('v0.11.0')]);
