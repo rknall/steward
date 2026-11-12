@@ -994,7 +994,7 @@
 
     function normStuck(v) {
         if (!isPlainObject(v) || !isStep(v.step)) return null;
-        return { step: v.step, wave: count(v.wave), trips: count(v.trips) };
+        return { step: v.step, wave: count(v.wave), trips: count(v.trips), refreshed: v.refreshed === true };
     }
 
     function filePause(r, reason, message) {
