@@ -135,3 +135,59 @@ t.test('events.eventResourceAmount reuses the resource reader', function () {
     t.assert.strictEqual(E.eventResourceAmount('XMAS'), 5);
     t.assert.strictEqual(E.eventResourceAmount('NoSuchEvent'), null);
 });
+
+// ---- uncategorized: the mayor's house items ----------------------------------
+
+// list: [name, amount, category]; a category of undefined has no definition.
+function withInventory(H, list) {
+    var cats = {};
+    var vec = [];
+    for (var i = 0; i < list.length; i++) {
+        vec.push({ name_string: list[i][0], amount: list[i][1] });
+        cats[list[i][0]] = list[i][2];
+    }
+    withResources(H, { GetPlayerResources_vector: function () { return vec; } });
+    H.host.game.def = function (name) {
+        if (name !== 'ServerState::gEconomics') return null;
+        return {
+            GetResourcesDefaultDefinition: function (n) {
+                return typeof cats[n] === 'string' ? { category_string: cats[n] } : null;
+            }
+        };
+    };
+}
+
+t.test('uncategorized lists held resources without a storehouse category', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withInventory(H, [
+        ['CollectibleWineBarrel', 7515, ''],
+        ['Wood', 448126, 'Intermediates'],
+        ['CollectibleGrainSacks', 150, ''],
+        ['CollectibleKettle', 0, ''],
+        ['Mystery', 4, undefined]
+    ]);
+    var names = { CollectibleWineBarrel: 'Barrel', CollectibleGrainSacks: 'Grain Sacks' };
+    H.host.loca.GetText = function (cat, key) {
+        return cat === 'RES' ? names[key] : '';
+    };
+
+    var list = H.Steward.core.resources.uncategorized();
+    t.assert.deepStrictEqual(JSON.parse(JSON.stringify(list)), [
+        { name: 'CollectibleWineBarrel', label: 'Barrel', amount: 7515 },
+        { name: 'CollectibleGrainSacks', label: 'Grain Sacks', amount: 150 }
+    ]);
+});
+
+t.test('uncategorized is null when the host lists cannot be read', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.uncategorized(), null);
+
+    withInventory(H, [['CollectibleWineBarrel', 1, '']]);
+    H.host.game.getResources = function () { return {}; };
+    t.assert.strictEqual(R.uncategorized(), null);
+
+    withInventory(H, [['CollectibleWineBarrel', 1, '']]);
+    H.host.game.def = function () { throw new Error('boom'); };
+    t.assert.strictEqual(R.uncategorized(), null);
+});

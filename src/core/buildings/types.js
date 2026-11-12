@@ -52,6 +52,9 @@
     add('GiftGhostShip',        'GiftGhostShip');
     add('BalloonMarket_mini',   'BalloonMarket_mini');
 
+    // Gem producers (collect section's gem pit table)
+    add('GemPit',           'GemPit');
+
     // Storage / infra
     add('Warehouse',        'Warehouse');
     add('Storehouse',       'Storehouse');
