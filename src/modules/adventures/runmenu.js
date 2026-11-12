@@ -24,6 +24,12 @@
  * Produce, Apply and Trip rows carry the run. Its row set never changes, so
  * it has one fixed signature.
  *
+ * A queue run keeps one signature for the whole queue, whatever the kind of
+ * the entry running: the entry hand-over happens inside plan(), where a rebuild
+ * is not allowed. The waves group is therefore padded with skip rows (or cut)
+ * to the queue's width, the largest wave count of its adventure entries, and
+ * every other group already has one row per step for both kinds.
+ *
  * Bundle slot: module file, in name order after run.js and before settings.js
  * and state.js; top level only assigns S.modules.adventures.runmenu; all else
  * runs at call time. Every call into the other adventures parts is late-bound
@@ -169,6 +175,14 @@
         };
     }
 
+    // The wave rows of a queue run, held at exactly the queue's width so the
+    // row set stays the one the menu was built with.
+    function fitWidth(list, width, label) {
+        var out = list.slice(0, width);
+        while (out.length < width) out.push({ label: label, file: '', mark: 'skip', detail: 'not used' });
+        return out;
+    }
+
     function waveRows(rs, r, row, pos) {
         var out = [];
         var sp = stepsPart();
@@ -195,6 +209,7 @@
         var r = rs.run;
         var groups = [];
         if (!r) return groups;
+        var queue = rs.request && rs.request.queue ? rs.request.queue : null;
         var steps = st().stepRows();
         var pos = st().position(r.step);
         var group = null;
@@ -204,10 +219,12 @@
                 group = { label: row.group, rows: [] };
                 groups.push(group);
             }
-            if (row.waves && st().optionOff(r, row.option)) {
-                group.rows.push({ label: row.group, file: '', mark: 'skip', detail: 'not used' });
-            } else if (row.waves) group.rows = group.rows.concat(waveRows(rs, r, row, pos));
-            else group.rows.push(stageRow(rs, r, row, pos));
+            if (row.waves) {
+                var part = st().optionOff(r, row.option)
+                    ? [{ label: row.group, file: '', mark: 'skip', detail: 'not used' }]
+                    : waveRows(rs, r, row, pos);
+                group.rows = group.rows.concat(queue ? fitWidth(part, queue.width, row.group) : part);
+            } else group.rows.push(stageRow(rs, r, row, pos));
         }
         return groups;
     }
@@ -314,6 +331,8 @@
     function signature() {
         var r = st().run();
         if (!r) return IDLE;
+        var req = st().current().request;
+        if (req && req.queue) return 'queue:' + req.queue.width;
         return st().isScenario(r) ? 'scenario' : 'waves:' + r.paths.length;
     }
 

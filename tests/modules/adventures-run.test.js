@@ -2923,3 +2923,346 @@ t.test('no site pauses GeneralBusy', function () {
     var w = homeWorld();
     assert.strictEqual(w.S.RunPause.GeneralBusy, undefined);
 });
+
+// ---- 21. Queue start, entryRun, Skip entry, End repetition in a queue ----------
+
+// A booted setup of its own for the queue commands: two templates (Long, 3
+// waves on BlackKnights; Short, 1 wave on Bandits), the checked-in twins
+// scenario, o.maps[adventure] maps of each in the star menu, o.open[adventure]
+// the zone of an open map, o.viewed the viewed zone. Nothing ticks the run.
+var airfs = require('../stubs/airfs');
+var A = require('../stubs/army');
+var QFS = require('fs');
+var QPATH = require('path');
+
+var TWINS_ADV = 'BuffAdventures_twins_easy';
+var QMAPS = { BlackKnights: 3, Bandits: 2 };
+
+function queueSetup(o) {
+    o = o || {};
+    var fs = airfs.make();
+    var alerts = [];
+    var H = harness.boot({ host: { air: fs.air, showGameAlert: function (m) { alerts.push(m); } } });
+    var S = H.Steward;
+    S.modules.adventures.builtinScenarios = {
+        twins: QFS.readFileSync(QPATH.join(__dirname, '..', '..', 'scenarios', 'twins.json'), 'utf8')
+    };
+    var maps = {};
+    var k;
+    for (k in QMAPS) if (Object.prototype.hasOwnProperty.call(QMAPS, k)) maps[k] = QMAPS[k];
+    maps[TWINS_ADV] = 1;
+    for (k in (o.maps || {})) if (Object.prototype.hasOwnProperty.call(o.maps, k)) maps[k] = o.maps[k];
+    var buffs = Object.keys(maps).map(function (a) { return { type: 'Adventure', resource: a, amount: maps[a] }; });
+    A.install(H, { buffs: buffs, adventureDefs: [A.adventureDef({ name: TWINS_ADV, type: 'Mission' })] });
+    var q = {
+        fs: fs, H: H, S: S, alerts: alerts, prompts: [], confirms: [],
+        run: S.modules.adventures.run, st: S.modules.adventures.state, qs: S.modules.adventures.queues,
+        home: o.home !== false, open: o.open || {}, viewed: o.viewed === undefined ? null : o.viewed,
+        known: true, listOk: true
+    };
+    H.ctx.prompt = function (text, def) { q.prompts.push(text); return def; };
+    H.ctx.confirm = function (text) { q.confirms.push(text); return true; };
+    S.core.zone.isHome = function () { return q.home; };
+    S.core.zone.id = function () { return q.viewed; };
+    S.core.adventures.zoneIdOf = function (adv) {
+        return Object.prototype.hasOwnProperty.call(q.open, adv) ? q.open[adv] : null;
+    };
+    S.core.production.isProduceable = function () { return q.known; };
+    S.modules.adventures.executor.check = function () {
+        if (!q.listOk) return { listOk: false };
+        return { ok: true, problems: [], warnings: [], loadoutKeys: { '1.1': true } };
+    };
+    var tpl = S.modules.adventures.templates;
+    q.long = tpl.save({ label: 'Long', adventure: 'BlackKnights', loadout: LOADOUT,
+        waves: ['C:/b/w1.json', 'C:/b/w2.json', 'C:/b/w3.json'], speedBuff: 'SpeedBuffDefault' }, 1001).id;
+    q.short = tpl.save({ label: 'Short', adventure: 'Bandits', loadout: LOADOUT,
+        waves: ['C:/b/s1.json'], speedBuff: 'SpeedBuffDefault' }, 1002).id;
+    H.clearQueued();
+    return q;
+}
+
+// Saves a queue of entries ([kind, id, count]) and returns its id.
+function saveQueue(q, entries, opts) {
+    opts = opts || {};
+    var rec = { label: opts.label || 'Event loop', loop: opts.loop === true, passes: opts.passes || 0,
+        noMap: opts.noMap || 'pause', retrain: 'settings', early: false,
+        entries: entries.map(function (e) { return { kind: e[0], id: e[1], count: e[2] }; }) };
+    var r = q.qs.save(rec, opts.now || 5000);
+    assert.ok(r.ok, JSON.stringify(r.problems));
+    return r.id;
+}
+
+function lastNotice(q) {
+    return q.alerts.length ? String(q.alerts[q.alerts.length - 1]).replace(/^Steward: /, '') : '';
+}
+
+function logText(q) {
+    return q.H.logs().map(function (l) { return l.args.join(' '); }).join('\n');
+}
+
+// Long x2, Twins x1, Short x1.
+function mixedQueue(q, opts) {
+    return saveQueue(q, [['template', q.long, 2], ['scenario', 'twins', 1], ['template', q.short, 1]], opts);
+}
+
+t.test('startQueue from home stores the queue at entry 1 and a Muster run with its count', function () {
+    var q = queueSetup();
+    var id = mixedQueue(q);
+    assert.strictEqual(q.run.startQueue(id), true);
+    var rs = q.st.current();
+    assert.strictEqual(rs.request.queue.id, id);
+    assert.strictEqual(rs.request.queue.index, 0);
+    assert.strictEqual(rs.request.queue.pass, 0);
+    assert.strictEqual(rs.request.queue.width, 3);
+    assert.strictEqual(rs.request.templateId, q.long);
+    assert.strictEqual(rs.request.label, 'Long');
+    assert.strictEqual(rs.request.count, 2);
+    assert.strictEqual(rs.run.step, q.S.RunStep.Muster);
+    assert.strictEqual(rs.run.templateId, q.long);
+    assert.deepStrictEqual(q.prompts, [], 'no count prompt');
+    assert.ok(/entry 1\/3 begins: Long/.test(logText(q)), logText(q));
+    assert.strictEqual(q.run.statusText(rs.request), 'Requested: Event loop 1/3: Long ×2');
+});
+
+t.test('startQueue on the open, viewed map of a template asks only the start wave', function () {
+    var q = queueSetup({ open: { BlackKnights: ZONE }, viewed: ZONE, home: false });
+    var id = mixedQueue(q);
+    assert.strictEqual(q.run.startQueue(id), true);
+    assert.strictEqual(q.prompts.length, 1);
+    assert.ok(/^Start at which wave of "Long"\? 1\.\.3/.test(q.prompts[0]), q.prompts[0]);
+    var rs = q.st.current();
+    assert.strictEqual(rs.run.step, q.S.WaveStep.Gate);
+    assert.strictEqual(rs.run.zoneId, ZONE);
+    assert.strictEqual(rs.request.count, 2);
+});
+
+t.test('a template first entry away from home and its map stores nothing', function () {
+    var q = queueSetup({ home: false });
+    assert.strictEqual(q.run.startQueue(mixedQueue(q)), false);
+    assert.strictEqual(q.st.current().request, null);
+    assert.ok(/choose the queue again/.test(lastNotice(q)), lastNotice(q));
+});
+
+t.test('a scenario first entry starts from home only and asks the start trip on its open map', function () {
+    var q = queueSetup({ home: false });
+    var id = saveQueue(q, [['scenario', 'twins', 1], ['template', q.short, 1]]);
+    assert.strictEqual(q.run.startQueue(id), false);
+    assert.strictEqual(q.st.current().request, null);
+    assert.ok(/Go home, then choose the queue again/.test(lastNotice(q)), lastNotice(q));
+
+    q.home = true;
+    assert.strictEqual(q.run.startQueue(id), true);
+    var rs = q.st.current();
+    assert.strictEqual(rs.request.templateId, '');
+    assert.strictEqual(rs.request.label, 'Twins');
+    assert.strictEqual(rs.run.scenarioId, 'twins');
+    assert.strictEqual(rs.run.trip, 0);
+    assert.deepStrictEqual(q.prompts, [], 'no map open: no prompt');
+
+    var q2 = queueSetup({ open: { BuffAdventures_twins_easy: 77 } });
+    var id2 = saveQueue(q2, [['scenario', 'twins', 1]]);
+    assert.strictEqual(q2.run.startQueue(id2), true);
+    assert.strictEqual(q2.prompts.length, 1);
+    assert.ok(/^Start at which trip of "Twins"/.test(q2.prompts[0]), q2.prompts[0]);
+    assert.strictEqual(q2.st.current().run.zoneId, 77);
+});
+
+t.test('a missing record or an unknown kind refuses with a notice and stores nothing', function () {
+    var q = queueSetup();
+    var id = mixedQueue(q);
+    q.S.modules.adventures.templates.remove(q.short);
+    assert.strictEqual(q.run.startQueue(id), false);
+    assert.strictEqual(q.st.current().request, null);
+    assert.ok(/"Event loop" cannot start: 1 problem\(s\)\. Entry 3: template/.test(lastNotice(q)), lastNotice(q));
+
+    var q2 = queueSetup();
+    var qid = saveQueue(q2, [['template', q2.long, 1]]);
+    var path = 'C:/client/steward/adventures/queues/' + qid + '.json';
+    var file = JSON.parse(q2.fs.disk[path]);
+    file.entries.push({ kind: 'venture', id: 'v1', count: 1 });
+    q2.fs.disk[path] = JSON.stringify(file);
+    assert.strictEqual(q2.run.startQueue(qid), false);
+    assert.strictEqual(q2.st.current().request, null);
+    assert.ok(/Entry 2: unknown kind venture/.test(lastNotice(q2)), lastNotice(q2));
+
+    assert.strictEqual(q2.run.startQueue('t999'), false);
+    assert.ok(/Queue t999 cannot be read/.test(lastNotice(q2)), lastNotice(q2));
+});
+
+t.test('noMap pause refuses a first entry without a map, as a single start does', function () {
+    var q = queueSetup({ maps: { BlackKnights: 0 } });
+    assert.strictEqual(q.run.startQueue(mixedQueue(q)), false);
+    assert.strictEqual(q.st.current().request, null);
+    assert.ok(/^No .* map in the star menu/.test(lastNotice(q)), lastNotice(q));
+});
+
+t.test('noMap skip starts at the first entry with a map and names the ones stepped over', function () {
+    var q = queueSetup({ maps: { BlackKnights: 0, BuffAdventures_twins_easy: 0 } });
+    assert.strictEqual(q.run.startQueue(mixedQueue(q, { noMap: 'skip' })), true);
+    var rs = q.st.current();
+    assert.strictEqual(rs.request.queue.index, 2);
+    assert.strictEqual(rs.request.label, 'Short');
+    assert.strictEqual(rs.request.templateId, q.short);
+    assert.ok(/no map for Long, Twins; it starts at entry 3, Short/.test(lastNotice(q)), lastNotice(q));
+    assert.ok(/entry 3\/3 begins: Short/.test(logText(q)), logText(q));
+
+    var none = queueSetup({ maps: { BlackKnights: 0, Bandits: 0, BuffAdventures_twins_easy: 0 } });
+    assert.strictEqual(none.run.startQueue(mixedQueue(none, { noMap: 'skip' })), false);
+    assert.strictEqual(none.st.current().request, null);
+    assert.ok(/No map for any entry of "Event loop"/.test(lastNotice(none)), lastNotice(none));
+});
+
+t.test('entryRun builds the first run of each kind and says when a read must wait', function () {
+    var q = queueSetup({ open: { Bandits: 55 } });
+    var copy = q.qs.toRun(q.qs.get(mixedQueue(q)));
+    var before = q.alerts.length;
+
+    var s = q.run.entryRun(copy.entries[1]);
+    assert.strictEqual(s.ok, true);
+    assert.strictEqual(s.run.scenarioId, 'twins');
+    assert.strictEqual(s.run.templateId, '');
+    assert.strictEqual(s.run.step, q.S.RunStep.Muster);
+    assert.strictEqual(s.run.trip, 0);
+
+    var t3 = q.run.entryRun(copy.entries[2]);
+    assert.strictEqual(t3.ok, true);
+    assert.strictEqual(t3.run.templateId, q.short);
+    assert.strictEqual(t3.run.zoneId, 55, 'an open map of the entry is its zone');
+    assert.strictEqual(t3.run.step, q.S.RunStep.Muster);
+
+    q.known = null;
+    assert.deepStrictEqual(plain(q.run.entryRun(copy.entries[1])),
+        { ok: false, retry: true, message: 'item definitions' });
+    q.listOk = false;
+    assert.deepStrictEqual(plain(q.run.entryRun(copy.entries[0])),
+        { ok: false, retry: true, message: 'specialist list' });
+    q.known = false;
+    var bad = q.run.entryRun(copy.entries[1]);
+    assert.strictEqual(bad.ok, false);
+    assert.ok(!bad.retry && /unknown item/.test(bad.message), bad.message);
+    assert.strictEqual(q.run.entryRun({ kind: 'venture', id: 'v1', count: 1 }).ok, false);
+    assert.strictEqual(q.run.entryRun({ kind: 'template', id: 'tmissing', count: 1 }).ok, false);
+    assert.strictEqual(q.alerts.length, before, 'entryRun tells the user nothing');
+});
+
+// A started queue with its run paused at step for reason.
+function pausedAt(q, step, reason, id) {
+    assert.strictEqual(q.run.startQueue(id), true);
+    var r = q.st.run();
+    r.step = step;
+    q.st.pause(reason, 'test pause');
+    return r;
+}
+
+t.test('can().skipEntry: the cases before the map is out and at Next', function () {
+    var q = queueSetup();
+    var S = q.S;
+    pausedAt(q, S.RunStep.Muster, S.RunPause.User, mixedQueue(q));
+    assert.strictEqual(q.run.can().skipEntry, true, 'template at Muster');
+
+    q = queueSetup();
+    pausedAt(q, S.RunStep.Produce, S.RunPause.ItemShort,
+        saveQueue(q, [['scenario', 'twins', 1], ['template', q.short, 1]]));
+    assert.strictEqual(q.run.can().skipEntry, true, 'scenario Produce pause');
+
+    q = queueSetup();
+    var r = pausedAt(q, S.RunStep.StartMap, S.RunPause.MapFailed, mixedQueue(q));
+    assert.strictEqual(q.run.can().skipEntry, true, 'start map failed');
+    r.marks = { map: { sentAt: 1, seen: true, sentOnce: true } };
+    assert.strictEqual(q.run.can().skipEntry, false, 'map mark seen');
+    r.marks = {};
+    r.pause.reason = S.RunPause.NotObserved;
+    assert.strictEqual(q.run.can().skipEntry, false, 'NotObserved at StartMap');
+    r.pause.reason = S.RunPause.MapFailed;
+    q.open.BlackKnights = ZONE;
+    assert.strictEqual(q.run.can().skipEntry, false, 'map open');
+    delete q.open.BlackKnights;
+    q.home = false;
+    assert.strictEqual(q.run.can().skipEntry, false, 'not at home');
+    q.home = true;
+    r.status = S.RunStatus.Running;
+    assert.strictEqual(q.run.can().skipEntry, false, 'not Paused');
+    r.status = S.RunStatus.Paused;
+    r.step = S.RunStep.Depart;
+    assert.strictEqual(q.run.can().skipEntry, false, 'after StartMap');
+
+    q = queueSetup();
+    pausedAt(q, S.RunStep.Muster, S.RunPause.User, saveQueue(q, [['template', q.long, 1], ['template', q.short, 1]]));
+    q.st.enterEntry(q.st.current().request, { index: 1, pass: 0 });
+    assert.strictEqual(q.run.can().skipEntry, false, 'no next entry in case A');
+    var last = q.st.run();
+    last.step = S.RunStep.Next;
+    last.pause.reason = S.RunPause.QueueEntry;
+    assert.strictEqual(q.run.can().skipEntry, true, 'Next with QueueEntry, no entry after');
+
+    var single = queueSetup();
+    assert.strictEqual(single.run.start(single.long), true);
+    single.st.pause(S.RunPause.User, 'test');
+    assert.strictEqual(single.run.can().skipEntry, false, 'no queue');
+});
+
+t.test('skipEntry before the map: the next entry begins, the transit stays', function () {
+    var q = queueSetup();
+    var S = q.S;
+    var r = pausedAt(q, S.RunStep.Muster, S.RunPause.User, mixedQueue(q));
+    var until = q.st.now() + LONG_MS;
+    r.transit = [{ from: 41, army: { Rifle: 3 }, until: until }];
+    r.transitBase = { Rifle: 5 };
+    q.st.current().request.finished = 1;
+    var oldId = r.id;
+    assert.strictEqual(q.run.skipEntry(), true);
+    var rs = q.st.current();
+    assert.strictEqual(rs.request.queue.index, 1);
+    assert.strictEqual(rs.request.label, 'Twins');
+    assert.strictEqual(rs.request.templateId, '');
+    assert.strictEqual(rs.request.finished, 0, 'the dropped runs are not counted');
+    assert.strictEqual(rs.run.scenarioId, 'twins');
+    assert.strictEqual(rs.run.status, S.RunStatus.Running);
+    assert.strictEqual(rs.run.step, S.RunStep.Muster);
+    assert.ok(rs.run.id > oldId, 'a new run id');
+    assert.deepStrictEqual(plain(rs.run.transit), [{ from: 41, army: { Rifle: 3 }, until: until }]);
+    assert.deepStrictEqual(plain(rs.run.transitBase), { Rifle: 5 });
+    assert.strictEqual(lastNotice(q), 'Entry skipped: Long; Twins begins.');
+});
+
+t.test('skipEntry before the map stays paused when the next entry cannot begin', function () {
+    var q = queueSetup();
+    var S = q.S;
+    pausedAt(q, S.RunStep.Muster, S.RunPause.User, mixedQueue(q));
+    q.known = null;
+    assert.strictEqual(q.run.skipEntry(), false);
+    assert.strictEqual(q.st.run().status, S.RunStatus.Paused);
+    assert.strictEqual(q.st.current().request.queue.index, 0);
+    assert.ok(/Twins cannot begin: item definitions not readable/.test(lastNotice(q)), lastNotice(q));
+});
+
+t.test('skipEntry at Next steps over the entry that could not begin', function () {
+    var q = queueSetup();
+    var S = q.S;
+    var r = pausedAt(q, S.RunStep.Next, S.RunPause.QueueEntry, mixedQueue(q));
+    var req = q.st.current().request;
+    req.finished = 1;
+    assert.strictEqual(q.run.skipEntry(), true);
+    assert.strictEqual(req.queue.skip, 1);
+    assert.strictEqual(req.finished, 1, 'finished unchanged');
+    assert.strictEqual(req.queue.index, 0);
+    assert.strictEqual(r.status, S.RunStatus.Running);
+    assert.strictEqual(r.step, S.RunStep.Next);
+    assert.strictEqual(lastNotice(q), 'Entry skipped: Twins.');
+    var file = Object.keys(q.fs.disk).filter(function (p) { return /run\.json$/.test(p); })[0];
+    assert.strictEqual(JSON.parse(q.fs.disk[file]).request.queue.skip, 1, 'saved');
+    assert.strictEqual(q.run.skipEntry(), false, 'not paused any more');
+});
+
+t.test('End repetition in a queue ends it after the current run', function () {
+    var q = queueSetup();
+    assert.strictEqual(q.run.startQueue(saveQueue(q, [['template', q.long, 1], ['scenario', 'twins', 1]])), true);
+    var req = q.st.current().request;
+    assert.strictEqual(q.run.can().endRepetition, true, 'the last run of the entry, an entry follows');
+    assert.strictEqual(q.run.endRepetition(), true);
+    assert.strictEqual(req.ended, true);
+    assert.strictEqual(req.count, 1);
+    assert.strictEqual(q.st.queueNext(req), null);
+    assert.strictEqual(q.run.can().endRepetition, false);
+    assert.strictEqual(lastNotice(q), 'Repetition ended: Event loop stops after the current run.');
+});

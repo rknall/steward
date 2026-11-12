@@ -79,13 +79,13 @@ function lastAlert(s) {
 t.test('menu lists a built-in scenario after the templates with its map count', function () {
     var s = setup(3);
     var labels = menuLabels(s);
-    assert.deepStrictEqual(labels.slice(8, 10), ['No templates yet', '---']);
+    assert.deepStrictEqual(labels.slice(9, 11), ['No templates yet', '---']);
     var items = s.S.modules.adventures.menu.items();
-    assert.strictEqual(labelOf(items[10]), 'Scenarios');
-    assert.deepStrictEqual(plain(items[10].items.map(function (it) { return labelOf(it); })), ['Twins ×3']);
+    assert.strictEqual(labelOf(items[11]), 'Scenarios');
+    assert.deepStrictEqual(plain(items[11].items.map(function (it) { return labelOf(it); })), ['Twins ×3']);
     var called = [];
     s.run.startScenario = function (id) { called.push(id); };
-    items[10].items[0].onSelect();
+    items[11].items[0].onSelect();
     assert.deepStrictEqual(called, ['twins']);
 });
 
@@ -93,7 +93,7 @@ t.test('menu without scenarios is the template list alone', function () {
     var s = setup(3);
     s.S.modules.adventures.builtinScenarios = {};
     assert.deepStrictEqual(menuLabels(s), ['Run templates…', '---', 'No run requested', 'Pause run',
-        'Resume run', 'End repetition', 'Stop run', '---', 'No templates yet']);
+        'Resume run', 'End repetition', 'Skip entry', 'Stop run', '---', 'No templates yet']);
 });
 
 t.test('a broken scenario file is a disabled row', function () {

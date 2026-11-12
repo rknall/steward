@@ -41,9 +41,24 @@
  * template is configured. There is one request and one run at a time;
  * starting another asks before replacing them.
  *
+ * Start of a queue (startQueue) checks every entry first, so a queue with a
+ * missing or unknown entry stores nothing. It begins with the first entry,
+ * or, when the queue skips entries without a map, the first one that has a
+ * map, and asks that entry's own prompts (start wave or start trip when its
+ * map is open) but no count: each entry carries its count. Later entries
+ * begin at home through entryRun, which the hand-over calls too.
+ *
+ * Skip entry, only in a queue, paused and at home: before the entry's map
+ * is out it drops the entry's remaining runs uncounted and begins the next
+ * entry at once, keeping the troops on their way home. At Next, where an
+ * entry that cannot begin paused the hand-over, it steps over that entry
+ * and the hand-over tries the one after it.
+ *
  * Request shape: { templateId, label, adventure, count, ended, requested,
- * finished, closedAt }: finished counts the runs done in this series and
- * closedAt is when the last map was closed.
+ * finished, closedAt, queue }: finished counts the runs done in this series
+ * and closedAt is when the last map was closed. queue is null for a single
+ * series, else the running copy of the queue; the other fields then describe
+ * its current entry.
  */
 
 (function (S) {
@@ -64,13 +79,26 @@
         return S.modules.adventures.steps;
     }
 
+    // The queue store and the loader, read at call time for the same reasons.
+    function queues() {
+        return S.modules.adventures.queues;
+    }
+
+    function loader() {
+        return S.modules.adventures.loader;
+    }
+
     function current() {
         return store().current().request;
     }
 
+    // A queue request names the queue and the entry: 'Requested: Event loop
+    // 2/3: Chain ×1'.
     function statusText(req) {
         if (!req) return 'No run requested';
-        return 'Requested: ' + req.label + ' ×' + req.count + (req.ended ? ', repetition ended' : '');
+        var q = req.queue;
+        var head = q ? q.label + ' ' + (q.index + 1) + '/' + q.entries.length + ': ' : '';
+        return 'Requested: ' + head + req.label + ' ×' + req.count + (req.ended ? ', repetition ended' : '');
     }
 
     function trim(v) {
@@ -161,7 +189,8 @@
         return 'Replace the requested run ' + what + '?';
     }
 
-    function makeRequest(rec, count) {
+    // queue: the running copy of a queue, or none for a single series.
+    function makeRequest(rec, count, queue) {
         return {
             templateId: rec.id,
             label:      rec.label,
@@ -170,7 +199,8 @@
             ended:      false,
             requested:  store().now(),
             finished:   0,
-            closedAt:   null
+            closedAt:   null,
+            queue:      queue || null
         };
     }
 
@@ -184,27 +214,32 @@
         return false;
     }
 
-    // Runs the executor's start check and logs its warnings; null when the
-    // executor is not loaded or the specialist list lost entries, whose
-    // generals would read as problems of the template (the user has been
-    // told either way).
-    function startCheck(rec, opts) {
+    // Runs the executor's start check and logs its warnings, without telling
+    // the user: the hand-over calls it on every pass while it waits, so the
+    // notice belongs to the caller. { ok: true, chk }, or { ok: false,
+    // message } when the executor is not loaded, with retry when the
+    // specialist list lost entries, whose generals would read as problems of
+    // the template; a moment later it reads again.
+    function templateCheck(rec, opts) {
         var executor = S.modules.adventures.executor;
-        if (!executor || !executor.check) {
-            notify('The wave executor is not loaded; nothing started.');
-            return null;
-        }
+        if (!executor || !executor.check) return { ok: false, message: 'the wave executor is not loaded' };
         var chk = executor.check(rec, opts) || {};
-        if (chk.listOk === false) {
-            notify('The specialist list cannot be read right now; try again in a moment.');
-            return null;
-        }
+        if (chk.listOk === false) return { ok: false, retry: true, message: 'specialist list' };
         var warnings = listOf(chk.warnings);
         for (var i = 0; i < warnings.length; i++) {
             S.kernel.warn('adventures', 'start check "' + rec.label + '":', messageOf(warnings[i]));
         }
         chk.warnings = warnings;
-        return chk;
+        return { ok: true, chk: chk };
+    }
+
+    // templateCheck for a start the user chose: null after telling him why.
+    function startCheck(rec, opts) {
+        var c = templateCheck(rec, opts);
+        if (c.ok) return c.chk;
+        if (c.retry) notify('The specialist list cannot be read right now; try again in a moment.');
+        else notify('The wave executor is not loaded; nothing started.');
+        return null;
     }
 
     // A new run of the template, checked as chk. Without a step the store
@@ -237,7 +272,8 @@
     // own file: the steps before it belong to the part of the map already
     // played, and a Send home there would wait for a general an earlier
     // session already sent home.
-    function startWaves(rec, count, zoneId) {
+    function startWaves(rec, req, zoneId) {
+        var count = req.count;
         var waves = steps().waveCount(rec.waves || []);
         var answer = ask('Start at which wave of "' + rec.label + '"? 1..' + waves, '1');
         var w = waveFrom(answer, waves);
@@ -252,7 +288,7 @@
         if (!chk.ok) return checkFailed(rec, listOf(chk.problems));
 
         var run = runFromTemplate(rec, chk, zoneId, steps().startIndex(rec.waves || [], w.wave));
-        store().begin(makeRequest(rec, count), run);
+        store().begin(req, run);
         wakeRun();
         S.kernel.log('adventures', 'run started:', rec.label, 'x' + count, 'at wave', w.wave, 'of', waves,
             'zone', zoneId, '(' + warnings.length + ' warning(s))');
@@ -265,14 +301,15 @@
     // At home: check the files and loadout keys only (the generals may be
     // away), then store a run at Muster. zoneId is the open map's zone, or
     // null until the run starts the map.
-    function startHome(rec, count, zoneId) {
-        var chk = startCheck(rec, { camps: false, fighters: false });
+    function startHome(rec, req, zoneId) {
+        var count = req.count;
+        var chk = startCheck(rec, homeCheck());
         if (!chk) return false;
         var warnings = chk.warnings;
         if (!chk.ok) return checkFailed(rec, listOf(chk.problems));
 
         var run = runFromTemplate(rec, chk, typeof zoneId === 'number' ? zoneId : null, 0, S.RunStep.Muster);
-        store().begin(makeRequest(rec, count), run);
+        store().begin(req, run);
         wakeRun();
         S.kernel.log('adventures', 'run started from home:', rec.label, 'x' + count, zoneText(zoneId),
             '(' + warnings.length + ' warning(s))');
@@ -283,9 +320,10 @@
 
     // The prompts every start shares: the record is readable, a map is in the
     // star menu, the user agrees to replace a current run and names a count.
-    // kind names the record in the notice ('Template', 'Scenario'). Returns
+    // kind names the record in the notice ('Template', 'Scenario'). A given
+    // count (a queue entry carries its own) asks no count. Returns
     // { rec, count, advLabel }, or null when the start ends here.
-    function startPrompts(rec, id, kind) {
+    function startPrompts(rec, id, kind, count) {
         if (!rec) {
             notify(kind + ' ' + id + ' cannot be read.');
             return null;
@@ -314,6 +352,7 @@
             cancelQueued();
             store().dropRound();
         }
+        if (typeof count === 'number') return { rec: rec, count: count, advLabel: advLabel };
         var answer = ask('How many consecutive runs of "' + rec.label + '"? ' + maps + ' available.', String(maps));
         var r = countFrom(answer, maps);
         if (!r.ok) {
@@ -323,16 +362,26 @@
         return { rec: rec, count: r.count, advLabel: advLabel };
     }
 
+    // The check of a start from home, without the camps and the fighters:
+    // the generals may still be away.
+    function homeCheck() {
+        return { camps: false, fighters: false };
+    }
+
+    // Where the user stands decides how a template run starts. what names
+    // the thing to choose again ('the template', 'the queue').
+    function startTemplate(rec, req, advLabel, what) {
+        var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
+        if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, req, zoneId);
+        if (S.core.zone.isHome() === true) return startHome(rec, req, zoneId);
+        notify('Go home or view the ' + advLabel + ' island, then choose ' + what + ' again.');
+        return false;
+    }
+
     function start(id) {
         var p = startPrompts(S.modules.adventures.templates.get(id), id, 'Template');
         if (!p) return false;
-        var rec = p.rec;
-
-        var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
-        if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, p.count, zoneId);
-        if (S.core.zone.isHome() === true) return startHome(rec, p.count, zoneId);
-        notify('Go home or view the ' + p.advLabel + ' island, then choose the template again.');
-        return false;
+        return startTemplate(p.rec, makeRequest(p.rec, p.count), p.advLabel, 'the template');
     }
 
     // A scenario's items the game cannot produce, or null when the definitions
@@ -346,6 +395,44 @@
             if (known === false) out.push('unknown item ' + names[i]);
         }
         return out;
+    }
+
+    // The start check of a scenario, without telling the user: { ok,
+    // problems, warnings }, with retry when the item definitions cannot be
+    // read now. The warnings are logged here, once per check that passed.
+    function scenarioCheck(rec) {
+        var unknown = unknownItems(rec);
+        if (unknown === null) return { ok: false, retry: true, problems: [], warnings: [] };
+        if (unknown.length) return { ok: false, retry: false, problems: unknown, warnings: [] };
+        var warnings = [];
+        var watcher = S.modules.adventures.watcher;
+        if (!watcher || !watcher.patterns || watcher.patterns() === null) {
+            warnings.push('collect does not pick up on adventures: quest objects will not be clicked');
+        }
+        for (var i = 0; i < warnings.length; i++) {
+            S.kernel.warn('adventures', 'start check "' + rec.label + '":', warnings[i]);
+        }
+        return { ok: true, retry: false, problems: [], warnings: warnings };
+    }
+
+    // A new run of the scenario at trip `trip`, starting at Muster.
+    function scenarioRun(rec, zoneId, trip) {
+        return store().newRun({
+            id:          store().now(),
+            templateId:  '',
+            scenarioId:  rec.id,
+            label:       rec.label,
+            adventure:   rec.adventure,
+            zoneId:      zoneId,
+            paths:       [],
+            loadoutPath: '',
+            loadoutKeys: {},
+            waveIndex:   0,
+            step:        S.RunStep.Muster,
+            speedBuff:   S.SpeedBuffChoice.None,
+            trips:       rec.trips,
+            trip:        trip
+        });
     }
 
     // The start trip index: 0 unless the map is open, then the user's answer.
@@ -374,66 +461,220 @@
         return typeof zoneId === 'number' ? 'zone ' + zoneId : 'no map open yet';
     }
 
-    function startScenario(id) {
-        var p = startPrompts(S.modules.adventures.scenarios.get(id), id, 'Scenario');
-        if (!p) return false;
-        var rec = p.rec;
+    // Stores a scenario series for req, from home only. what names the thing
+    // to choose again ('the scenario', 'the queue').
+    function startScenarioRun(rec, req, what) {
         if (S.core.zone.isHome() !== true) {
-            notify('Go home, then choose the scenario again.');
+            notify('Go home, then choose ' + what + ' again.');
             return false;
         }
-        var unknown = unknownItems(rec);
-        if (unknown === null) {
+        var chk = scenarioCheck(rec);
+        if (chk.retry) {
             notify('Item definitions cannot be read right now; try again in a moment.');
             return false;
         }
-        if (unknown.length) return checkFailed(rec, unknown);
-
-        var warnings = [];
-        var watcher = S.modules.adventures.watcher;
-        if (!watcher || !watcher.patterns || watcher.patterns() === null) {
-            warnings.push('collect does not pick up on adventures: quest objects will not be clicked');
-        }
-        for (var i = 0; i < warnings.length; i++) {
-            S.kernel.warn('adventures', 'start check "' + rec.label + '":', warnings[i]);
-        }
+        if (!chk.ok) return checkFailed(rec, chk.problems);
+        var warnings = chk.warnings;
 
         var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
         if (typeof zoneId !== 'number') zoneId = null;
         var trip = startTrip(rec, zoneId);
         if (trip === null) return false;
 
-        var run = store().newRun({
-            id:          store().now(),
-            templateId:  '',
-            scenarioId:  rec.id,
-            label:       rec.label,
-            adventure:   rec.adventure,
-            zoneId:      zoneId,
-            paths:       [],
-            loadoutPath: '',
-            loadoutKeys: {},
-            waveIndex:   0,
-            step:        S.RunStep.Muster,
-            speedBuff:   S.SpeedBuffChoice.None,
-            trips:       rec.trips,
-            trip:        trip
-        });
-        store().begin(makeRequest({ id: '', label: rec.label, adventure: rec.adventure }, p.count), run);
+        var count = req.count;
+        store().begin(req, scenarioRun(rec, zoneId, trip));
         wakeRun();
-        S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + p.count + ',',
-            seriesText(p.count, trip, rec.trips.length) + ',', zoneText(zoneId),
+        S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + count + ',',
+            seriesText(count, trip, rec.trips.length) + ',', zoneText(zoneId),
             '(' + warnings.length + ' warning(s))');
-        notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', ' +
-            seriesText(p.count, trip, rec.trips.length) + '.' +
+        notify('Scenario run started from home: ' + rec.label + ' ×' + count + ', ' +
+            seriesText(count, trip, rec.trips.length) + '.' +
             (warnings.length ? ' Warning: ' + warnings.join('; ') + '.' : ''));
         return true;
     }
 
-    // True while runs are requested beyond the one in progress, so there is
-    // a repetition left to end.
+    function startScenario(id) {
+        var p = startPrompts(S.modules.adventures.scenarios.get(id), id, 'Scenario');
+        if (!p) return false;
+        var rec = p.rec;
+        return startScenarioRun(rec, makeRequest({ id: '', label: rec.label, adventure: rec.adventure }, p.count),
+            'the scenario');
+    }
+
+    // ---- Queue -------------------------------------------------------------
+
+    function isTemplateEntry(entry) {
+        return !!entry && entry.kind === queues().KIND.Template;
+    }
+
+    function isScenarioEntry(entry) {
+        return !!entry && entry.kind === queues().KIND.Scenario;
+    }
+
+    // The first run of a queue entry, at home, for the hand-over and Skip
+    // entry: nothing is asked and nothing told, since the hand-over may call
+    // it on every pass while a read waits. { ok: true, run }; { ok: false,
+    // retry: true, message } when a list the check needs cannot be read now
+    // (message names it); { ok: false, message } when the entry cannot run.
+    function entryRun(entry) {
+        var rec;
+        if (isTemplateEntry(entry)) {
+            rec = S.modules.adventures.templates.get(entry.id);
+            if (!rec) return { ok: false, message: 'template ' + entry.id + ' is missing or unreadable' };
+            var c = templateCheck(rec, homeCheck());
+            if (!c.ok) return { ok: false, retry: c.retry === true, message: c.message };
+            if (!c.chk.ok) {
+                return { ok: false, message: listOf(c.chk.problems).slice(0, 3).map(messageOf).join('; ') };
+            }
+            var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
+            return { ok: true, run: runFromTemplate(rec, c.chk, typeof zoneId === 'number' ? zoneId : null, 0,
+                S.RunStep.Muster) };
+        }
+        if (isScenarioEntry(entry)) {
+            rec = S.modules.adventures.scenarios.get(entry.id);
+            if (!rec) return { ok: false, message: 'scenario ' + entry.id + ' is missing or unreadable' };
+            var s = scenarioCheck(rec);
+            if (s.retry) return { ok: false, retry: true, message: 'item definitions' };
+            if (!s.ok) return { ok: false, message: s.problems.slice(0, 3).join('; ') };
+            return { ok: true, run: scenarioRun(rec, null, 0) };
+        }
+        return { ok: false, message: 'unknown kind ' + (entry && entry.kind ? entry.kind : '(none)') };
+    }
+
+    // The entry a queue starts with: 0, or with noMap skip the first entry
+    // with a map. { index, skipped } with the labels stepped over; null after
+    // telling the user why none can start.
+    function firstEntry(copy) {
+        if (copy.noMap !== queues().NO_MAP.Skip) return { index: 0, skipped: [] };
+        var pass = {};
+        var skipped = [];
+        for (var i = 0; i < copy.entries.length; i++) {
+            var n = available(copy.entries[i].adventure, pass);
+            if (n === null) {
+                notify('The star menu cannot be read right now. Try again in a moment.');
+                return null;
+            }
+            if (n > 0) return { index: i, skipped: skipped };
+            skipped.push(copy.entries[i].label);
+        }
+        notify('No map for any entry of "' + copy.label + '".');
+        return null;
+    }
+
+    // Starts a saved queue at its first entry: every entry must be readable,
+    // the entry's own prompts apply and its count is the queue's. Stores
+    // nothing when it refuses.
+    function startQueue(id) {
+        var rec = queues().get(id);
+        if (!rec) {
+            notify('Queue ' + id + ' cannot be read.');
+            return false;
+        }
+        var problems = queues().validate(rec);
+        if (problems.length) return checkFailed(rec, problems);
+        var copy = queues().toRun(rec);
+        var first = firstEntry(copy);
+        if (!first) return false;
+        var entry = copy.entries[first.index];
+        var entryRec = queues().entryRecord(entry);
+        var kind = isTemplateEntry(entry) ? 'Template' : 'Scenario';
+        var p = startPrompts(entryRec, entry.id, kind, entry.count);
+        if (!p) return false;
+
+        var req = makeRequest(p.rec, entry.count, copy);
+        store().enterEntry(req, { index: first.index, pass: 0 });
+        var ok = isTemplateEntry(entry) ? startTemplate(p.rec, req, p.advLabel, 'the queue') :
+            startScenarioRun(p.rec, req, 'the queue');
+        if (!ok) return false;
+        S.kernel.log('adventures', 'queue ' + copy.label + ': entry ' + (first.index + 1) + '/' +
+            copy.entries.length + ' begins: ' + entry.label);
+        if (first.skipped.length) {
+            S.kernel.log('adventures', 'queue ' + copy.label + ': no map for ' + first.skipped.join(', ') +
+                ', ' + first.skipped.length + ' entry(ies) skipped');
+            notify('Queue "' + copy.label + '": no map for ' + first.skipped.join(', ') + '; it starts at entry ' +
+                (first.index + 1) + ', ' + entry.label + '.');
+        }
+        return true;
+    }
+
+    // True while runs are requested beyond the one in progress, or a queue
+    // entry or pass follows, so there is a repetition left to end.
     function repetitionLeft() {
-        return store().requestedRuns() > store().finishedRuns() + 1;
+        return store().requestedRuns() > store().finishedRuns() + 1 || !!store().queueNext(current());
+    }
+
+    // Which Skip entry applies now: 'drop' (the entry's map is not out yet,
+    // so its remaining runs go uncounted and the next entry begins), 'over'
+    // (the hand-over paused on an entry that cannot begin) or null. Only in
+    // a paused queue at home: the next entry begins at home. A map start that
+    // was seen, or that cannot be told apart from one (NotObserved), keeps
+    // the entry, since its map may be out.
+    function skipCase(rs) {
+        var req = rs.request;
+        var r = rs.run;
+        if (!req || !req.queue || !r || r.status !== S.RunStatus.Paused) return null;
+        if (S.core.zone.isHome() !== true) return null;
+        if (r.step === S.RunStep.Next && r.pause && r.pause.reason === S.RunPause.QueueEntry) return 'over';
+        if (store().position(r.step) > store().position(S.RunStep.StartMap)) return null;
+        if (!store().queueNext(req)) return null;
+        if (typeof S.core.adventures.zoneIdOf(r.adventure) === 'number') return null;
+        if (r.step === S.RunStep.StartMap && r.pause && r.pause.reason === S.RunPause.NotObserved) return null;
+        var m = loader() && loader().marked ? loader().marked(r, 'map') : null;
+        if (m && m.seen) return null;
+        return 'drop';
+    }
+
+    // The entry the paused hand-over tried: the next one, stepped over the
+    // entries Skip entry already passed.
+    function triedEntry(req) {
+        var at = store().queueNext(req);
+        for (var i = 0; i < req.queue.skip && at; i++) at = store().queueAt(req, at);
+        return at ? req.queue.entries[at.index] : null;
+    }
+
+    function skipEntry() {
+        var rs = store().current();
+        var c = skipCase(rs);
+        if (!c) {
+            notify('No queue entry to skip now.');
+            return false;
+        }
+        var req = rs.request;
+        var q = req.queue;
+        var r = rs.run;
+        if (c === 'over') {
+            var tried = triedEntry(req);
+            var name = tried ? tried.label : '';
+            q.skip += 1;
+            store().save();
+            store().resume();
+            wakeRun();
+            S.kernel.log('adventures', 'queue ' + q.label + ': entry skipped at the hand-over: ' + name);
+            notify('Entry skipped: ' + name + '.');
+            return true;
+        }
+        cancelQueued();
+        store().dropRound('entry skipped');
+        var at = store().queueNext(req);
+        var next = q.entries[at.index];
+        var e = entryRun(next);
+        if (!e.ok) {
+            notify('Entry ' + next.label + ' cannot begin' + (e.retry ? ': ' + e.message + ' not readable' :
+                ': ' + e.message) + '. The run stays paused.');
+            return false;
+        }
+        var old = req.label;
+        store().enterEntry(req, at);
+        var run = e.run;
+        run.id = Math.max(store().now(), r.id + 1);
+        run.transit = r.transit;
+        run.transitBase = r.transitBase;
+        store().begin(req, run);
+        wakeRun();
+        S.kernel.log('adventures', 'queue ' + q.label + ': entry skipped: ' + old + '; entry ' + (at.index + 1) + '/' +
+            q.entries.length + ' begins: ' + next.label);
+        notify('Entry skipped: ' + old + '; ' + next.label + ' begins.');
+        return true;
     }
 
     // Which commands apply now; each key is the name of its command. The
@@ -448,7 +689,8 @@
             pause:         status === S.RunStatus.Running,
             resume:        status === S.RunStatus.Paused,
             endRepetition: !!rs.run && status !== S.RunStatus.Done && !!rs.request && repetitionLeft(),
-            stop:          !!rs.request || !!rs.run
+            stop:          !!rs.request || !!rs.run,
+            skipEntry:     skipCase(rs) !== null
         };
     }
 
@@ -482,7 +724,9 @@
     }
 
     // Same meaning as autoTSO's end repetition: the series ends with the run
-    // in progress, so the count becomes the runs finished plus that one.
+    // in progress, so the count becomes the runs finished plus that one. In a
+    // queue, ended also keeps the next entry from beginning, so the queue
+    // ends with this run.
     function endRepetition() {
         var req = current();
         if (!req) {
@@ -496,8 +740,9 @@
         req.count = store().finishedRuns() + 1;
         req.ended = true;
         store().save();
-        S.kernel.log('adventures', 'run repetition ended:', req.label);
-        notify('Repetition ended: ' + req.label + ' stops after the current run.');
+        var what = req.queue ? req.queue.label : req.label;
+        S.kernel.log('adventures', 'run repetition ended:', what);
+        notify('Repetition ended: ' + what + ' stops after the current run.');
         refresh();
         return true;
     }
@@ -527,6 +772,9 @@
         can:           can,
         start:         start,
         startScenario: startScenario,
+        startQueue:    startQueue,
+        entryRun:      entryRun,
+        skipEntry:     skipEntry,
         pause:         pause,
         resume:        resume,
         stop:          stop,
