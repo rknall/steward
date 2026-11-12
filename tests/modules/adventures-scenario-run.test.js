@@ -33,12 +33,14 @@ var GLUE = 'BattleBuffHurt_BuffAd_Glue';
 var SPLASH = 'BattleBuffHurt_BuffAd_WaterSplash';
 var BLAST = 'BattleBuffHurt_BuffAd_Explosive';
 var EXPERT = 'BattleBuffHurt_BuffAd_Specialist';
+var MEDIUM = 'BattleBuffHurt_BuffAd_MediumDynamite';
+var BIG = 'BattleBuffHurt_BuffAd_BigDynamite';
 
 var COST = [{ name_string: 'Wood', amount: 2 }];
 
 function items() {
     var out = {};
-    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT].forEach(function (b) { out[b] = { group: '0', yield: 1, costs: COST }; });
+    [BRIDGE, SHEET, RESCUE, DYN, GLUE, SPLASH, BLAST, EXPERT, MEDIUM, BIG].forEach(function (b) { out[b] = { group: '0', yield: 1, costs: COST }; });
     return out;
 }
 
@@ -857,6 +859,89 @@ t.test('Apply: a client restart between the short take and the remainder offers 
     assert.deepStrictEqual(plain(splash.map(function (s) { return [s.amount, s.took]; })), [[10, 9], [1, 1]],
         JSON.stringify(itemSends(w2)));
     assert.strictEqual(sendsTo(w2, EXPERT).length, 1);
+});
+
+// ---- items asked for by the object they clear -------------------------------------
+
+// Storm Recovery-like: three dynamites whose quest names the boulders they
+// clear (onmap end conditions), never the dynamite. Small goes to both kinds
+// of boulder's grids by file order; Medium mixes the two kinds.
+var STORM_BOULDERS = {
+    id: 'storm_boulders_test', label: 'Storm boulders (test)',
+    trips: [{ items: [
+        { buff: DYN, grids: [5680, 4394, 2152, 2070] },
+        { buff: MEDIUM, grids: [5680, 2152, 2014, 5814] },
+        { buff: BIG, grids: [2275, 2014, 5814] }
+    ] }, {}]
+};
+var BOULDERS_01 = [2070, 2152, 4394, 5680];
+var BOULDERS_02 = [2014, 2275, 5814];
+
+function stormBoulders(o) {
+    o = o || {};
+    var need = {};
+    var buildings = {};
+    STORM_BOULDERS.trips[0].items.forEach(function (it) {
+        it.grids.forEach(function (g) { need[it.buff + ':' + g] = 1; });
+    });
+    BOULDERS_01.forEach(function (g) { buildings[g] = 'buffad_boulder_01'; });
+    BOULDERS_02.forEach(function (g) { buildings[g] = 'buffad_boulder_02'; });
+    var w = scenWorld({
+        quests: [{ key: 'q2', name: 'Buff_Adv_StormRecovery_SubQuest02',
+            onmap: ['buffad_boulder_01', 'buffad_boulder_02'], unread: o.unread },
+        { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need, world: { gridBuildings: buildings }
+    });
+    [DYN, MEDIUM, BIG].forEach(function (b) { w.setStock(b, 10); });
+    onIsland(w, record(w, STORM_BOULDERS), 0);
+    return w;
+}
+
+function sentTo(w, buff) {
+    return plain(sendsTo(w, buff).map(function (s) { return s.grid; }));
+}
+
+t.test('Apply: a quest whose onmap conditions name the boulders at the grids takes the dynamite', function () {
+    var w = stormBoulders();
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(sentTo(w, DYN), [5680, 4394, 2152, 2070]);
+    assert.deepStrictEqual(sentTo(w, MEDIUM), [5680, 2152, 2014, 5814]);
+    assert.deepStrictEqual(sentTo(w, BIG), [2275, 2014, 5814]);
+    assert.ok(!logged(w, /waiting for a quest that wants/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a boulder gone after its first blast still takes the next dynamite', function () {
+    var w = stormBoulders();
+    drive(w, { until: at('Trip'), on: function (w2) {
+        if (sendsTo(w2, DYN).length && sendsTo(w2, DYN)[0].grid === 5680) delete w2.gridBuildings[5680];
+    } });
+    assertStep(w, 'Trip');
+    assert.strictEqual(w.S.core.buildings.byGrid(5680), null, 'the boulder is gone');
+    assert.deepStrictEqual(sentTo(w, MEDIUM), [5680, 2152, 2014, 5814]);
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: one boulder kind cleared skips only that kind\'s grids', function () {
+    var w = stormBoulders();
+    drive(w, { until: at('Trip'), on: function (w2) {
+        if (sendsTo(w2, DYN).length === 4) BOULDERS_01.forEach(function (g) { delete w2.gridBuildings[g]; });
+    } });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(sentTo(w, MEDIUM), [2014, 5814]);
+    assert.deepStrictEqual(sentTo(w, BIG), [2275, 2014, 5814]);
+    assert.ok(logged(w, /quest no longer wants BattleBuffHurt_BuffAd_MediumDynamite; 2 grid\(s\) skipped/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: an unread onmap quest holds the dynamite', function () {
+    var w = stormBoulders({ unread: true });
+    w.auto.readFails = true;
+    passesFor(w, 120000);
+    assertStep(w, 'Apply');
+    assert.strictEqual(w.itemSends.length, 0, 'nothing sent');
+    assert.ok(logged(w, /waiting for quest Buff_Adv_StormRecovery_SubQuest02 to be running, mode 2/), logLines(w).join('\n'));
 });
 
 // ---- production -----------------------------------------------------------------
