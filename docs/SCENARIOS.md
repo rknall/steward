@@ -70,8 +70,13 @@ then repeats maps like a template series.
 ## Rules
 
 - Production overlap: while at home for trip i the run orders the needs of
-  trip i (the item total, or one per open grid) plus trip i+1 (all grids), minus stock and queued items,
-  and waits only until trip i's needs are in the star menu.
+  trip i (the item total, or one per open grid) plus trip i+1 (all grids), minus stock and queued items.
+  It leaves home only once no item of trip i or i+1 is in a production queue (any
+  queued entry of that buff counts), the star menu holds the full amount trip i
+  needs of each item (stock at least the needed amount, not merely some), and
+  both still hold on a second read about 10 s later. Stock left from an earlier
+  run never counts while that item is still queued. The wait has no limit and is
+  logged once a minute as `waiting for production: ...`.
 - Send to a grid: `min(amount - taken, stock)` for an item with an amount, where
   `taken` is what all the item's grids together have taken this trip (0 at first);
   `min(1 - taken, stock)` with `taken` of that grid alone for an item without one.
