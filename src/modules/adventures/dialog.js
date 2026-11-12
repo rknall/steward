@@ -875,13 +875,13 @@
     }
 
     // One switch per start buff: on lists the buff in the draft, and the run
-    // applies it on arrival when it is in stock.
+    // applies it on the home island before the map starts.
     function startBuffField(draft, b) {
         var h = H();
         var list = T().normStartBuffs(draft.startBuffs);
-        var title = 'Apply ' + b.label + ' on arrival';
+        var title = 'Apply ' + b.label + ' before the map starts';
         var stock = typeof b.amount === 'number' ? ' (' + b.amount + ' in stock)' : '';
-        return h.field(title, 'Used once per run when in stock' + stock, h.toggle({
+        return h.field(title, 'Set at home once per run, when in stock and not already running' + stock, h.toggle({
             checked:  list.indexOf(b.name) !== -1,
             label:    title,
             onChange: function (on) {

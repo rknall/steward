@@ -1,8 +1,8 @@
 /*
  * Away steps of an adventure run: from leaving home to coming back.
  *
- * Jump -> Arrive -> StartBuffs -> Pickups -> StarAll -> Horseshoe hand the run
- * to the wave executor at Gate of wave 1; after the last wave the executor hands it
+ * Jump -> Arrive -> Pickups -> StarAll -> Horseshoe hand the run to the
+ * wave executor at Gate of wave 1; after the last wave the executor hands it
  * back at PackStar -> Pack -> Clear -> LastQuest -> Close -> JumpHome, and
  * the home steps take over at ArriveHome. Closing the map returns the generals
  * home by itself, so no step sends them; ArriveHome waits until each is listed
@@ -218,8 +218,7 @@
             else if (!ld().ready(g)) { if (busy === null) busy = keys[i]; }
         }
         if (missing === null && busy === null && inv.ok) {
-            if (r.startBuffs && r.startBuffs.length) st().go(S.RunStep.StartBuffs, 'every general arrived');
-            else st().go(S.RunStep.Pickups, 'every general arrived');
+            st().go(S.RunStep.Pickups, 'every general arrived');
             return;
         }
         if (missing !== null) {
@@ -231,46 +230,6 @@
             return;
         }
         ld().waitRead(r, 'armies');
-    }
-
-    // ---- Start buffs --------------------------------------------------------
-
-    // Optional, like the horseshoe: each zone buff of the template's list that
-    // is in stock goes out once per run (sentOnce survives a Resume), and one
-    // that is missing or refused only logs and moves on.
-    function startBuffs(r) {
-        var round = ld().currentRound(r, S.RunStep.StartBuffs);
-        if (round && ld().complete(round)) {
-            for (var k in round.results) {
-                if (!Object.prototype.hasOwnProperty.call(round.results, k)) continue;
-                var res = round.results[k];
-                if (res.status === S.ActionResult.Verified) {
-                    ld().markSeen(r, k);
-                    log(k + ' applied');
-                } else {
-                    log(k + ' not applied: ' + res.reason);
-                }
-            }
-            st().go(S.RunStep.Apply, 'start buffs done');
-            return;
-        }
-        var names = [];
-        var list = Object.prototype.toString.call(r.startBuffs) === '[object Array]' ? r.startBuffs : [];
-        for (var i = 0; i < list.length; i++) {
-            var rec = ld().marked(r, 'start:' + list[i]);
-            if (!rec || !(rec.sentOnce || rec.seen)) names.push(list[i]);
-        }
-        if (!names.length) {
-            st().go(S.RunStep.Apply, 'no start buff to apply');
-            return;
-        }
-        // A round lost before its send leaves no marker and is started again.
-        ld().dropOrphan(r);
-        round = ld().startRound(r, S.RunStep.StartBuffs, []);
-        for (var j = 0; j < names.length; j++) {
-            var key = 'start:' + names[j];
-            ld().attempt(round, key, ld().wrapSend(r, key, S.core.buffs.startBuff(names[j])));
-        }
     }
 
     // ---- Pickups ------------------------------------------------------------
@@ -860,7 +819,6 @@
         var rows = [
             [R.Jump,      jumpStep,  false],
             [R.Arrive,    arrive,    true],
-            [R.StartBuffs, startBuffs, false],
             [R.Apply,     apply,     false],
             [R.Pickups,   pickups,   false],
             [R.StarAll,   starAll,   true],

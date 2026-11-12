@@ -18,7 +18,7 @@
  * indented, so it stays readable and shareable. An older file may carry a
  * `retrain` key; it is ignored, because retraining is a module setting.
  * `startBuffs` lists the zone buffs (S.core.buffs.startBuffs, e.g. the Black
- * Vortex) applied once on arrival when in stock; a file without it applies none.
+ * Vortex) applied once at home before the map starts, when in stock; a file without it applies none.
  *
  * `waves` lists, in run order, battle-file paths (strings) mixed with step
  * entries (plain objects such as { step: 'unload', generals: [...] }) that

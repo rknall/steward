@@ -164,11 +164,11 @@
         ['Unload',     'RunUnload',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
         ['Load',       'RunLoad',       HOME,      'Home',       'Load generals',              OPT_GENERALS],
         ['Verify',     'RunVerify',     HOME,      'Home',       'Load generals',              OPT_GENERALS],
+        ['StartBuffs', 'RunStartBuffs', HOME,      'Home',       'Start buffs',                OPT_STARTBUFFS],
         ['StartMap',   'RunStartMap',   HOME,      'Home',       'Start map',                  ''],
         ['Depart',     'RunDepart',     HOME,      'Home',       'Send generals',              OPT_GENERALS],
         ['Jump',       'RunJump',       ANY,       'Travel',     'Jump to the map',            ''],
         ['Arrive',     'RunArrive',     ADVENTURE, 'Travel',     'Wait for all generals',      OPT_GENERALS,  true],
-        ['StartBuffs', 'RunStartBuffs', ADVENTURE, 'Travel',     'Start buffs',                OPT_STARTBUFFS],
         ['Apply',      'RunApply',      ADVENTURE, 'Travel',     'Apply items',                OPT_SCENARIO],
         ['Pickups',    'RunPickups',    ADVENTURE, 'Travel',     'Pick up items',              OPT_GENERALS],
         ['StarAll',    'RunStarAll',    ADVENTURE, 'Travel',     'Send all to the star',       OPT_STARALL],
@@ -808,9 +808,8 @@
     // template step entries (plain objects, see steps.js) mixed, and
     // waveIndex indexes that mixed list. speedBuff is the template's choice
     // as written and is resolved when it is used. startBuffs is the template's
-    // list of zone buffs to apply on arrival when in stock ([]: none). starAll
-    // is the template's
-    // switch for sending all generals to the star on arrival; only an explicit
+    // list of zone buffs to apply at home before the map starts, when in stock
+    // and not running ([]: none). starAll is the template's switch for sending all generals to the star on arrival; only an explicit
     // false turns it off, so a template or run file without it keeps the old
     // behaviour, and every later run of the series copies it on. loadoutNames
     // maps a loadout key to the general's plain name, for display only: the

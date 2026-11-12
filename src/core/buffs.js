@@ -819,6 +819,7 @@
         definedNames:  definedNames,
         isSpeedBuff:   isSpeedBuff,
         isStartBuff:   isStartBuff,
+        isRunning:     isRunning,
         startBuffs:    startBuffs,
         startBuff:     startBuff,
         effectText:    effectText,
