@@ -335,6 +335,67 @@ t.test('isSelectable is false when the read throws', function () {
     t.assert.strictEqual(H.Steward.core.buildings.isSelectable(bad), false);
 });
 
+// ---- productionState -----------------------------------------------------------
+
+t.test('productionState reads the GetResourceCreation state number', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.productionState(H.zone.building({ productionState: 1 })), 1);
+    t.assert.strictEqual(B.productionState(H.zone.building({ productionState: 0 })), 0);
+});
+
+t.test('productionState is null when the read is missing, throws or is not a number', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.productionState(H.zone.building({})), null);
+    t.assert.strictEqual(B.productionState(null), null);
+    var throwing = { GetResourceCreation: function () { throw new Error('boom'); } };
+    t.assert.strictEqual(B.productionState(throwing), null);
+    var noMethod = { GetResourceCreation: function () { return {}; } };
+    t.assert.strictEqual(B.productionState(noMethod), null);
+    var stringState = { GetResourceCreation: function () {
+        return { GetProductionState: function () { return '1'; } };
+    } };
+    t.assert.strictEqual(B.productionState(stringState), null);
+});
+
+t.test('MISSING_INPUT_STATE is 1 and buffState reuses productionState', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.MISSING_INPUT_STATE, 1);
+    var b = H.zone.building({ productionState: 1, buffs: [] });
+    t.assert.strictEqual(B.buffState(b).productionState, B.productionState(b));
+    t.assert.strictEqual(B.buffState(b).productionState, 1);
+    var none = H.zone.building({});
+    t.assert.strictEqual(B.buffState(none).productionState, B.productionState(none));
+    t.assert.strictEqual(B.buffState(none).productionState, null);
+});
+
+// Single reads and the pass-scoped name index.
+function flaky(fn) {
+    // A member that is a function on its first read and undefined afterwards.
+    var reads = 0;
+    return { get: function () { reads++; return reads === 1 ? fn : undefined; }, count: function () { return reads; } };
+}
+
+t.test('name, grid and level read a getter-defined member once', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var counters = {};
+    var b = {};
+    ['GetBuildingName_string', 'GetGrid', 'GetUpgradeLevel'].forEach(function (m, i) {
+        var f = flaky(function () { return [ 'Foo', 7, 3 ][i]; });
+        counters[m] = f;
+        Object.defineProperty(b, m, { get: f.get });
+    });
+    t.assert.strictEqual(B.name(b), 'Foo');
+    t.assert.strictEqual(B.grid(b), 7);
+    t.assert.strictEqual(B.level(b), 3);
+    t.assert.strictEqual(counters.GetBuildingName_string.count(), 1);
+    t.assert.strictEqual(counters.GetGrid.count(), 1);
+    t.assert.strictEqual(counters.GetUpgradeLevel.count(), 1);
+});
+
 // ---- name index in a read pass ----
 
 function nameIndexZone(H, counter) {
@@ -391,4 +452,16 @@ t.test('byName in a pass still returns a mason only the host index holds', funct
     });
     t.assert.strictEqual(found.length, 1);
     t.assert.strictEqual(found[0].GetGrid(), 99);
+});
+
+t.test('productionBuffInfo reads a flaky GetBuffDefinition once and returns the name', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var def = { GetName_string: function () { return 'Buff1'; } };
+    var f = flaky(function () { return def; });
+    var a = {};
+    Object.defineProperty(a, 'GetBuffDefinition', { get: f.get });
+    var info = B.productionBuffInfo({ productionBuff: a });
+    t.assert.strictEqual(info.name, 'Buff1');
+    t.assert.strictEqual(f.count(), 1);
 });

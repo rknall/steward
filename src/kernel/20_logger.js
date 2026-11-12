@@ -12,6 +12,8 @@
  * every other file steward writes follow one location policy. The logger
  * only picks the 'steward/logs' folder and reports where it landed.
  * log.filePath() returns the native path of the current log file (or null).
+ * log.limited(ms) returns a per-condition limiter that writes at most one line
+ * per ms and counts the lines it held back.
  *
  * console.log rotates by size, by day, or both, and at most keepRotated old
  * files stay beside it. Rotation is driven by the writes themselves with no
@@ -369,6 +371,38 @@
             maxFileSizeKB: state.maxFileSizeKB,
             keepRotated:   state.keepRotated,
             rotateDaily:   state.rotateDaily
+        };
+    };
+
+    // One limiter per condition: a failure that repeats on every tick would
+    // flood the log, so at most one line goes out per ms and the next line
+    // written says how many were held back in between.
+    //   var note = S.kernel.log.limited(function () { return S.kernel.TIMEOUTS.LOG_REPEAT_MS; });
+    //   note('error', 'scheduler', 'tick threw', err);
+    // ms may be a function, read on every call. Returns true when a line was
+    // written. Never throws: logging must not stop the caller.
+    log.limited = function (ms) {
+        var lastAt = null;
+        var held = 0;
+        return function note(level, category, text, detail) {
+            try {
+                var window = typeof ms === 'function' ? ms() : ms;
+                if (typeof window !== 'number' || !isFinite(window)) window = 0;
+                var now = Date.now();
+                if (lastAt !== null && now - lastAt < window) {
+                    held++;
+                    return false;
+                }
+                lastAt = now;
+                var more = held > 0 ? ' (' + held + ' more since the last line)' : '';
+                held = 0;
+                var line = text + more + (arguments.length >= 4 ? ': ' + detail : '');
+                var sink = level === 'debug' || level === 'warn' || level === 'error' ? level : 'log';
+                S.kernel[sink](category, line);
+                return true;
+            } catch (e) {
+                return false;
+            }
         };
     };
 

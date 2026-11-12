@@ -83,6 +83,14 @@ t.test('the tab bar hides tabs without modules and keeps Overview', function () 
     assert.strictEqual(s.ui.screen.state().tab, 'overview');
 });
 
+t.test('the production tab comes after events in the bar', function () {
+    var s = setup();
+    mod(s, 'events', 'events', {});
+    mod(s, 'miner', 'mining', {});
+    mod(s, 'prod', 'production', {});
+    assert.deepStrictEqual(tabIds(open(s)), ['overview', 'mining', 'events', 'production']);
+});
+
 t.test('opening on a tab that is not shown falls back to Overview', function () {
     var s = setup();
     mod(s, 'miner', 'mining', {});

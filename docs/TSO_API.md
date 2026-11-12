@@ -99,7 +99,9 @@ Host calls behind the core write actions (each is wrapped by `Steward.core.packe
 |------|---------|
 | `SendMessagetoServer(1031, dRaiseArmyVO)` with `armyHolderSpecialistVO` and one `dResourceVO` per unit | `army.raise` (the general must stand on a map grid: `GetGarrison()` is null at the star and the server refuses the raise) |
 | `cMilitaryUtil.SendRaiseArmyToServer(game.gi, spec, null)` | `army.unload` |
-| `SendMessagetoServer(91, dTimedProductionVO)`, one per stack shape; queue 0 is the barracks, 8 the elite barracks | `production.order` |
+| `SendMessagetoServer(91, dTimedProductionVO)`, one per stack shape, with `type` the queue id and `buildingGrid` the producing building; see Timed production | `production.order`, `production.orderIn` |
+| `SendMessagetoServer(141, type)`, `data` = the production type. Finishes a queue whose head entry waits for completion (the Bookbinder). Verified by the entry leaving the queue or the item stock rising. What it does is not confirmed live | `production.complete` |
+| `SendServerAction(107, 1 or 0, grid, 0, null)`. Sets an absolute state (1 resume, 0 pause), so a retry is safe. Verified by `IsProductionActive()` on the building | `production.setActive` |
 | `quest.SetQuestMode(1)`, then `SendMessagetoServer(100, dServerAction, responder)` with `type = 1`, `data = quest.GetUniqueId()` and `responder = game.createResponder(onResult, onFault)` (`ServerState::ResponderSimple`). The claim is verified by the server's result callback for the current send, or by the quest leaving the zone's pool (a claimed quest stays in the pool for a while). A fault, a stale callback or `isFinished` turning false is never a success | `quests.claim` |
 | `quest.SetQuestMode(3)`, then `SendMessagetoServer(100, dServerAction, responder)` with `type = 0` (`SERVER_STACK_QUEST_BUTTON_OK`) and `data = quest.GetUniqueId()`. This is what the client's `QuestOkButtonPressedFromGui` sends when the player opens a quest in mode 2 ("New Quest", unread). The read is verified by the server's result callback for the current send, or by new quests entering the zone's pool. Mode 3 alone is never proof | `quests.read` |
 | `AdventureManager.removeAdventure(zoneId)` | `adventures.close` |
@@ -252,6 +254,35 @@ assets.GetResourceIcon('Coin');
 
 The host answers synchronously, with no load event. It returns a grey `<span>` placeholder when the bitmap is not decoded yet and a Base64 `<img>` otherwise. Steward caches only the `<img>` and redraws a table view once a second later when it got a placeholder.
 
+### Modal show and hide: the stage swap
+
+The host keeps the game and the HTML layer on one stage and swaps them with
+`stage.swapChildrenAt(0, 1)`. The swap is bound to `show.bs.modal` and `hide.bs.modal` on every
+`Modal.create()` (`0-common.js:604-607`). The HTML layer is on top only while the number of those
+events is odd. The rules that follow from this:
+
+- Bootstrap 3.4.1 fires `hide.bs.modal` (and `show.bs.modal`) before it checks `isShown`. A hide
+  on a modal that is already hiding therefore swaps again, and the count goes even.
+- A `fade` dialog stays `:visible` for about 300 ms after it hides. Host `Modal.show()` runs
+  `.modal('hide')` on every other `div[role='dialog']:visible`, a fading one included, so a
+  dialog that was just closed is hidden a second time.
+- An even count leaves the HTML layer behind the game. It survives a script reload, so a client
+  restart is needed to clear it. While it lasts the queue's modal guard sees a dialog that is not
+  on screen and defers every action.
+
+Steward rule: open a steward dialog with `S.kernel.ui.showModal(modal)` and close it with
+`S.kernel.ui.hideModal(modal)`. Never call `modal.hide()` before showing another window.
+`hideModal` hides only a modal the Bootstrap instance reports as shown. `showModal` first takes
+any other dialog that is still fading out off the screen, so the host's show does not hide it a
+second time. A window that
+replaces the dashboard calls `S.kernel.ui.releaseDashboard()` first, which drops the dashboard
+state without a hide, because the host's show hides the dashboard with its own single event.
+
+Known host hazard, not preventable from steward: clicking the header X or a `.btnClose` twice
+during a fade. The host binds the swap before steward code runs, so a second host hide still
+swaps the stage. Host menus that open a window also hide every visible dialog first, so opening
+one within the fade after a steward Close has the same effect.
+
 ## Star menu and adventures
 
 The star menu stock is `game.gi.mCurrentPlayer.getAvailableBuffs_vector()`. Each entry has `GetType()`, `GetResourceName_string()` and `amount`. Adventure maps have type `Adventure` and the adventure name as resource.
@@ -330,6 +361,41 @@ Checked live on 2026-11-09 with the steward "Dump mine buffs" diagnostic
 - Applied means `productionBuff` is non-null within 15 s. Confirmed by verified applies: each
   one was seen inside the window after a single send. `mBuffs_vector` has length 1 on a buffed
   building; it is recorded in the dump only. A stock drop alone is not treated as success.
+
+## Timed production
+
+Read from the client bytecode and the host scripts of one client build; re-check after a client update.
+
+- Queues are per production type, not per building: `zone.GetProductionQueue(type)`. An order is a `dTimedProductionVO` whose `buildingGrid` picks the building. Of several buildings with one name, the highest-level one produces, so steward orders into and buffs that one only (level descending, then grid).
+- The type id has a name in the host enum `Enums::TIMED_PRODUCTION_TYPE`. A profile is derived from the id and that name, never from a list of building names.
+- A VO's `amount` is items per stack and `stacks` is the stack count. The host's order panel bounds the amount by `defines.MAX_PRODUCTION_AMOUNT` (25) for every type; the Bookbinder sends one book per order. `Steward.core.production.maxProductionAmount()` reads the constant. A queue has no known capacity.
+- Entry fields read: `GetAmount()`, `GetProducedItems()`, `GetProductionTime()`, `GetCollectedTime()`, the time bonus, and the VO's `producedItems`. Time left for one entry is `((amount - produced) * productionTime - collectedTime) / timeBonus` in ms. In-progress counts sum `GetAmount()` without subtracting `GetProducedItems()`.
+- A run of a timed item or buff yields `GetProductionAmount()` items; units and books yield 1.
+
+| Kind | Queue ids | Items from | Order shape | Entries at most |
+|------|-----------|------------|-------------|-----------------|
+| Units | 0 barracks, 8 elite barracks (confirmed live) | `cMilitaryUnitDescription.GetAllUnitDescriptions(true)` split by elite flag; item = `GetProductionName_string()`, kept when `army.unitBase` resolves | full stacks plus a remainder | no limit known |
+| Units | 7 (tier 3, not confirmed live) | `cMilitaryUnitData.GetAllUnitDataByTier(true, 3)`, same item name | one message, `stacks 1` | 1 |
+| Buffs | 1, 6, 11 (confirmed live) | produceable buffs of the queue's group | full stacks plus a remainder | no limit known |
+| Books | 2 (the Bookbinder, not confirmed live) | `skillPoints_vector` ids | one book per order, no stack setting | 1 |
+| Cooldown | enum name `culturebuilding` | none | not orderable | 0 |
+| Timed | any other type with a `productionQueue` | `global.timedProductions_vector[type]` | one message, `stacks 1` | 1 until a limit is known |
+
+- Availability, read for the item drop-down and the planner (`itemsOf`, `isProducible`). Each check that cannot be read gives null and never hides an item:
+
+| Check | Host read |
+|-------|-----------|
+| event and quest | `Utils::RequirementsHelper.checkRequirements(gi, event, quest)` with the def's `requiresEvent` and `requiresQuest` |
+| level window | `requiresUpgradeLevelMin` and `requiresUpgradeLevelMax` against the producer's level |
+| adventure buff | `BuffSystem::BuffAdventureController.isActiveBuffAdventureBuffOrNormalBuff(name)` |
+| recipe lock | `gi.mRequirements.timedProductionRequirements_vector[key].isFulfilledForSkillList(gi.mCurrentPlayer.getSkills())` |
+| page | the def's `GetGroup()` (timed defs also `GetType()`); the title is the loca key `BuffGroup<g>` for buffs and `<TIMED_PRODUCTION_TYPE.toString(type)>Group<g>` for timed types |
+
+- A recipe-locked item is greyed in the client and cannot be ordered. The buff list from `GetProduceableBuffDefinitions` is already filtered by event and quest.
+- A book's price is the level whose `amountProduced` the player's lifetime `producedAmount` of that book has reached. A finished head entry (VO `producedItems` 1) needs message 141.
+- `culturebuilding` has a cooldown, `productionBuilding.getRemainingCooldown()`, not a queue. When the enum name cannot be read, a queue whose building has that method is treated the same way.
+- Profiles marked not confirmed order with no retry and at most one entry in the queue, so a wrong assumption costs one order.
+- autoTSO never orders books; a Bookbinder order in steward is new behaviour.
 
 ## Scenario items
 

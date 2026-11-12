@@ -138,4 +138,55 @@
         Reload:   'InstallReload'
     };
 
+    // Production demand priorities. The numbers are an order, not a protocol:
+    // the planner sorts demands by them, and a lower number is more urgent.
+    // Users: core/production.js (planner), modules/production (standing orders).
+    S.ProductionPriority = {
+        RunNow:   1,
+        RunAhead: 2,
+        Quest:    3,
+        Standing: 4
+    };
+
+    // Kinds of production the core readers distinguish. Each names one queue
+    // model. Users: core/production.js (readers), modules/production (UI).
+    S.ProductionKind = {
+        Units:    'ProductionUnits',
+        Buffs:    'ProductionBuffs',
+        Books:    'ProductionBooks',
+        Timed:    'ProductionTimed',
+        Cooldown: 'ProductionCooldown'
+    };
+
+    // Outcome of matching one production demand against the live queue.
+    // Users: core/production.js (planner), modules/production (demand views).
+    S.DemandStatus = {
+        Covered:      'DemandCovered',
+        Waiting:      'DemandWaiting',
+        Order:        'DemandOrder',
+        Deferred:     'DemandDeferred',
+        Short:        'DemandShort',
+        Held:         'DemandHeld',
+        QueueFull:    'DemandQueueFull',
+        NotOrderable: 'DemandNotOrderable',
+        Unreadable:   'DemandUnreadable'
+    };
+
+    // What a standing demand keeps stocked. Queue keeps N items queued (in
+    // progress or waiting); Stock wants N in stock, counting what is queued.
+    // Users: core/production/demand.js, core/production/plan.js, modules/production.
+    S.DemandBasis = {
+        Queue: 'DemandBasisQueue',
+        Stock: 'DemandBasisStock'
+    };
+
+    // Verdict of the shared buff engine's eligible() check. Ok buffs now, Skip
+    // tries the next building, Stop ends the pass (breaker open, no probe due).
+    // Users: core/buffing.js, modules/mining, modules/production.
+    S.BuffVerdict = {
+        Ok:   'BuffOk',
+        Skip: 'BuffSkip',
+        Stop: 'BuffStop'
+    };
+
 }(Steward));

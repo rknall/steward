@@ -216,18 +216,60 @@ function jqInstalled(H) {
     return !!(H.ctx.$ && H.ctx.$._jqFake);
 }
 
-// Host Modal and document stand-ins. Without the jq fake, Body() has no
-// length, so the render functions return early; its visibility is the
-// test's switch (`rig.visible`) either way. With the jq fake, Body() and
-// Footer() are real elements, one pair per modal, and `rig.made[i].modal`
-// is the instance. The style element already lists the dashboard, settings
-// and adventures scopes and the
-// current rule checksum, so ensureStyle returns at once.
-function installModal(H) {
+// Host Modal and document stand-ins, in two modes.
+//
+// Default: without the jq fake, Body() has no length, so the render
+// functions return early; its visibility is the test's switch (`rig.visible`)
+// either way. With the jq fake, Body() and Footer() are real elements, one
+// pair per modal, and `rig.made[i].modal` is the instance. create, show and
+// hide do nothing. In this mode `rig.visible` is also what
+// `S.kernel.ui.isModalShown` reads, through a bare element carrying a
+// `bs.modal` state.
+//
+// `{ host: true }` (needs jq.install(H) first) models the host Modal
+// (0-common.js:567-611) and Bootstrap 3.4.1 `Modal.prototype.hide` closely
+// enough to reproduce the stage swap wedge:
+//   - every show and hide event swaps the game and HTML stage layers, so
+//     `rig.swaps` counts them and an odd count means the HTML layer is on top;
+//   - Bootstrap 3 triggers the show and hide events before it tests
+//     `isShown`, so a hide of an already hidden modal still swaps;
+//   - a hidden modal stays displayed (fading) until `rig.flushFades()`, and
+//     the host's `show` hides every other displayed dialog, a fading one
+//     included, then shows its own only when it is not displayed;
+//   - `create()` does nothing while an element for the id exists, and a
+//     closable modal removes its element on `hidden.bs.modal`.
+// The style element already lists the dashboard, settings and adventures
+// scopes and the current rule checksum, so ensureStyle returns at once.
+function installModal(H, opts) {
+    opts = opts || {};
+    var host = opts.host === true;
+    if (host && !jqInstalled(H)) {
+        throw new Error('installModal({ host: true }) needs jq.install(H) first');
+    }
     var rig = { made: [], visible: false };
+    var order = [];
+
     function Modal(id, title, closable) {
         this._rig = { id: id, title: title, closable: closable, modal: this };
+        this.id = '#' + id;
+        this.rawId = id;
+        this.removeHiding = closable !== false;
         rig.made.push(this._rig);
+        if (!host && jqInstalled(H)) {
+            var $ = H.ctx.$;
+            // No role and no modal class, so the queue's dialog walk and
+            // settleFading never see this element.
+            if (!$(this.id).length) {
+                var st = {};
+                Object.defineProperty(st, 'isShown', {
+                    get: function () { return rig.visible === true; },
+                    enumerable: true
+                });
+                var $el = $('<div>', { id: id });
+                $el.data('bs.modal', st);
+                $('body').append($el);
+            }
+        }
     }
     Modal.prototype.create = noop;
     Modal.prototype.show = noop;
@@ -249,6 +291,110 @@ function installModal(H) {
         }
         return { length: 0 };
     };
+
+    if (host) {
+        rig.swaps = 0;
+        rig.live = {};
+        rig.pending = [];
+
+        var bsShow = function (rec) {
+            rec.$el.trigger('show.bs.modal');
+            if (rec.state.isShown === true) return;
+            rec.state.isShown = true;
+            rec.displayed = true;
+            rec.$el[0].style.display = '';
+            rec.$el.addClass('in');
+            var at = rig.pending.indexOf(rec);
+            if (at >= 0) rig.pending.splice(at, 1);
+        };
+        var bsHide = function (rec) {
+            rec.$el.trigger('hide.bs.modal');
+            if (rec.state.isShown !== true) return;
+            rec.state.isShown = false;
+            rec.$el.removeClass('in');
+            if (rig.pending.indexOf(rec) < 0) rig.pending.push(rec);
+        };
+        var drop = function (rec) {
+            rec.$el.remove();
+            delete rig.live[rec.rawId];
+            var o = order.indexOf(rec);
+            if (o >= 0) order.splice(o, 1);
+            var p = rig.pending.indexOf(rec);
+            if (p >= 0) rig.pending.splice(p, 1);
+        };
+
+        Modal.prototype.create = function () {
+            if (rig.live[this.rawId]) return;
+            var $ = H.ctx.$;
+            var $el = $('<div>', { id: this.rawId, role: 'dialog', 'class': 'modal fade' });
+            var rec = { rawId: this.rawId, $el: $el, state: { isShown: null }, displayed: false };
+            rec.$body = $('<div>');
+            rec.$footer = $('<div>');
+            $el.append(rec.$body).append(rec.$footer);
+            $el.data('bs.modal', rec.state);
+            $el[0].visible = function () {
+                return rec.displayed && $el[0].style.display !== 'none';
+            };
+            rec.$body[0].visible = function () { return $el[0].visible(); };
+            $('body').append($el);
+            $el.on('show.bs.modal hide.bs.modal', function () { rig.swaps++; });
+            if (this.removeHiding) {
+                $el.on('hidden.bs.modal', function () { drop(rec); });
+            }
+            rig.live[this.rawId] = rec;
+            order.push(rec);
+        };
+        Modal.prototype.Body = function () {
+            var rec = rig.live[this.rawId];
+            return rec ? rec.$body : H.ctx.$('#' + this.rawId + '-none');
+        };
+        Modal.prototype.Footer = function () {
+            var rec = rig.live[this.rawId];
+            return rec ? rec.$footer : H.ctx.$('#' + this.rawId + '-none');
+        };
+        Modal.prototype.show = function () {
+            var own = rig.live[this.rawId];
+            var others = order.slice();
+            for (var i = 0; i < others.length; i++) {
+                if (others[i] !== own && others[i].$el.is(':visible')) bsHide(others[i]);
+            }
+            if (own && !own.$el.is(':visible')) bsShow(own);
+        };
+        Modal.prototype.hide = function () {
+            var own = rig.live[this.rawId];
+            if (own) bsHide(own);
+        };
+
+        rig.flushFades = function () {
+            var list = rig.pending.slice();
+            rig.pending = [];
+            for (var i = 0; i < list.length; i++) {
+                list[i].displayed = false;
+                list[i].$el.trigger('hidden.bs.modal');
+            }
+        };
+        rig.dismiss = function (rawId) {
+            if (rig.live[rawId]) bsHide(rig.live[rawId]);
+        };
+        rig.isShown = function (rawId) {
+            return !!rig.live[rawId] && rig.live[rawId].state.isShown === true;
+        };
+        rig.shownIds = function () {
+            var out = [];
+            for (var i = 0; i < order.length; i++) {
+                if (order[i].state.isShown === true) out.push(order[i].rawId);
+            }
+            return out;
+        };
+        rig.htmlOnTop = function () { return rig.swaps % 2 === 1; };
+        rig.balanced = function () {
+            return rig.htmlOnTop() === (rig.shownIds().length > 0);
+        };
+        rig.element = function (rawId) {
+            return rig.live[rawId] ? rig.live[rawId].$el : null;
+        };
+    }
+
     H.ctx.Modal = Modal;
     var doc = ensureDocument(H);
     doc._byId['steward-dashboard-style'] = {

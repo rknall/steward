@@ -250,6 +250,28 @@ t.test('a bound dropdown commits the option value with its own type', function (
     assert.ok(!$d.hasClass('steward-dirty'));
 });
 
+t.test('dropdown header options are disabled, valueless and never committed', function () {
+    var s = setup();
+    s.h.baseline('logger', { zz: { pick: 1 } });
+    var $d = s.h.dropdown([{ label: 'Page', header: true }, { label: 'One', value: 1 },
+        { label: 'Two', value: 2 }], { ns: 'logger', path: 'zz.pick' });
+    var $heads = $d.find('option.steward-opt-head');
+    assert.strictEqual($heads.length, 1);
+    assert.strictEqual($heads.attr('disabled'), 'disabled');
+    assert.strictEqual($heads.attr('value'), undefined);
+    assert.strictEqual($heads.text(), 'Page');
+    $d.val('2').trigger('change');
+    assert.strictEqual(s.h.get('logger', 'zz.pick'), 2);
+});
+
+t.test('a selected equal to a header label selects nothing', function () {
+    var s = setup();
+    var $d = s.h.dropdown([{ label: 'Page', header: true }, { label: 'One', value: 1 }],
+        { selected: 'Page' });
+    assert.strictEqual($d.find('option[selected]').length, 0);
+    assert.ok(!$d.find('option.steward-opt-head').attr('selected'));
+});
+
 t.test('button classes follow the options and the click handler runs', function () {
     var s = setup();
     var clicks = 0;

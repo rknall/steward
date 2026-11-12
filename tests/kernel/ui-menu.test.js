@@ -979,3 +979,23 @@ t.test('selecting Settings without a host Modal logs an error and does not throw
     });
     t.assert.strictEqual(errors.length, 1);
 });
+
+t.test('the status names a queue held past the stale bound', function () {
+    var s = setup();
+    var K = s.H.Steward.kernel;
+    var stale = K.TIMEOUTS.QUEUE_MODAL_STALE_MS;
+    var info = null;
+    K.queue.deferral = function () { return info; };
+    K.ui.status.refresh();
+    t.assert.strictEqual(K.ui.status.get(), 'Active — 1 module');
+    info = { since: 0, ms: stale - 1, ids: ['X'], depth: 1 };
+    K.ui.status.refresh();
+    t.assert.strictEqual(K.ui.status.get(), 'Active — 1 module');
+    info = { since: 0, ms: stale + 120000, ids: ['X'], depth: 1 };
+    K.ui.status.refresh();
+    t.assert.ok(/ — queue held 12 min$/.test(K.ui.status.get()), K.ui.status.get());
+    t.assert.strictEqual(K.ui.status.get(), 'Active — 1 module — queue held 12 min');
+    K.queue.deferral = function () { throw new Error('probe'); };
+    K.ui.status.refresh();
+    t.assert.strictEqual(K.ui.status.get(), 'Active — 1 module');
+});

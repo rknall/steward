@@ -148,3 +148,21 @@ t.test('without a clock option the instance reads Date.now', function () {
     var at = b.snapshot().nextProbeAt - b.COOLDOWN_MS;
     t.assert.ok(at >= before && at <= Date.now(), String(at));
 });
+
+t.test('reset closes an open breaker, clears run and probe time, logs once', function () {
+    var env = setup();
+    var b = env.b;
+    missN(b, 5);
+    t.assert.strictEqual(b.isOpen(), true);
+    env.H.clearLogs();
+    b.reset('user');
+    t.assert.deepStrictEqual(JSON.parse(JSON.stringify(b.snapshot())),
+        { open: false, run: 0, nextProbeAt: 0 });
+    t.assert.strictEqual(b.admit(3), 3);
+    var l = lines(env, 'log', 'testcat');
+    t.assert.strictEqual(l.length, 1);
+    t.assert.strictEqual(String(l[0].args[0]), 'test breaker reset by user');
+    b.reset();
+    l = lines(env, 'log', 'testcat');
+    t.assert.strictEqual(String(l[1].args[0]), 'test breaker reset');
+});

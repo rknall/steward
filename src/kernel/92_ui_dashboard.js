@@ -58,7 +58,8 @@
         { id: 'geologists',  label: 'Geologists' },
         { id: 'mining',      label: 'Mining' },
         { id: 'buildings',   label: 'Collect' },
-        { id: 'events',      label: 'Events' }
+        { id: 'events',      label: 'Events' },
+        { id: 'production',  label: 'Production' }
     ];
 
     // Elements of the open dashboard that chrome() and activate() update.

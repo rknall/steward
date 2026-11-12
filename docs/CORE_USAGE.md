@@ -21,7 +21,8 @@
 | `Steward.core.actions`     | Runs write actions: send, verify by observation, retry once. |
 | `Steward.core.quests`      | Quest pool reads, click-trigger and pick-up names and the claim action. |
 | `Steward.core.pickups`     | Clickable quest objects and collectibles of the viewed zone, and the click action. |
-| `Steward.core.production`  | Troop queue reads, order pricing and the order action. |
+| `Steward.core.production`  | Queue profiles and entries per production type, item info, generic order and complete actions, the on/off action, the planner and the demand ledger. |
+| `Steward.core.buffing`     | Shared building-buff engine: verified apply, per-grid hold after an unseen apply, one breaker per owner. |
 | `Steward.core.resources`   | Resource amount and free population reads.            |
 
 Write actions are defs (plain objects with `precheck`, `send`, `check` and so on) built by the core that owns the action, for example `S.core.army.raise`, `S.core.quests.claim`, `S.core.pickups.click` and `S.core.production.order`. They run through `S.core.actions.attempt(def, onDone)`, which verifies by positive observation: a failed read or a missing object never counts as success. Which action to run and when stays with the module; the cores stay policy-free. Readers that defs rely on report a failed read as `null`, never as zero or an empty list.
@@ -134,9 +135,10 @@ A host member can read as a function and then as undefined, and a view that walk
 - `hostRead.pass(fn)` opens a read pass around a view model, a window render, a dashboard tab draw or a module's planning pass. Inside it the memoizing readers answer from one memo; outside a pass they read fresh, exactly as before. A nested pass joins the open one. A module status that must agree across the parts of one draw memoizes it with `hostRead.cached`.
 - Never wrap an action def, a send or `actions.attempt` in a pass. They run later from the kernel queue and their verification reads must stay live.
 - A cached value is shared by every reader in the pass, so treat it as read-only.
-- The memoizing readers are `buildings.byName` (the name index) and the `buffs` entries, star menu, target table and group-contains reads.
+- The memoizing readers are `production.queueTypes`, `queueOf`, `entries`, `itemsOf`, `queuedIn`, `buffTable`, `production.avail|<type>|<item>` (one item's availability) and `production.skills`, `buildings.byName` (the name index), the `buffs` entries, star menu, target table and group-contains reads, and the production model's status (`hostRead.cached('production.status')`).
 - `buffs.buildingBuffCandidates` and `buffs.speedBuffs` read the star menu once per call even outside a pass, so the amounts of one call agree.
 - `buffs.amount`, a candidate's or speed buff's `amount`, `mapCounts` and `populationStock` are null when unreadable. A view shows `?`, never 0.
+- `production.stockOf` passes a buff or resource stock's null on; the planner marks the row `stockUnknown` and orders nothing on it, and the buff that would go with an order is left out.
 
 ```js
 var model = Steward.kernel.hostRead.pass(function () {
@@ -201,7 +203,22 @@ The breaker part of the guard is `Steward.core.breaker`: a factory that makes na
 with their own run counter, open state and probe cooldown. The send guard holds one instance
 for explorers and geologists. Mining buffs hold a separate instance, so a failing buff never
 pauses specialist dispatch, and a specialist failure never pauses buffing. Each instance logs
-its open and close transitions once.
+its open and close transitions once. Production orders and production buffs hold two more instances, and the buff side runs through `Steward.core.buffing.create()`, which mining shares, so each owner pauses only itself. `buffing.create().eligible(b, assigned)` answers one `Steward.BuffVerdict`: `Ok` to buff now, `Skip` to try the next building, `Stop` when the breaker is open and no probe is due.
+
+## Rule 6.5: the production demand ledger
+
+Several owners order into the same host queues, so none of them spends the warehouse on its own. Each declares what it wants in `Steward.core.production.demand` and one planner prices all of it.
+
+- Declare through `put(owner, key, need)` (items wanted), `hold(owner, key, {kind|item})` (other owners must not order that kind or item) or `provide(owner, fn)` (a function pulled on every read, for state kept elsewhere, such as a paused run).
+- A need is `{ label, type, item, items, basis, priority }`: `items` is a positive integer, `basis` is `Steward.DemandBasis.Queue` (keep N queued) or `Steward.DemandBasis.Stock` (have N in stock), and a module never writes the string. `priority` is one value of `Steward.ProductionPriority`. Never write a number.
+- A `put` or `hold` lives 2 minutes. Re-put every pass; an owner that stops running stops reserving.
+- `Steward.core.production.plan(needs, { actFor })` returns `{ rows, orders }`. Every need reserves its missing runs in priority order, but only the rows of the `actFor` owner produce orders. Another owner's needs reduce what is left to spend and nothing more. Feed it `demand.list()`.
+- `plan` also takes `opts.orderRuns(need)`. For an own need it returns the runs to order: the planner then orders exactly that many runs (capped by the type's per-order limit), only into an empty queue, and reads the need Covered while the queue holds any entry. One order per type is placed per call, so two names that share a queue never both order. Anything but a positive whole number takes the normal path. The per-order ceiling is `Steward.core.production.orderMax(type)` (the Bookbinder 1, every other type `maxProductionAmount()`).
+- `Steward.core.production.itemsOf(type)` entries are `{ name, label, producible, why, page, pageLabel }`. `isProducible(type, item)` answers true, false or null for one item without building the whole list. null means a check could not be read and never hides an item.
+- Send each order with `Steward.core.production.orderIn`. The planner sends nothing.
+- `Steward.core.production.producer(name)` is the building a name's queue runs at (highest level, then lowest grid). Order into and buff only that one.
+- `Steward.core.production.isActive(b)` reads the on/off state and returns null when unknown.
+- `Steward.core.buildings.productionState(b)` and `Steward.core.buildings.MISSING_INPUT_STATE` read the production state. Compare against the constant, never a bare number.
 
 ## Rule 7: wrap risky calls
 

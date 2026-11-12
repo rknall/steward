@@ -29,8 +29,9 @@
  *      The view lives in 93_ui_settings.js.
  *
  *   This file owns what both screens share: the open sequence, the settings
- *   buffer and its change count, the footer (Save, a change note, Close)
- *   and S.kernel.ui.screen, the read surface the views use. A view is an
+ *   buffer and its change count, the footer (Save, a change note, Close),
+ *   the host modal show and hide helpers every steward window uses, and
+ *   S.kernel.ui.screen, the read surface the views use. A view is an
  *   object in S.kernel.ui.views with render() and optional chrome() and
  *   idleNote(); it is looked up when a screen opens, so this file never
  *   needs the later ones at load time. The stylesheet comes from
@@ -162,10 +163,27 @@
         return (isModuleEnabled(mod.id) ? '✓ ' : '✕ ') + mod.ui.section.title;
     }
 
+    // A queue held this long by a visible dialog usually means a dialog the
+    // user cannot see (the game layer may cover it), so the status says so;
+    // the regular status refresh keeps the minutes current.
+    function heldSuffix() {
+        try {
+            var q = S.kernel.queue;
+            if (!q || typeof q.deferral !== 'function') return '';
+            var d = q.deferral();
+            if (!d || typeof d.ms !== 'number') return '';
+            if (d.ms < S.kernel.TIMEOUTS.QUEUE_MODAL_STALE_MS) return '';
+            return ' — queue held ' + Math.floor(d.ms / 60000) + ' min';
+        } catch (e) {
+            return '';
+        }
+    }
+
     function statusLabel() {
         var n = 0;
         try { n = S.kernel.registry.count(); } catch (e) { /* ignore */ }
-        return (paused ? 'Paused' : 'Active') + ' — ' + n + ' module' + (n === 1 ? '' : 's');
+        return (paused ? 'Paused' : 'Active') + ' — ' + n + ' module' + (n === 1 ? '' : 's')
+            + heldSuffix();
     }
 
     // Adaptive placement: the host's `mainSettings.menuStyle` decides whether
@@ -925,15 +943,13 @@
     }
 
     // The native menu stays clickable behind a modal, and opening a screen
-    // drops the buffer. Visibility matters because the header X and a zone
-    // load skip closeDashboard and leave stale changes behind. A guard that
-    // throws counts as no edits, so a broken window never locks the screens.
+    // drops the buffer. A window counts while it is shown: one closed by the
+    // header X, a zone load or Close (fading included) holds nothing to lose,
+    // and the first two skip closeDashboard and leave stale changes behind.
+    // A guard that throws counts as no edits, so a broken window never locks
+    // the screens.
     function hasOpenEdits() {
-        if (hasDirty() && active.modal) {
-            try {
-                if (active.modal.Body().is(':visible')) return true;
-            } catch (e) { /* no body: not open */ }
-        }
+        if (hasDirty() && active.modal && isModalShown(active.modal)) return true;
         for (var id in editGuards) {
             if (!hasOwn(editGuards, id)) continue;
             try {
@@ -1005,7 +1021,7 @@
             active.modal.create();
             active.view.render();
             renderFooter();
-            active.modal.show();
+            showModal(active.modal);
         } catch (e) {
             S.kernel.error('ui', 'open' + label + ' threw:', e);
         }
@@ -1020,7 +1036,9 @@
         openScreen(SETTINGS_MODAL_ID, 'Steward settings', 'Settings', 'settings', { group: group || null });
     }
 
-    function closeDashboard(commit) {
+    // Saves or discards the buffer and drops the footer handles; the modal
+    // itself is left to the caller.
+    function settleBuffer(commit) {
         if (hasDirty()) {
             if (commit) {
                 flushBuffers();
@@ -1032,10 +1050,149 @@
         resetBuffer();
         active.saveBtn = null;
         active.$note = null;
-        if (active.modal) {
-            try { active.modal.hide(); } catch (e) { /* ignore */ }
-        }
+    }
+
+    function closeDashboard(commit) {
+        settleBuffer(commit);
+        var m = active.modal;
         active.modal = null;
+        hideModal(m);
+    }
+
+    // For a window that replaces the dashboard: the buffer is discarded so the
+    // next open re-reads settings, but the modal is not hidden. The host's
+    // show of the next window hides the dashboard itself; a hide here would be
+    // a second hide event during the fade.
+    function releaseDashboard() {
+        settleBuffer(false);
+        active.modal = null;
+    }
+
+    // -----------------------------------------------------------------
+    // Host modals
+    // -----------------------------------------------------------------
+
+    // Every host show or hide event swaps the game and HTML stage layers.
+    // Bootstrap 3 fires the event before it checks whether the modal is
+    // shown, so a hide on a modal that is already hiding still swaps. A
+    // fading modal stays :visible, so the host's Modal.show would hide it a
+    // second time. An even count leaves the HTML layer behind the game until
+    // the client restarts. Steward therefore hides only a modal that is really
+    // shown, and settles fading dialogs before it shows another one. Nothing
+    // here depends on the fade duration.
+
+    // Bootstrap's constructor sets isShown to null, so only true counts.
+    // Without a Bootstrap instance, class 'in' marks a shown modal: Bootstrap
+    // removes it at hide, before the fade.
+    function elementShown($el) {
+        try {
+            if (!$el || !$el.length) return false;
+            var bs = $el.data('bs.modal');
+            if (bs) return bs.isShown === true;
+            return $el.is(':visible') && $el.hasClass('in');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function isModalShown(modal) {
+        try {
+            if (typeof $ === 'undefined') return false;
+            if (!modal || typeof modal.id !== 'string') return false;
+            return elementShown($(modal.id));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // The hide itself is logged by the watcher bound in showModal, which also
+    // sees the hides the host starts.
+    function hideModal(modal) {
+        try {
+            if (!isModalShown(modal)) {
+                S.kernel.debug('ui', 'hide skipped, not shown: ' + modalRawId(modal));
+                return false;
+            }
+            modal.hide();
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Hidden elements no longer match the host's ':visible' selector, so its
+    // show does not hide them again. Bootstrap's own end-of-fade handler still
+    // runs on them, so the host still removes them. The modal being shown is
+    // skipped: hiding it would let its pending end-of-fade handler remove it.
+    // Returns how many dialogs it settled.
+    function settleFading(keepRawId) {
+        var n = 0;
+        try {
+            if (typeof $ === 'undefined') return 0;
+            $(S.kernel.HOST_DIALOG_SELECTOR).each(function (i, el) {
+                var $el = $(el);
+                if (keepRawId && $el.attr('id') === keepRawId) return;
+                if (!$el.is(':visible')) return;
+                if (elementShown($el)) return;
+                $el.css('display', 'none');
+                n++;
+            });
+        } catch (e) { /* the show goes ahead regardless */ }
+        return n;
+    }
+
+    function modalRawId(modal) {
+        if (!modal) return '?';
+        if (typeof modal.rawId === 'string') return modal.rawId;
+        return typeof modal.id === 'string' ? modal.id.replace(/^#/, '') : '?';
+    }
+
+    // One hide.bs.modal watcher per element logs every hide of a steward
+    // window, the host's header X and its own Modal.show included, since all
+    // of them go through that event. Bootstrap fires it before it checks
+    // isShown, so the handler still sees the state before the hide: a hide
+    // while not shown is the second stage swap that leaves the game layer on
+    // top. The data flag keeps it to one handler, because the host creates a
+    // new element on each open of a closable modal while a persistent element
+    // keeps its flag; so there is no namespace and no off(). It only reads.
+    function watchHides(modal, rawId) {
+        try {
+            if (typeof $ === 'undefined' || typeof modal.id !== 'string') return;
+            var $el = $(modal.id);
+            if (!$el.length || $el.data('stewardHideWatch')) return;
+            $el.data('stewardHideWatch', true);
+            $el.on('hide.bs.modal', function () {
+                try {
+                    if (elementShown($el)) {
+                        S.kernel.log('ui', 'window hidden: ' + rawId);
+                    } else {
+                        S.kernel.warn('ui', 'second hide of ' + rawId + ' while it closes: the game may '
+                            + 'now cover steward windows; restart the client if the game stops reacting');
+                    }
+                } catch (e) { /* the hide goes ahead regardless */ }
+            });
+        } catch (e) { /* a missing watcher only costs the log line */ }
+    }
+
+    function showModal(modal) {
+        if (!modal || typeof modal.show !== 'function') return false;
+        var keep = modalRawId(modal);
+        var settled = settleFading(keep);
+        if (settled > 0) {
+            S.kernel.debug('ui', 'settled ' + settled + ' closing dialog(s) before showing ' + keep);
+        }
+        try {
+            modal.show();
+        } catch (e) {
+            S.kernel.error('ui', 'modal show threw:', e);
+            return false;
+        }
+        watchHides(modal, keep);
+        try {
+            if (isModalShown(modal)) S.kernel.log('ui', 'window shown: ' + keep);
+            else S.kernel.log('ui', 'window show had no effect: ' + keep + ' (still closing)');
+        } catch (e) { /* the window is open either way */ }
+        return true;
     }
 
     // -----------------------------------------------------------------
@@ -1095,11 +1252,6 @@
         }
     }
 
-    function buildLabel() {
-        var ver = S.kernel.VERSION;
-        return (typeof ver === 'string' && /^\d/.test(ver)) ? 'v' + ver : 'dev';
-    }
-
     // What the views read; everything else on the screen goes through the
     // helpers.
     var screenApi = {
@@ -1114,7 +1266,7 @@
         panelHeight:     panelHeight,
         isModuleEnabled: isModuleEnabled,
         hasEnabledFlag:  hasEnabledFlag,
-        buildLabel:      buildLabel
+        buildLabel:      S.kernel.buildLabel
     };
 
     // -----------------------------------------------------------------
@@ -1141,6 +1293,10 @@
     S.kernel.ui.openDashboard    = openDashboard;
     S.kernel.ui.openSettings     = openSettings;
     S.kernel.ui.closeDashboard   = closeDashboard;
+    S.kernel.ui.releaseDashboard = releaseDashboard;
+    S.kernel.ui.isModalShown     = isModalShown;
+    S.kernel.ui.hideModal        = hideModal;
+    S.kernel.ui.showModal        = showModal;
     S.kernel.ui.bufferedSettings = bufferedSettings;
     S.kernel.ui.markDirty        = markDirty;
     S.kernel.ui.markEditing      = markEditing;

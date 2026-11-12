@@ -94,3 +94,14 @@ t.test('reload overwrites the version slot', function () {
     var H2 = harness.reload(H);
     t.assert.strictEqual(H2.Steward.kernel.VERSION, version.read(REPO_ROOT));
 });
+
+t.test('buildLabel reads the version', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.buildLabel(), 'v' + version.read(REPO_ROOT));
+});
+
+t.test('buildLabel is dev for an unreplaced token', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.VERSION = '__STEWARD_VERSION__';
+    t.assert.strictEqual(H.Steward.kernel.buildLabel(), 'dev');
+});
