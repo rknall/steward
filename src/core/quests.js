@@ -59,7 +59,10 @@
  * collects what waits only because its quest is not running yet.
  * itemWant() also takes opts.buildings, the names of the buildings at the
  * target grid: a type-1 trigger that is not a click trigger and names one of
- * them counts as asking for the item, under the same gate.
+ * them counts as asking for the item, under the same gate. The strict gate
+ * needs an apply-type condition: buffappliedonadventure, onmap or
+ * buildingdestroyed naming the item, or the building at the grid. A type-1
+ * trigger that names the item itself is skipped there.
  *
  * Bundle slot: core, after production.js and before resources.js (core files
  * load in name order). Everything here runs at call time; the top level only
@@ -412,14 +415,16 @@
 
     // The condition of one quest that names one of the wanted items, or null.
     // In order: (1) an end condition with an item action naming the item or a
-    // target, (2) a type-1 trigger naming one of them, (3) an end condition with
+    // target, (2) a type-1 trigger naming one of them, only under the loose gate:
+    // such a trigger may ask to produce the item, not to apply it, and the strict
+    // gate must never spend an item on a produce-only quest, (3) an end condition with
     // an item action naming a building standing at the target grid, (4) a type-1
     // trigger that is not a click trigger and names such a building. Rules 3 and 4
     // let a quest ask for the item without naming it. Rule 3 exists because a
     // quest may ask for an item by the object it removes, naming the object's
     // building in an onmap or buildingdestroyed condition (boulders that dynamite
     // clears, say) and never the item.
-    function itemCondition(def, names, buildings) {
+    function itemCondition(def, names, buildings, strict) {
         var ends = toList(def.endConditions_vector);
         var trig = toList(def.questTriggers_vector);
         var haveBuildings = buildings && buildings.length;
@@ -430,7 +435,7 @@
                 if (en && inList(ITEM_ACTIONS, en.action_string) && inList(names, en.item_string)) return en;
             }
         }
-        if (trig) {
+        if (trig && strict !== true) {
             for (i = 0; i < trig.length; i++) {
                 var t = trig[i];
                 if (t && t.type === 1 && inList(names, t.item_string || t.name_string || t.type_string)) return t;
@@ -495,7 +500,7 @@
                 if (!counts && !strict) continue;
                 var def = definition(q).def;
                 if (!def) continue;
-                var cond = itemCondition(def, names, buildings);
+                var cond = itemCondition(def, names, buildings, strict);
                 if (!cond) continue;
                 var unmet = !fin && isTriggerOpen(toList(q.mQuestTriggersFinished_vector), cond);
                 if (!counts) {

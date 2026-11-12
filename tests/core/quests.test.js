@@ -883,6 +883,70 @@ t.test('itemWant running: an end condition building match works without quest tr
     t.assert.strictEqual(dynWant(q, { buildings: [BOULDER_1] }), 'open');
 });
 
+// A quest that asks to produce items, as the client defines it: the end conditions
+// own the buffs (buffowned) and pick up collectibles (buildingdestroyed); the
+// triggers are unnamed type-45 ones. It never asks to apply an item.
+var STINKY = 'BattleBuffHurt_BuffAd_StinkyPotion';
+var DECOMP = 'BattleBuffHurt_BuffAd_Decomposer';
+
+function produceQuest(statuses, mode) {
+    return itemQuest({
+        name: 'Buff_Adv_StormRecovery_SubQuest03',
+        ends: [
+            endCond('BuildingStinkyMushroom', 0, 'buildingdestroyed'),
+            endCond('BuildingGlowingHerbs', 1, 'buildingdestroyed'),
+            endCond(STINKY, 2, 'buffowned'),
+            endCond(DECOMP, 3, 'buffowned')
+        ],
+        triggers: [0, 1, 2, 3].map(function (k) { return { triggerIdx: k, type: 45, condition: 0 }; }),
+        statuses: statuses || [{ status: 0 }, { status: 0 }, { status: 0 }, { status: 0 }],
+        mode: mode === undefined ? 3 : mode
+    });
+}
+
+function itemWantOf(list, item, opts) {
+    var o = { running: true };
+    for (var k in (opts || {})) o[k] = opts[k];
+    return bootClick(list).Q.itemWant(item, [], o);
+}
+
+t.test('itemWant running: a produce quest never makes the potions open', function () {
+    var q = produceQuest();
+    t.assert.strictEqual(itemWantOf([q], STINKY), 'none');
+    t.assert.strictEqual(itemWantOf([q], DECOMP), 'none');
+    t.assert.strictEqual(itemWantOf([q], STINKY, { buildings: ['BuffAd_Ruin_02'] }), 'none');
+    t.assert.strictEqual(itemWantOf([q], DECOMP, { buildings: ['BuffAd_Ruin_03'] }), 'none');
+});
+
+t.test('itemWant running: a produce quest next to an apply quest is open only by the apply condition', function () {
+    var produce = produceQuest();
+    var apply = itemQuest({ ends: [endCond(STINKY, 0)], statuses: [{ status: 0 }], mode: 3 });
+    t.assert.strictEqual(itemWantOf([produce, apply], STINKY), 'open');
+    t.assert.strictEqual(itemWantOf([produce, apply], DECOMP), 'none');
+    var applied = itemQuest({ ends: [endCond(STINKY, 0)], statuses: [{ status: 1 }], mode: 3 });
+    t.assert.strictEqual(itemWantOf([produce, applied], STINKY), 'done');
+});
+
+t.test('itemWant running: a type-1 trigger naming the item does not make it open', function () {
+    var shapes = [
+        { item_string: STINKY, condition: 0 },
+        { name_string: STINKY, condition: 3 },
+        { type_string: STINKY, condition: 0 }
+    ];
+    for (var i = 0; i < shapes.length; i++) {
+        var tr = { triggerIdx: 0, type: 1 };
+        for (var k in shapes[i]) tr[k] = shapes[i][k];
+        var q = itemQuest({
+            ends: [endCond(STINKY, 0, 'produce')], triggers: [tr],
+            statuses: [{ status: 0 }], mode: 3
+        });
+        t.assert.strictEqual(itemWantOf([q], STINKY), 'none', 'shape ' + i);
+        t.assert.strictEqual(itemWantOf([q], STINKY, { buildings: ['buffad_x'] }), 'none', 'shape ' + i + ' with building');
+        // The loose gate still reads the trigger.
+        t.assert.strictEqual(want([q], STINKY), 'open', 'loose shape ' + i);
+    }
+});
+
 t.test('definition falls back from getter to field to none', function () {
     var b = boot([]);
     var d = { specialType_string: '' };

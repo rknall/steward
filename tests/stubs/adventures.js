@@ -55,6 +55,13 @@
  *     of onmap, the way Storm Recovery asks for dynamite by the boulders it
  *     clears. A condition is met (status 1) once no grid of w.gridBuildings
  *     holds its name; the quest is finished once all are met (not with stayOpen);
+ *   - a quest { key, name, produce, collect, unread, met } asks only to make
+ *     items, the way Storm Recovery's Buff_Adv_StormRecovery_SubQuest03 (the
+ *     default name) does in a quest dump: per name of collect a
+ *     'buildingdestroyed' end condition (min 11) on a collectible, then per
+ *     buff of produce a 'buffowned' end condition (min 11), each with an
+ *     unnamed type-45 trigger. Every condition is open (met: all met); the
+ *     quest never finishes. It names no grid, so no send meets it;
  *   - w.gridBuildings[grid] (o.gridBuildings) names the building standing at
  *     grid: core.buildings.byGrid returns an object whose name reads it (a
  *     camp grid may carry a name too). Delete the entry and the grid is empty;
@@ -838,10 +845,23 @@ function installItems(w) {
                 statuses.push({ status: standing(name) ? 0 : 1 });
             });
         }
+        var makes = (q.collect || []).map(function (name) { return { action: 'buildingdestroyed', name: name }; })
+            .concat((q.produce || []).map(function (buff) { return { action: 'buffowned', name: buff }; }));
+        if (makes.length) {
+            ends = [];
+            triggers = [];
+            statuses = [];
+            makes.forEach(function (c, k) {
+                ends.push({ action_string: c.action, item_string: c.name, min: 11, triggerIdx: k });
+                triggers.push({ type: 45, condition: 0, triggerIdx: k });
+                statuses.push({ status: q.met ? 1 : 0 });
+            });
+        }
         var gone = onmap.length > 0 && !q.stayOpen && statuses.every(function (s) { return s.status === 1; });
+        var name = q.name || (makes.length ? 'Buff_Adv_StormRecovery_SubQuest03' : '');
         return {
             isFinished: function () { return !!q.finished || gone; },
-            getQuestName_string: function () { return q.name || ''; },
+            getQuestName_string: function () { return name; },
             mQuestMode: q.unread ? 2 : 3,
             IsActive: function () { return true; },
             IsQuestActive: function () { return true; },
