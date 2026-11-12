@@ -266,3 +266,18 @@ t.test('the queue entry pause reason exists', function () {
     var w = W.world({ home: true });
     assert.strictEqual(w.S.RunPause.QueueEntry, 'PauseQueueEntry');
 });
+
+t.test('queueTarget steps over queue.skip entries and counts the step-overs', function () {
+    var w = W.world({ home: true });
+    var req = request(queue());
+    assert.deepStrictEqual(plain(w.st.queueTarget(req)), { at: { index: 1, pass: 0 }, stepped: 0 });
+    req.queue.skip = 1;
+    assert.deepStrictEqual(plain(w.st.queueTarget(req)), { at: { index: 2, pass: 0 }, stepped: 1 });
+    req.queue.skip = 3;
+    assert.deepStrictEqual(plain(w.st.queueTarget(req)), { at: null, stepped: 2 },
+        'the queue ends on the way');
+    var looped = request(queue({ loop: true, passes: 2, skip: 2 }));
+    assert.deepStrictEqual(plain(w.st.queueTarget(looped)), { at: { index: 0, pass: 1 }, stepped: 2 });
+    req.ended = true;
+    assert.deepStrictEqual(plain(w.st.queueTarget(req)), { at: null, stepped: 0 });
+});

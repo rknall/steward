@@ -181,18 +181,16 @@
         });
     }
 
-    // The maps of the entry a queue's Start begins with. advs: the adventure
-    // of each entry, null where its record cannot be read. With the no-map
-    // skip that is the first entry with a map; null while a star menu read
-    // fails before one is found, 0 when none has a map.
+    // The maps of the entry a queue's Start begins with (queues.startIndex).
+    // advs: the adventure of each entry, null where its record cannot be
+    // read, which counts as no map. null while a star menu read fails before
+    // that entry is found, 0 when none has a map.
     function queueMaps(rec, advs, pass) {
-        var skip = rec.noMap === S.modules.adventures.queues.NO_MAP.Skip;
-        for (var i = 0; i < advs.length; i++) {
-            var n = advs[i] === null ? 0 : mapsOf(advs[i], pass);
-            if (n === null) return null;
-            if (!skip || n > 0) return n;
-        }
-        return 0;
+        var countOf = function (i) { return advs[i] ? mapsOf(advs[i], pass) : 0; };
+        var r = S.modules.adventures.queues.startIndex(rec.noMap, advs.length, countOf);
+        if (!r) return null;
+        if (r.index < 0) return 0;
+        return r.count !== undefined ? r.count : countOf(r.index);
     }
 
     function queueItem(rec) {

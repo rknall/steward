@@ -326,20 +326,15 @@
         // window has no fill sizing, so its panel scrolls.
         var $panel = $('<div>', { 'class': 'steward-panel steward-compact' });
         var failed = false;
-        // Only a click on one of the queue list's own buttons (New queue,
-        // Edit) opens the queue editor; the editor has no other way to say so.
-        var goEdit = state.queueGo && state.view === 'queues';
-        state.queueGo = false;
-        if (goEdit) {
-            state.view = 'queueEdit';
-            state.queueId = null;
-        }
+        // The queue list's New queue and Edit begin a draft in queueview; a
+        // failed Edit begins none and stays on the list with its error.
+        if (state.view === 'queues' && QV().editing()) state.view = 'queueEdit';
         try {
             if (state.view === 'edit') renderEdit($panel);
-            else if (state.view === 'queueEdit') QV().renderEdit($panel, queueCtx(false), state.queueId);
+            else if (state.view === 'queueEdit') QV().renderEdit($panel, queueCtx(), null);
             else {
                 $panel.append(viewSwitch());
-                if (state.view === 'queues') QV().renderList($panel, queueCtx(true));
+                if (state.view === 'queues') QV().renderList($panel, queueCtx());
                 else renderList($panel);
             }
         } catch (e) {
@@ -360,7 +355,6 @@
     // throws again simply shows this view again instead of looping.
     function backToListFromFailure() {
         resetQueues();
-        state.queueId = null;
         state.draft = null;
         state.orig = null;
         state.problems = null;
@@ -420,17 +414,10 @@
         return $tabs;
     }
 
-    // What queueview needs from the window. On the list the buttons also
-    // note the click, so render() can tell an Edit or New queue click from a
-    // delete or a refresh.
-    function queueCtx(onList) {
+    // What queueview needs from the window.
+    function queueCtx() {
         return {
-            btn: onList ? function (label, onClick) {
-                return btn(label, function () {
-                    state.queueGo = true;
-                    onClick();
-                });
-            } : btn,
+            btn: btn,
             iconBtn: iconBtn,
             textEl: textEl,
             act: act,
@@ -438,8 +425,7 @@
             syncMenu: syncMenu,
             render: render,
             backToList: function () {
-                state.queueGo = false;
-                state.queueId = null;
+                resetQueues();
                 state.view = 'queues';
                 render();
             }
@@ -515,8 +501,7 @@
             view: 'list', draft: null, orig: null, title: null, recs: null, problems: null,
             confirmDelete: null, error: null, labelInput: null, lastBuff: null, moved: -1,
             footKind: null, $save: null, $mid: null,
-            adding: null, $addStep: null, $addNote: null, seqProblems: [], files: {},
-            queueId: null, queueGo: false
+            adding: null, $addStep: null, $addNote: null, seqProblems: [], files: {}
         };
         // A draft left in a window that was hidden never carries over.
         resetQueues();

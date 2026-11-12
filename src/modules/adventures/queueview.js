@@ -28,7 +28,8 @@
  * remove it.
  *
  * The window calls renderList($c, ctx), renderEdit($c, ctx, id) (null id
- * starts a new queue), isDirty() and reset(). ctx carries the window's
+ * starts a new queue), isDirty(), editing() (a draft is held, so the window
+ * shows the editor) and reset(). ctx carries the window's
  * helpers: btn, iconBtn, textEl, act (wraps a click handler), notify,
  * syncMenu, render (rebuild the view), backToList.
  *
@@ -62,8 +63,8 @@
     function Sc() { return S.modules.adventures.scenarios; }
     function H() { return S.kernel.ui.helpers; }
 
-    function plural(n, word) {
-        return n + ' ' + word + (n === 1 ? '' : 's');
+    function plural(n, one, many) {
+        return n + ' ' + (n === 1 ? one : many);
     }
 
     function snapshot(draft) {
@@ -72,6 +73,11 @@
 
     function isDirty() {
         return !!(view && view.draft && snapshot(view.draft) !== view.orig);
+    }
+
+    // True while a draft is held: New queue or a successful Edit began one.
+    function editing() {
+        return view !== null;
     }
 
     function reset() {
@@ -116,15 +122,15 @@
             else other++;
         }
         var parts = [];
-        if (a) parts.push(plural(a, 'adventure'));
-        if (s) parts.push(plural(s, 'scenario'));
+        if (a) parts.push(plural(a, 'adventure', 'adventures'));
+        if (s) parts.push(plural(s, 'scenario', 'scenarios'));
         if (other) parts.push(other + ' unknown');
         return rec.entries.length + (parts.length ? ' (' + parts.join(', ') + ')' : '');
     }
 
     function loopText(rec) {
         if (!rec.loop) return 'no loop';
-        return rec.passes > 0 ? plural(rec.passes, 'pass') : 'endless';
+        return rec.passes > 0 ? plural(rec.passes, 'pass', 'passes') : 'endless';
     }
 
     function optionsText(rec) {
@@ -224,7 +230,7 @@
         var $card = h.card({
             icon:   '⚔',
             title:  'Run queues',
-            meta:   plural(good, 'queue') + ' · start one from ~Steward~ › Adventures › Queues',
+            meta:   plural(good, 'queue', 'queues') + ' · start one from ~Steward~ › Adventures › Queues',
             $tools: folder ? ctx.btn('New queue', ctx.act(function () { newQueue(ctx); })) : null
         });
         $card.append(h.table({
@@ -595,6 +601,7 @@
         renderList: renderList,
         renderEdit: renderEdit,
         isDirty:    isDirty,
+        editing:    editing,
         reset:      reset
     };
 

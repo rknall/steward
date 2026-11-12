@@ -304,3 +304,24 @@ t.test('toFile writes only the file fields', function () {
     assert.deepStrictEqual(Object.keys(o), ['version', 'label', 'entries', 'loop', 'passes', 'early', 'retrain', 'noMap', 'saved']);
     assert.deepStrictEqual(o.entries, [{ kind: 'template', id: 'a', count: 1 }]);
 });
+
+t.test('startIndex: entry 0 without the no-map skip, reading no count', function () {
+    var w = setup();
+    var reads = 0;
+    var r = w.q.startIndex(w.q.NO_MAP.Pause, 3, function () { reads++; return 0; });
+    assert.deepStrictEqual(plain(r), { index: 0, skipped: [] });
+    assert.strictEqual(reads, 0);
+});
+
+t.test('startIndex with the no-map skip: first entry with a map, none, or a failed read', function () {
+    var w = setup();
+    var skip = w.q.NO_MAP.Skip;
+    function counts(list) { return function (i) { return list[i]; }; }
+    assert.deepStrictEqual(plain(w.q.startIndex(skip, 3, counts([0, 0, 4]))),
+        { index: 2, count: 4, skipped: [0, 1] });
+    assert.deepStrictEqual(plain(w.q.startIndex(skip, 2, counts([0, 0]))),
+        { index: -1, count: 0, skipped: [0, 1] });
+    assert.strictEqual(w.q.startIndex(skip, 3, counts([0, null, 4])), null);
+    assert.deepStrictEqual(plain(w.q.startIndex(skip, 3, counts([2, null, 4]))),
+        { index: 0, count: 2, skipped: [] }, 'a later unreadable entry is not read');
+});
