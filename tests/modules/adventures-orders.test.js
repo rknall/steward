@@ -65,7 +65,9 @@ function homeWorld(o) {
     return w;
 }
 
-// A run of one map at o.step. o.run: run fields set after newRun.
+// Run 1 of a series of two maps at o.step, so a restart after the map still
+// resumes it (the last run of a series is settled once home and is not
+// written to the file). o.run: run fields set after newRun.
 function series(w, o) {
     var r = w.st.newRun({
         id: 42, templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights',
@@ -76,7 +78,7 @@ function series(w, o) {
     var k;
     for (k in (o.run || {})) if (Object.prototype.hasOwnProperty.call(o.run, k)) r[k] = o.run[k];
     w.st.begin({
-        templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 1, ended: false,
+        templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 2, ended: false,
         requested: w.t, finished: 0, closedAt: null
     }, r);
     return w.st.run();

@@ -64,9 +64,24 @@
         return out;
     }
 
+    // A host type or folder label reduced to lower-case letters and digits,
+    // without a plural s: 'MiniMission', 'Mini_Missions' and 'Mini-missions'
+    // all read 'minimission'. The host spelling of a type is not confirmed
+    // (see above), so a folder takes every spelling of its types and of its
+    // own label, and only a type matching none falls to Other.
+    function typeKey(v) {
+        return String(v).toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
+    }
+
     function typeFolder(type) {
+        if (type === null || type === undefined || type === '') return null;
+        var key = typeKey(type);
         for (var i = 0; i < TYPE_FOLDERS.length; i++) {
-            if (TYPE_FOLDERS[i].types.indexOf(type) !== -1) return TYPE_FOLDERS[i].label;
+            var f = TYPE_FOLDERS[i];
+            if (typeKey(f.label) === key) return f.label;
+            for (var j = 0; j < f.types.length; j++) {
+                if (typeKey(f.types[j]) === key) return f.label;
+            }
         }
         return null;
     }

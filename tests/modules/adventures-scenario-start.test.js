@@ -231,6 +231,114 @@ t.test('startScenario on an open map asks the start trip', function () {
     assert.strictEqual(s.prompts[1].def, '1');
 });
 
+t.test('start notice and log name runs and trips apart (#42)', function () {
+    var s = setup(3);
+    s.answer = '2';
+    assert.strictEqual(s.run.startScenario('twins'), true);
+    var n = s.rec.trips.length;
+    assert.ok(lastAlert(s).indexOf('run 1 of 2, trip 1 of ' + n + '.') !== -1, lastAlert(s));
+    var line = s.H.logs().filter(function (l) {
+        return l.args[0] === 'scenario run started from home:';
+    })[0];
+    var text = line.args.join(' ');
+    assert.ok(text.indexOf('run 1 of 2, trip 1 of ' + n) !== -1, text);
+    // From home no map is open yet: the zone is resolved at StartMap.
+    assert.ok(text.indexOf('no map open yet') !== -1, text);
+    assert.ok(text.indexOf('zone null') === -1, text);
+});
+
+t.test('an open map names its zone in the start log', function () {
+    var s = setup(1, { zoneId: 77 });
+    s.answers = ['1', '1'];
+    assert.strictEqual(s.run.startScenario('twins'), true);
+    var line = s.H.logs().filter(function (l) { return l.args[0] === 'scenario run started from home:'; })[0];
+    assert.ok(line.args.join(' ').indexOf('zone 77') !== -1, line.args.join(' '));
+});
+
+// ---- settled series (#64) ---------------------------------------------------------
+
+function savedFile(s) {
+    var k = Object.keys(s.fs.disk).filter(function (p) { return /run\.json$/.test(p); })[0];
+    return JSON.parse(s.fs.disk[k]);
+}
+
+// A started scenario series of `count` runs with `finished` done, the run past
+// its last trip (or at `trip`) and moved to `step`.
+function atStep(count, finished, step, trip) {
+    var s = setup(count);
+    s.answer = String(count);
+    assert.strictEqual(s.run.startScenario('twins'), true);
+    s.st.current().request.finished = finished;
+    var r = s.st.run();
+    r.trip = trip === undefined ? r.trips.length : trip;
+    s.st.go(step, 'test');
+    return s;
+}
+
+t.test('last run home on the home map: the file holds no run, memory keeps it going', function () {
+    var s = atStep(2, 1, 'RunArriveHome');
+    assert.strictEqual(s.st.settled(s.st.current()), true);
+    var f = savedFile(s);
+    assert.strictEqual(f.run, null);
+    assert.strictEqual(f.request, null);
+    assert.ok(s.st.run(), 'the run still finishes in memory');
+    assert.strictEqual(s.st.run().step, s.S.RunStep.ArriveHome);
+    assert.ok(s.H.logs().some(function (l) { return /run state file cleared/.test(String(l.args[0])); }));
+});
+
+t.test('a client restart after the last run came home resumes nothing', function () {
+    var s = atStep(1, 0, 'RunRetrain');
+    var rs = s.st.current();
+    rs.loaded = false;
+    rs.request = null;
+    rs.run = null;
+    s.st.load();
+    assert.strictEqual(s.st.run(), null);
+    assert.strictEqual(s.st.current().request, null);
+});
+
+t.test('a new start after the last run came home does not ask to replace it', function () {
+    var s = atStep(2, 1, 'RunArriveHome');
+    var first = s.st.run().id;
+    s.agree = false;
+    s.answer = '1';
+    assert.strictEqual(s.run.startScenario('twins'), true);
+    assert.strictEqual(s.confirms.length, 0);
+    assert.strictEqual(s.st.current().request.count, 1);
+    assert.strictEqual(s.st.current().request.finished, 0);
+    assert.strictEqual(s.st.run().step, s.S.RunStep.Muster);
+    assert.ok(first !== undefined);
+});
+
+t.test('an unfinished series keeps its run in the file and still asks (run 1 of 3)', function () {
+    var s = atStep(3, 0, 'RunArriveHome');
+    assert.strictEqual(s.st.settled(s.st.current()), false);
+    assert.strictEqual(savedFile(s).run.scenarioId, 'twins');
+    s.agree = false;
+    assert.strictEqual(s.run.startScenario('twins'), false);
+    assert.strictEqual(s.confirms.length, 1);
+});
+
+t.test('the last run is not settled before its last trip or before it is home', function () {
+    var s = atStep(1, 0, 'RunArriveHome', 0);
+    assert.strictEqual(s.st.settled(s.st.current()), false);
+    assert.strictEqual(savedFile(s).run.scenarioId, 'twins');
+    var j = atStep(1, 0, 'RunJumpHome');
+    assert.strictEqual(j.st.settled(j.st.current()), false);
+    assert.strictEqual(savedFile(j).run.scenarioId, 'twins');
+});
+
+t.test('a done series is settled; a stopped one keeps its reason in the file', function () {
+    var s = atStep(1, 0, 'RunNext');
+    s.st.done();
+    assert.strictEqual(s.st.settled(s.st.current()), true);
+    assert.strictEqual(savedFile(s).run, null);
+    var t2 = atStep(2, 0, 'RunMuster', 0);
+    t2.st.stop('troops short');
+    assert.strictEqual(t2.st.settled(t2.st.current()), false);
+    assert.strictEqual(savedFile(t2).run.stopReason, 'troops short');
+});
+
 // ---- bar menu -----------------------------------------------------------------
 
 t.test('run menu of a scenario run: scenario rows, skipped general rows, one Waves row', function () {

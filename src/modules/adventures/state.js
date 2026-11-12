@@ -37,6 +37,9 @@
  * the previous one, so a field that is dropped from the run never lingers;
  * the host settings store is a deep merge and would keep it. File format:
  * JSON.stringify of { version, request, run }, indented.
+ * A settled series (settled(): done, or its last run back on the home map)
+ * is written as no request and no run, so a client restart resumes nothing
+ * and a new start does not ask to replace it.
  *
  * The working copy is S.modules.adventures.runState. The module namespace
  * survives a script reload, so load() reads the file only on a fresh client
@@ -239,6 +242,9 @@
     // write would otherwise warn on every transition.
     var warnedNoDir = false;
     var warnedWrite = false;
+    // Whether the last written file was a settled series (no run), so the
+    // clearing is logged once.
+    var savedSettled = false;
 
     function isArray(v) {
         return Object.prototype.toString.call(v) === '[object Array]';
@@ -670,19 +676,44 @@
         }
     }
 
-    // Pure. Only the persisted part; the memory-only parts are left out.
+    // Pure. Whether the series has nothing left a restart could resume: it
+    // ended Done without a stop reason, or its last run (for a scenario, after
+    // its last trip) has reached the home map, ArriveHome or later. Generals
+    // still travelling and the retrain of that last run do not count, so a
+    // restart or a new start does not ask about a run that is over. A stopped
+    // series keeps its reason, and an earlier run of the series goes on.
+    function settled(rs) {
+        var r = rs ? rs.run : null;
+        if (!r) return false;
+        if (r.status === S.RunStatus.Done) return !r.stopReason;
+        var q = rs.request;
+        var total = q && num(q.count) !== null && q.count >= 1 ? Math.floor(q.count) : 1;
+        if ((q ? count(q.finished) : 0) + 1 < total) return false;
+        if (isScenario(r) && !(isArray(r.trips) && r.trip >= r.trips.length)) return false;
+        return isStep(r.step) && !isWaveStep(r.step) && position(r.step) >= position(S.RunStep.ArriveHome);
+    }
+
+    // Pure. Only the persisted part; the memory-only parts are left out. A
+    // settled series is written as no run, so a client restart starts empty.
     function toFile(rs) {
+        var gone = settled(rs);
         return JSON.stringify({
             version: FILE_VERSION,
-            request: rs.request,
-            run:     rs.run
+            request: gone ? null : rs.request,
+            run:     gone ? null : rs.run
         }, null, 2);
     }
 
     function save() {
         var path = filePath();
         if (!path) return false;
-        var w = S.kernel.files.writeText(path, toFile(current()));
+        var rs = current();
+        var gone = settled(rs);
+        var w = S.kernel.files.writeText(path, toFile(rs));
+        if (w.ok && gone && !savedSettled) {
+            S.kernel.log('adventures', 'run state file cleared: ' + rs.run.label + ' is home after its last run');
+        }
+        if (w.ok) savedSettled = gone;
         if (!w.ok) {
             if (!warnedWrite) {
                 warnedWrite = true;
@@ -1538,6 +1569,7 @@
         kindOff:       kindOff,
         tripLabel:     tripLabel,
         isStep:        isStep,
+        settled:       settled,
         isWaveStep:    isWaveStep,
         partOf:        partOf,
         readyOn:       readyOn,
