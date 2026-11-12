@@ -13,6 +13,10 @@
  * on another zone (passes stop there) or a busy queue (no pass is planned) is
  * not counted. Any step change starts the clock again.
  *
+ * Before the first trip at a stuck position the run sends the client's own
+ * zone refresh (message 1037) once and reads the step again; the trip comes
+ * only if the wait goes on REFRESH_WAIT_MS more.
+ *
  * Only the wave steps and the short island steps take the trip. The long ones
  * (the travel to the map, the last quest) wait for the game on purpose, and
  * the home and any-zone steps are not on the island.
@@ -37,6 +41,8 @@
 
     var RESOLVE_HOME_MS = 300000;   // time the trip stays at home before it goes back
     var RESOLVE_MAX     = 2;        // trips per stuck wave or series step before the pause
+    var REFRESH_MSG     = 1037;     // the client's Update entry: the server resends the viewed zone
+    var REFRESH_WAIT_MS = 300000;   // wait that goes on this long after the refresh still takes the trip
 
     var CATEGORY = 'adventures';
 
@@ -71,13 +77,32 @@
         return typeof a.stuckMinutes === 'function' ? a.stuckMinutes() * 60000 : 0;
     }
 
+    // The lighter resync before the first trip at a stuck position: message
+    // 1037 for the viewed zone, once. The clock is set back so that only a wait
+    // that goes on REFRESH_WAIT_MS more takes the trip. False when it was not
+    // sent, and the trip follows at once.
+    function refresh(r, ms, what) {
+        var limit = limitMs();
+        if (S.core.packets.sendMessage(REFRESH_MSG, null) !== true) return false;
+        var rs = st().current();
+        rs.stuckClock = { since: r.since, last: now(), ms: Math.max(0, limit - REFRESH_WAIT_MS) };
+        log(st().stepName(r.step) + ' waited ' + Math.round(ms / 60000) + ' min (' + what +
+            '); zone refresh sent before any trip');
+        return true;
+    }
+
     // Starts a trip, or pauses once the trips at this stuck position are used
     // up. The text names the wait that did not end.
     function fire(r, ms) {
         var b = st().busyOf(r);
         var what = b ? b.text : 'waiting';
         var mins = Math.round(ms / 60000);
-        if (!st().sameStuck(r, r.step)) r.stuck = { step: r.step, wave: r.waveIndex, trips: 0 };
+        if (!st().sameStuck(r, r.step)) r.stuck = { step: r.step, wave: r.waveIndex, trips: 0, refreshed: false };
+        if (!r.stuck.refreshed) {
+            r.stuck.refreshed = true;
+            st().save();
+            if (refresh(r, ms, what)) return;
+        }
         if (r.stuck.trips >= RESOLVE_MAX) {
             st().pause(S.RunPause.Stuck, 'waited ' + mins + ' min after ' + r.stuck.trips + ' zone trips: ' + what);
             return;

@@ -77,6 +77,15 @@ function homeWorld(o) {
     });
     w.gi = w.H.host.game.gi;
     countVisits(w);
+    w.refreshes = [];
+    var send = w.gi.mClientMessages.SendMessagetoServer;
+    w.gi.mClientMessages.SendMessagetoServer = function (id) {
+        if (id === 1037) {
+            w.refreshes.push({ zone: arguments[1], t: w.t });
+            if (o.noRefresh !== false) throw new Error('refresh off in this test');
+        }
+        return send.apply(this, arguments);
+    };
     return w;
 }
 
@@ -151,6 +160,31 @@ function noTrip(w) {
 function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 // ---- the hang ---------------------------------------------------------------
+
+t.test('hang: a zone refresh goes out once before the trip; a wait that ends after it takes no trip', function () {
+    var w = hangWorld({ noRefresh: false });
+    W.ticksFor(w, 44 * MIN);
+    assert.strictEqual(w.refreshes.length, 0, 'no refresh before the limit');
+    W.ticksFor(w, 2 * MIN);
+    assert.strictEqual(w.refreshes.length, 1, 'one refresh at the limit');
+    assert.strictEqual(w.refreshes[0].zone, ZONE, 'for the viewed zone');
+    assert.strictEqual(w.st.run().resolve, null, 'no trip yet');
+    assert.strictEqual(w.st.run().stuck.refreshed, true);
+    w.g1.state.task = null;
+    W.ticksFor(w, 10 * MIN);
+    assert.strictEqual(w.visits.length, 0, 'the refresh fixed the wait: no trip');
+    assert.strictEqual(w.refreshes.length, 1);
+});
+
+t.test('hang: a wait that goes on after the refresh takes the trip, with no second refresh', function () {
+    var w = hangWorld({ noRefresh: false });
+    W.ticksFor(w, 46 * MIN);
+    assert.strictEqual(w.refreshes.length, 1);
+    assert.strictEqual(visitsTo(w, HOME), 0);
+    W.ticksFor(w, 6 * MIN);
+    assert.strictEqual(visitsTo(w, HOME), 1, 'trip after the wait went on');
+    assert.strictEqual(w.refreshes.length, 1, 'refresh sent once');
+});
 
 t.test('hang: a Gate wait watched past 45 min goes home, waits 5 min, comes back and goes on', function () {
     var w = hangWorld();
@@ -343,7 +377,7 @@ t.test('normRun: resolve and stuck round-trip; bad shapes load as null', functio
     var w2 = W.world({ home: true, fs: w.fs });
     w2.st.load();
     assert.deepStrictEqual(plain(w2.st.run().resolve), { phase: 'wait', at: 123 });
-    assert.deepStrictEqual(plain(w2.st.run().stuck), { step: w.S.WaveStep.Gate, wave: 0, trips: 1 });
+    assert.deepStrictEqual(plain(w2.st.run().stuck), { step: w.S.WaveStep.Gate, wave: 0, trips: 1, refreshed: false });
 
     var data = JSON.parse(w.fs.disk[W.RUN_FILE]);
     data.run.resolve = { phase: 'x' };
