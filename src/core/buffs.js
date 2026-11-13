@@ -31,15 +31,17 @@
     // name. The only place this type name exists.
     var ADVENTURE_MAP_TYPE = 'Adventure';
 
-    // Wire values of the buff action (61): the player's own island grid, the
-    // zone-wide target of a speed buff, and the star-menu type that carries the
-    // population buff. 8825 and 0 are what the client's own buff UI sends; they
-    // exist only here. The population resource name is read from
+    // Wire values of the buff action (61): the player's own island grid and the
+    // zone-wide target of a speed buff. 8825 and 0 are what the client's own buff
+    // UI sends; they exist only here. The population resource name is read from
     // S.core.resources.POPULATION at call time, since that file loads after
     // this one.
     var PLAYER_GRID = 8825;
     var ZONE_GRID = 0;
-    var POPULATION_TYPE = 'AddResource';
+    // Star-menu type of every resource-adding item, population included: the
+    // stack carries any resource, so this is not a population-only type. The
+    // only copy of the literal; other files read it from S.core.buffs.
+    var ADD_RESOURCE_TYPE = 'AddResource';
 
     var BUFF_TIMEOUT_MS = 15000;
     // A camp buff has no retry, so it gets the window of a send and a retry.
@@ -667,8 +669,8 @@
         var total = 0;
         var largest = 0;
         for (var i = 0; i < raw.length; i++) {
-            if (unreadableAs(raw[i], POPULATION_TYPE)) return null;
-            if (raw[i].type !== POPULATION_TYPE || (raw[i].resource || '') !== res) continue;
+            if (unreadableAs(raw[i], ADD_RESOURCE_TYPE)) return null;
+            if (raw[i].type !== ADD_RESOURCE_TYPE || (raw[i].resource || '') !== res) continue;
             var a = raw[i].amount || 0;
             total += a;
             if (a > largest) largest = a;
@@ -686,27 +688,27 @@
             timeoutMs: BUFF_TIMEOUT_MS,
             precheck: function () {
                 if (!isNum(amount) || amount !== Math.floor(amount) || !(amount > 0)) return 'invalid amount';
-                var n = stock(POPULATION_TYPE, populationResource());
+                var n = stock(ADD_RESOURCE_TYPE, populationResource());
                 if (!isNum(n)) return 'buff stock unreadable';
                 if (n < amount) return 'not enough in stock';
-                if (!entryAtLeast(POPULATION_TYPE, populationResource(), amount)) return 'no single stack of ' + amount;
+                if (!entryAtLeast(ADD_RESOURCE_TYPE, populationResource(), amount)) return 'no single stack of ' + amount;
                 if (!isNum(S.core.resources.freePopulation())) return 'free population unreadable';
                 return null;
             },
             baseline: function () {
                 return {
                     free:  S.core.resources.freePopulation(),
-                    stock: stock(POPULATION_TYPE, populationResource())
+                    stock: stock(ADD_RESOURCE_TYPE, populationResource())
                 };
             },
             send: function () {
-                return sendEntry(entryAtLeast(POPULATION_TYPE, populationResource(), amount), PLAYER_GRID, amount);
+                return sendEntry(entryAtLeast(ADD_RESOURCE_TYPE, populationResource(), amount), PLAYER_GRID, amount);
             },
             check: function (base) {
                 if (!base) return false;
                 var free = S.core.resources.freePopulation();
                 if (isNum(free) && isNum(base.free) && free >= base.free + amount) return true;
-                var n = stock(POPULATION_TYPE, populationResource());
+                var n = stock(ADD_RESOURCE_TYPE, populationResource());
                 return isNum(n) && isNum(base.stock) && n <= base.stock - amount;
             },
             describe: function (base) {
@@ -794,6 +796,7 @@
         SPEED_BUFF_PREFIX: SPEED_BUFF_PREFIX,
         PLAYER_GRID:   PLAYER_GRID,
         ZONE_GRID:     ZONE_GRID,
+        ADD_RESOURCE_TYPE: ADD_RESOURCE_TYPE,
         inventory:     inventory,
         entry:         entry,
         stock:         stock,
