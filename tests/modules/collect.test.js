@@ -485,6 +485,23 @@ t.test('the settings column shows the gem pit table with a total under the setti
     t.assert.strictEqual($pits.find('tfoot td').eq(1).text(), '4 (6)');
 });
 
+t.test('the gem pit card shows the time to 20000 gems from the storehouse stock', function () {
+    var r = uiRig([]);
+    var S = r.H.Steward;
+    S.core.events.refill.rates12h = function () {
+        return { rows: [{ building: 'GemPit', grid: 10, rate12h: 2, rate12hBuffed: null }],
+                 totalRate12h: 2, totalRate12hBuffed: null };
+    };
+    S.core.resources.amount = function () { return 19976; };
+    var $side = r.$('<div>');
+    r.mod.side($side, r.h);
+    t.assert.ok($side.text().indexOf('20000 gems in 6d 0h 00m (now 19976)') >= 0, $side.text());
+    S.core.resources.amount = function () { return null; };
+    $side = r.$('<div>');
+    r.mod.side($side, r.h);
+    t.assert.strictEqual($side.text().indexOf('20000 gems'), -1);
+});
+
 t.test('the settings column shows no gem pit table without a pit or off the home island', function () {
     var r = uiRig([]);
     var R = r.H.Steward.core.events.refill;
