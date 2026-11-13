@@ -65,10 +65,10 @@ t.test('adventures registers with a function menu and a misc settings section', 
 t.test('menu without templates lists the fixed rows and a placeholder', function () {
     var s = setup({ buffs: [] });
     assert.deepStrictEqual(menuLabels(s), ['Run templates…', '---', 'No run requested', 'Pause run',
-        'Resume run', 'End repetition', 'Stop run', '---', 'No templates yet']);
+        'Resume run', 'End repetition', 'Skip entry', 'Stop run', '---', 'No templates yet']);
     var items = s.H.module('adventures').menu.items();
     assert.strictEqual(items[2].enabled, false);
-    assert.strictEqual(items[8].enabled, false);
+    assert.strictEqual(items[9].enabled, false);
 });
 
 t.test('menu lists templates in label order with their map counts', function () {
@@ -80,11 +80,11 @@ t.test('menu lists templates in label order with their map counts', function () 
     s.tpl.save(record({}), 1000);
     s.tpl.save(record({ label: 'Alpha', adventure: 'Other' }), 2000);
     var items = s.H.module('adventures').menu.items();
-    assert.strictEqual(items.length, 9);
-    assert.strictEqual(labelOf(items[8]), 'Missions');
-    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return labelOf(it); })),
+    assert.strictEqual(items.length, 10);
+    assert.strictEqual(labelOf(items[9]), 'Missions');
+    assert.deepStrictEqual(plain(items[9].items.map(function (it) { return labelOf(it); })),
         ['Alpha ×0', 'Black Knights ×3']);
-    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return typeof it.enabled === 'function' ? it.enabled({}) : it.enabled; })),
+    assert.deepStrictEqual(plain(items[9].items.map(function (it) { return typeof it.enabled === 'function' ? it.enabled({}) : it.enabled; })),
         [false, true]);
 });
 
@@ -790,8 +790,8 @@ t.test('a menu label shows ×? while the map stock is unreadable', function () {
     s.tpl.save(record({}), 1000);
     s.S.core.buffs.mapCounts = function () { return null; };
     var items = s.H.module('adventures').menu.items();
-    assert.strictEqual(labelOf(items[8]), 'Missions');
-    assert.deepStrictEqual(plain(items[8].items.map(function (it) { return labelOf(it); })), ['Black Knights ×?']);
+    assert.strictEqual(labelOf(items[9]), 'Missions');
+    assert.deepStrictEqual(plain(items[9].items.map(function (it) { return labelOf(it); })), ['Black Knights ×?']);
 });
 
 t.test('start refuses while the map stock is unreadable', function () {

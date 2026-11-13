@@ -190,3 +190,8 @@ why.
 - An item send that made no host call (its star-menu entry has no unique id)
   is tried again, 10 s apart, up to 3 times per grid, then BuffFailed pauses.
   A real packet failure still pauses at once.
+
+## Scenarios in queues
+
+A scenario can be an entry of an adventure queue, mixed with templates; see
+[QUEUES.md](QUEUES.md).

@@ -32,11 +32,26 @@
  * in the labels and says whether one waits long. Every pause the run raises,
  * except the user's own, plays the pause sound (S.core.sound).
  *
+ * A request may carry a queue (request.queue; null for a single run): the
+ * running copy of a saved queue, taken at start, with each entry's
+ * templateId, label, adventure and count already filled in, its position
+ * (index, pass), the loop options, skip (the entries a Skip entry at the
+ * hand-over steps over) and tried (the entry a paused hand-over could not
+ * begin). The request's templateId, label, adventure, count,
+ * finished, closedAt and ended always describe the current entry, so the run
+ * counters and the series test work unchanged inside a queue. enterEntry()
+ * copies an entry's fields into the request as they are; a scenario entry
+ * carries templateId '' like a single scenario request, so nothing here tells
+ * the entry kinds apart, and the kinds and option values have their one home
+ * in the queue store. A queue with an entry still to come is never settled.
+ *
  * Storage: one file, <steward folder>/adventures/run.json, written whole
  * with S.kernel.files.writeText (temp file, then move). The file replaces
  * the previous one, so a field that is dropped from the run never lingers;
  * the host settings store is a deep merge and would keep it. File format:
- * JSON.stringify of { version, request, run }, indented.
+ * JSON.stringify of { version, request, run }, indented. request.queue is
+ * optional, so a file written before queues existed loads with no queue and
+ * the version stays the same.
  * A settled series (settled(): done, or its last run back on the home map)
  * is written as no request and no run, so a client restart resumes nothing
  * and a new start does not ask to replace it.
@@ -229,6 +244,7 @@
     S.RunPause.ItemShort         = 'PauseItemShort';
     S.RunPause.Stuck             = 'PauseStuck';
     S.RunPause.Planned           = 'PausePlanned';
+    S.RunPause.QueueEntry        = 'PauseQueueEntry';
 
     // The phases of the zone trip, persisted in run.json as run.resolve.phase.
     var ResolvePhase = { Home: 'home', Wait: 'wait', Back: 'back' };
@@ -623,6 +639,103 @@
         return q && num(q.count) !== null && q.count >= 1 ? Math.floor(q.count) : 1;
     }
 
+    // ---- Queue --------------------------------------------------------------
+
+    // The position after `from` ({ index, pass }): the next entry of the
+    // pass, else entry 0 of the next pass while the queue loops and passes
+    // are left (passes 0: no limit), else null. Null without a queue.
+    function queueAt(req, from) {
+        var q = req ? req.queue : null;
+        if (!q || !isArray(q.entries) || !from) return null;
+        var index = count(from.index);
+        var pass = count(from.pass);
+        if (index + 1 < q.entries.length) return { index: index + 1, pass: pass };
+        if (q.loop === true && (count(q.passes) === 0 || pass + 1 < count(q.passes))) {
+            return { index: 0, pass: pass + 1 };
+        }
+        return null;
+    }
+
+    // The entry that follows the current one, or null when the queue is over,
+    // was ended by End repetition or there is no queue.
+    function queueNext(req) {
+        if (!req || req.ended === true || !req.queue) return null;
+        return queueAt(req, { index: req.queue.index, pass: req.queue.pass });
+    }
+
+    // The entry the hand-over goes to: the next one, stepped over the
+    // entries Skip entry passed (queue.skip). { at, stepped }: at is null
+    // when the queue ends on the way; stepped counts the step-overs tried.
+    function queueTarget(req) {
+        var at = queueNext(req);
+        var skip = at ? count(req.queue.skip) : 0;
+        var stepped = 0;
+        for (; at && stepped < skip; stepped++) at = queueAt(req, at);
+        return { at: at, stepped: stepped };
+    }
+
+    // The entry a paused hand-over tried: queue.tried, which the hand-over
+    // sets when the entry it reached cannot begin, else queueTarget's. The
+    // two differ when entries with no map were stepped over on the way.
+    function queueTried(req) {
+        var q = req ? req.queue : null;
+        if (q && q.tried && isArray(q.entries) && q.entries[q.tried.index]) return q.tried;
+        return queueTarget(req).at;
+    }
+
+    // The queue.skip that makes the hand-over land past `at`: the step-overs
+    // from the next entry to `at`, plus one. Null when `at` is not on the
+    // way. The walk is bounded, since an endless queue never runs out.
+    function queueSkipPast(req, at) {
+        var pos = queueNext(req);
+        if (!pos || !at) return null;
+        var limit = count(req.queue.skip) + req.queue.entries.length + 1;
+        for (var n = 0; pos && n <= limit; n++) {
+            if (pos.index === at.index && pos.pass === at.pass) return n + 1;
+            pos = queueAt(req, pos);
+        }
+        return null;
+    }
+
+    // Makes the entry at `at` the current one: the queue moves there, any
+    // pending skip is used up, and the entry's fields become the request's,
+    // with no run of it finished yet. closedAt stays, so the gap after the
+    // last closed map still holds for the next entry.
+    function enterEntry(req, at) {
+        var q = req ? req.queue : null;
+        if (!q || !at || !isArray(q.entries)) return false;
+        var index = count(at.index);
+        var e = q.entries[index];
+        if (!e) return false;
+        q.index = index;
+        q.pass = count(at.pass);
+        q.skip = 0;
+        q.tried = null;
+        req.templateId = e.templateId;
+        req.label = e.label;
+        req.adventure = e.adventure;
+        req.count = e.count;
+        req.finished = 0;
+        return true;
+    }
+
+    function queueOf() {
+        var q = current().request;
+        return q && q.queue ? q.queue : null;
+    }
+
+    function plural(n, one, many) {
+        return n + ' ' + (n === 1 ? one : many);
+    }
+
+    // The queue's place, 'Long and short 1/3' and, while it loops,
+    // ', pass 2/3' (2/infinity sign without a pass limit), ending in ': '.
+    function queuePart(q) {
+        var head = q.label + ' ' + (q.index + 1) + '/' + q.entries.length;
+        if (q.loop === true) head += ', pass ' + (q.pass + 1) + '/' + (q.passes > 0 ? q.passes : '\u221e');
+        return head + ': ';
+    }
+
     // The trip of a scenario run ('trip 2/3'), or '' for a template run.
     // r.trip reaches trips.length once the last trip is over, so the label
     // then stays on the last trip.
@@ -634,9 +747,11 @@
     }
 
     // The run and its place in the series, shared by both status texts and
-    // the run menu; a scenario run adds its trip.
+    // the run menu; a scenario run adds its trip and a queue puts its place
+    // in front.
     function runPart(r) {
-        return r.label + ', run ' + (finishedRuns() + 1) + '/' + requestedRuns() +
+        var q = queueOf();
+        return (q ? queuePart(q) : '') + r.label + ', run ' + (finishedRuns() + 1) + '/' + requestedRuns() +
             (isScenario(r) ? ', ' + tripLabel() : '');
     }
 
@@ -650,6 +765,16 @@
             return 'Requested: ' + rs.request.label;
         }
         if (r.status === S.RunStatus.Done) {
+            var q = queueOf();
+            // A stopped queue names the entry it stopped in; a done one ran
+            // all of its entries, so it names the queue alone.
+            if (q && r.stopReason) {
+                return 'Stopped: ' + queuePart(q) + r.label + ', ' + finishedRuns() + ' run(s): ' + r.stopReason;
+            }
+            if (q) {
+                return 'Done: ' + q.label + ', ' + plural(q.entries.length, 'entry', 'entries') +
+                    (q.loop === true ? ', ' + plural(q.pass + 1, 'pass', 'passes') : '');
+            }
             if (r.stopReason) return 'Stopped: ' + r.label + ', ' + finishedRuns() + ' run(s): ' + r.stopReason;
             return 'Done: ' + r.label + ', ' + finishedRuns() + ' run(s)';
         }
@@ -695,12 +820,15 @@
     // its last trip) has reached the home map, ArriveHome or later. Generals
     // still travelling and the retrain of that last run do not count, so a
     // restart or a new start does not ask about a run that is over. A stopped
-    // series keeps its reason, and an earlier run of the series goes on.
+    // series keeps its reason, and an earlier run of the series goes on. A
+    // queue with an entry or a pass still to come goes on as well; Done is
+    // only reached once the queue has ended, so it is tested first.
     function settled(rs) {
         var r = rs ? rs.run : null;
         if (!r) return false;
         if (r.status === S.RunStatus.Done) return !r.stopReason;
         var q = rs.request;
+        if (queueNext(q)) return false;
         var total = q && num(q.count) !== null && q.count >= 1 ? Math.floor(q.count) : 1;
         if ((q ? count(q.finished) : 0) + 1 < total) return false;
         if (isScenario(r) && !(isArray(r.trips) && r.trip >= r.trips.length)) return false;
@@ -895,7 +1023,56 @@
             ended:      q.ended === true,
             requested:  num(q.requested),
             finished:   count(q.finished),
-            closedAt:   num(q.closedAt)
+            closedAt:   num(q.closedAt),
+            queue:      normQueue(q.queue)
+        };
+    }
+
+    // The running copy of a queue. Entries that are no objects are dropped,
+    // and a queue left without entries is no queue: the request then goes on
+    // as the single series of its current entry. retrain and noMap stay the
+    // strings they were; the queue store owns their values and its readers
+    // fall back on its defaults.
+    // The position a paused hand-over tried, or null when it names no entry.
+    function normTried(v, length) {
+        if (!isPlainObject(v)) return null;
+        var index = count(v.index);
+        return index < length ? { index: index, pass: count(v.pass) } : null;
+    }
+
+    function normQueue(v) {
+        if (!isPlainObject(v)) return null;
+        var entries = [];
+        var list = isArray(v.entries) ? v.entries : [];
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i];
+            if (!isPlainObject(e)) continue;
+            var c = num(e.count);
+            entries.push({
+                kind:       str(e.kind),
+                id:         str(e.id),
+                templateId: str(e.templateId),
+                label:      str(e.label),
+                adventure:  str(e.adventure),
+                count:      c !== null && c >= 1 ? Math.floor(c) : 1
+            });
+        }
+        if (!entries.length) return null;
+        var w = num(v.width);
+        return {
+            id:      str(v.id),
+            label:   str(v.label),
+            entries: entries,
+            index:   Math.min(count(v.index), entries.length - 1),
+            loop:    v.loop === true,
+            passes:  count(v.passes),
+            pass:    count(v.pass),
+            early:   v.early === true,
+            retrain: str(v.retrain),
+            noMap:   str(v.noMap),
+            width:   w !== null && w >= 1 ? Math.floor(w) : 1,
+            skip:    count(v.skip),
+            tried:   normTried(v.tried, entries.length)
         };
     }
 
@@ -1587,6 +1764,12 @@
         tripLabel:     tripLabel,
         isStep:        isStep,
         settled:       settled,
+        queueAt:       queueAt,
+        queueNext:     queueNext,
+        queueTarget:   queueTarget,
+        queueTried:    queueTried,
+        queueSkipPast: queueSkipPast,
+        enterEntry:    enterEntry,
         isWaveStep:    isWaveStep,
         partOf:        partOf,
         readyOn:       readyOn,

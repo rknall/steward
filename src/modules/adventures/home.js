@@ -36,11 +36,20 @@
  * Population and Retrain recompute what is missing from the game on every
  * pass, so an order that reached the queue drops out of the plan by itself.
  * Whether lost troops are retrained at all follows the module setting, read
- * each time a step needs it, so a change applies to the running run.
+ * each time a step needs it, so a change applies to the running run. A
+ * running queue whose Retrain option is On or Off decides instead, for every
+ * entry; Follow settings leaves it to the setting.
+ *
+ * In a queue, Next hands over to the next entry once the current one has
+ * run its count: the entry's first run begins at Muster, so its own
+ * generals are gathered there. With the queue's early switch on, the last
+ * run of a template entry goes from ArriveHome straight to Next when another
+ * template or a scenario follows, without waiting for its generals or
+ * retraining their losses.
  *
  * Bundle slot: module file; top level only assigns
- * S.modules.adventures.home; state, loader, executor and every core are read
- * at call time.
+ * S.modules.adventures.home; state, loader, executor, run, queues and every
+ * core are read at call time.
  */
 
 (function (S) {
@@ -76,6 +85,18 @@
         return S.modules.adventures.state.now();
     }
 
+    function run() {
+        return S.modules.adventures.run;
+    }
+
+    function queues() {
+        return S.modules.adventures.queues;
+    }
+
+    function notify(text) {
+        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
+    }
+
     function log(text) {
         S.kernel.log(CATEGORY, st().label() + ': ' + text);
     }
@@ -108,9 +129,24 @@
         return ld().linesOf(r, r.loadoutPath, -1, 'loadout');
     }
 
+    // The running queue's Retrain option when it overrides the setting
+    // (On or Off), else null: no queue, Follow settings, or a value the
+    // queue store does not know.
+    function queueRetrain() {
+        var req = st().current().request;
+        var q = req && req.queue;
+        var Q = queues();
+        if (!q || !Q || !Q.RETRAIN) return null;
+        if (q.retrain === Q.RETRAIN.On || q.retrain === Q.RETRAIN.Off) return q.retrain;
+        return null;
+    }
+
     // The module settings, read late: settings.js may be missing from a
-    // partial load, and a missing reader reads as off.
+    // partial load, and a missing reader reads as off. A queue's own Retrain
+    // option comes first.
     function retrainOn() {
+        var forced = queueRetrain();
+        if (forced !== null) return forced === queues().RETRAIN.On;
         var a = S.modules.adventures;
         return typeof a.retrainOn === 'function' && a.retrainOn() === true;
     }
@@ -490,6 +526,9 @@
     // What a series stopped for short troops tells the user to change.
     function shortHint() {
         if (!retrainOn()) {
+            if (queueRetrain() !== null) {
+                return 'set the Retrain option of the queue to On or Follow settings, then start the queue again';
+            }
             return 'turn on "Retrain lost troops" in Settings > Adventures, then start the run again';
         }
         if (settlersOnly()) {
@@ -792,12 +831,32 @@
 
     // ---- After the map ------------------------------------------------------
 
+    // Whether the last run of a template entry hands over at once: the
+    // queue's early switch is on and the next entry is another template or
+    // a scenario (whose templateId is ''). The same template next needs the
+    // same generals, so it gathers and retrains as a series does.
+    function earlyHandOver(r) {
+        var req = st().current().request;
+        var q = req && req.queue;
+        if (!q || q.early !== true || req.ended === true || st().isScenario(r)) return false;
+        if (st().finishedRuns() + 1 < st().requestedRuns()) return false;
+        var at = st().queueNext(req);
+        var next = at ? q.entries[at.index] : null;
+        return !!next && next.templateId !== r.templateId;
+    }
+
     // A scenario run with a trip left goes back to Produce for it; after its
     // last trip it ends the map like a template run, whose retrain steps its
-    // kind skips on the way to Next.
+    // kind skips on the way to Next. An early hand-over skips the gather and
+    // the retrain; the troops still travelling go with the next entry.
     function arriveHome(r, inv) {
         if (st().isScenario(r) && r.trip < r.trips.length) {
             st().go(S.RunStep.Produce, 'trip ' + (r.trip + 1) + ' next');
+            return;
+        }
+        if (earlyHandOver(r)) {
+            log('early hand-over: retrain skipped');
+            st().go(S.RunStep.Next, 'early hand-over: retrain skipped');
             return;
         }
         gather(r, inv, S.RunStep.Account, 'generals home');
@@ -1061,12 +1120,71 @@
     // with their home count now, so the new run's Snapshot can tell troops
     // that land in between from ones still travelling. That count is waited
     // for, since without it a landing before Snapshot would be counted twice.
+    //
+    // In a queue, an entry that has run its count hands over to the next
+    // entry (the next pass when the queue loops), past the entries a Skip
+    // entry here stepped over. With No map left set to skip, an entry whose
+    // map is used up drops its remaining runs and following entries with no
+    // map are stepped over; a star menu that cannot be read is waited for,
+    // and a looping queue with no map for any entry pauses instead of
+    // spinning. The next entry's first run is built before anything is
+    // counted: a list it needs that cannot be read now is waited for, and an
+    // entry that cannot run pauses here, so Resume repeats this step, Skip
+    // entry steps over it, and the finished run is counted once.
     function nextRun(r, inv) {
-        var q = st().current().request;
+        var req = st().current().request;
+        var q = req && req.queue ? req.queue : null;
         var finished = st().finishedRuns() + 1;
         var total = st().requestedRuns();
-        var last = !q || finished >= total;
-        var carried = last ? [] : st().transit(r).entries;
+        var seriesEnd = !req || finished >= total;
+        var skipMaps = !!q && !!queues() && q.noMap === queues().NO_MAP.Skip;
+        // One star-menu read for every map count of this pass.
+        var pass = {};
+        var notes = [];
+        var mapSkipped = [];
+        var stepped = 0;
+        var n;
+        if (skipMaps && !seriesEnd) {
+            n = run().available(req.adventure, pass);
+            if (n === null) {
+                ld().waitRead(r, 'star menu');
+                return;
+            }
+            if (n === 0) {
+                seriesEnd = true;
+                notes.push('no map left for ' + req.label + ': ' + (total - finished) + ' run(s) dropped');
+                mapSkipped.push(req.label);
+            }
+        }
+        var target = (q && seriesEnd) ? st().queueTarget(req) : { at: null, stepped: 0 };
+        var at = target.at;
+        stepped += target.stepped;
+        if (at && skipMaps) {
+            // Every entry looked at once with no map: a loop would only come
+            // round to them again.
+            var empty = 0;
+            while (at) {
+                var entry = q.entries[at.index];
+                n = run().available(entry.adventure, pass);
+                if (n === null) {
+                    ld().waitRead(r, 'star menu');
+                    return;
+                }
+                if (n > 0) break;
+                notes.push('no map left for ' + entry.label + ': ' + entry.count + ' run(s) dropped');
+                mapSkipped.push(entry.label);
+                stepped++;
+                empty++;
+                at = st().queueAt(req, at);
+                if (at && empty >= q.entries.length) {
+                    q.tried = null;
+                    st().pause(S.RunPause.QueueEntry, 'no map for any queue entry');
+                    return;
+                }
+            }
+        }
+        var over = !req || (seriesEnd && !at);
+        var carried = over ? [] : st().transit(r).entries;
         var base = null;
         if (carried.length) {
             // Before the counter changes, so the wait repeats this step only.
@@ -1076,13 +1194,46 @@
                 return;
             }
         }
-        if (q) q.finished = finished;
+        var e = null;
+        if (at) {
+            var next = q.entries[at.index];
+            e = run().entryRun(next);
+            if (e.retry) {
+                ld().waitRead(r, e.message);
+                return;
+            }
+            if (!e.ok) {
+                // Skip entry steps past this entry, which may lie beyond
+                // the one queue.skip reaches when no-map entries came first.
+                q.tried = { index: at.index, pass: at.pass };
+                st().pause(S.RunPause.QueueEntry, next.label + ': ' + e.message);
+                return;
+            }
+        }
+        if (req) req.finished = finished;
         S.kernel.log(CATEGORY, 'run ' + finished + '/' + total + ' done: ' + r.label);
-        if (last) {
+        for (var k = 0; k < notes.length; k++) S.kernel.log(CATEGORY, notes[k]);
+        if (stepped > 0) S.kernel.log(CATEGORY, 'queue ' + q.label + ': ' + stepped + ' entry(ies) skipped');
+        if (mapSkipped.length) notify('Skipped ' + mapSkipped.join(', ') + ': no map left in the star menu.');
+        if (over) {
+            if (q) q.skip = 0;
             st().done();
             return;
         }
-        st().begin(q, st().newRun({
+        if (at) {
+            st().enterEntry(req, at);
+            var first = e.run;
+            // A new id, so nothing of the finished run is taken for this one.
+            // Nothing else of it is copied: the entry may be of another kind.
+            first.id = Math.max(now(), r.id + 1);
+            first.transit = carried;
+            first.transitBase = base;
+            st().begin(req, first);
+            S.kernel.log(CATEGORY, 'queue ' + q.label + ': entry ' + (at.index + 1) + '/' + q.entries.length +
+                ' begins: ' + req.label + (q.loop === true ? ', pass ' + (at.pass + 1) : ''));
+            return;
+        }
+        st().begin(req, st().newRun({
             // A new id, so nothing of the finished run is taken for this one.
             id:          Math.max(now(), r.id + 1),
             templateId:  r.templateId,

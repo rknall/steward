@@ -2,13 +2,20 @@
  * Adventures submenu of the native ~Steward~ menu.
  *
  * Layout: "Run templates…", the run status line, "Pause run", "Resume
- * run", "End repetition", "Stop run", then the templates in category
+ * run", "End repetition", "Skip entry", "Stop run", then the templates in category
  * folders (Missions, Mini-missions, Co-op missions, Ventures, Events,
- * Other), a separator and one Scenarios folder. An adventure with a host
+ * Other), a separator and one Scenarios folder, then one Queues folder
+ * after it. An adventure with a host
  * campaign gets a sub-folder named after it inside its folder, listed above
  * the loose entries. A folder exists only when it holds an entry. Choosing a
  * template or scenario starts a run of it. Every row only changes run state;
  * the scheduler's plan() does the work.
+ *
+ * A queue row starts the saved queue at its first entry. Its label shows the
+ * entry count and the maps for the entry Start would begin with: the first
+ * entry, or with the queue's no-map skip the first entry that has a map. Like
+ * a scenario row it is greyed with no map. Both kinds of entry are read once,
+ * when the menu is built, so a status pass reads no file.
  *
  * Where an adventure belongs comes from S.core.adventures.folderPath (host
  * type, campaign and requiresEvent, with an Other fallback that names the
@@ -16,7 +23,8 @@
  * game's adventure definitions, which are empty while the game is still
  * loading at menu build. Until they are readable the menu shows one greyed
  * "Templates (loading…)" row and, after a separator, one greyed "Scenarios
- * (loading…)" row instead of folders that would move after load.
+ * (loading…)" row instead of folders that would move after load; a Queues
+ * (loading…) row stands in for the Queues folder the same way.
  *
  * Every template and scenario row is labelled with the maps available for
  * its adventure and is greyed when there is none. A pass where the star menu
@@ -89,10 +97,19 @@
         return S.core.adventures.folderPath(defOf(index, adventure), scenario).join('/');
     }
 
+    // The saved queues, broken ones included; empty when the store is not
+    // loaded.
+    function queueEntries() {
+        var q = S.modules.adventures.queues;
+        return q && q.list ? q.list() : [];
+    }
+
     // recs: the readable templates; scens: the scenario entries, whose parts
     // are prefixed so a scenario never matches a template of the same id;
-    // index: the definitions by name, or null while they are not readable.
-    function signature(recs, scens, index) {
+    // index: the definitions by name, or null while they are not readable;
+    // qs: the queue entries, prefixed likewise, with what each lists so a
+    // changed entry list rebuilds the row's text.
+    function signature(recs, scens, index, qs) {
         var parts = [];
         var i;
         index = index || null;
@@ -105,6 +122,11 @@
             parts.push('s:' + scens[i].id + '\t' + (scens[i].error !== undefined ? '!'
                 : scens[i].label + '\t' + scens[i].adventure + '\t'
                     + pathKey(index, scens[i].adventure, true)));
+        }
+        qs = qs || [];
+        for (i = 0; i < qs.length; i++) {
+            parts.push('q:' + qs[i].id + '\t' + (qs[i].error !== undefined ? '!' : qs[i].label + '\t' + qs[i].noMap
+                + '\t' + qs[i].entries.map(function (e) { return e.kind + ':' + e.id; }).join(',')));
         }
         return parts.join('\n');
     }
@@ -124,13 +146,18 @@
     // an unreadable pass leaves it, and a row never read yet stays greyed.
     // A function, so each row captures its own state (ES5 has no block scope).
     function mapRow(text, adventure, onSelect) {
+        return countRow(text, function (pass) { return mapsOf(adventure, pass); }, onSelect);
+    }
+
+    // The same row for a count that countOf(pass) works out.
+    function countRow(text, countOf, onSelect) {
         var on = false;
         return {
             label: function (pass) {
-                return text + ' ×' + countText(mapsOf(adventure, pass));
+                return text + ' ×' + countText(countOf(pass));
             },
             enabled: function (pass) {
-                var n = mapsOf(adventure, pass);
+                var n = countOf(pass);
                 if (n !== null) on = n > 0;
                 return on;
             },
@@ -152,6 +179,52 @@
             var run = S.modules.adventures.run;
             if (run) run.startScenario(rec.id);
         });
+    }
+
+    // The maps of the entry a queue's Start begins with (queues.startIndex).
+    // advs: the adventure of each entry, null where its record cannot be
+    // read, which counts as no map. null while a star menu read fails before
+    // that entry is found, 0 when none has a map.
+    function queueMaps(rec, advs, pass) {
+        var countOf = function (i) { return advs[i] ? mapsOf(advs[i], pass) : 0; };
+        var r = S.modules.adventures.queues.startIndex(rec.noMap, advs.length, countOf);
+        if (!r) return null;
+        if (r.index < 0) return 0;
+        return r.count !== undefined ? r.count : countOf(r.index);
+    }
+
+    function queueItem(rec) {
+        if (rec.error !== undefined) {
+            return { label: rec.id + S.modules.adventures.templates.EXT + ' (unreadable)', enabled: false };
+        }
+        var qs = S.modules.adventures.queues;
+        var advs = [];
+        for (var i = 0; i < rec.entries.length; i++) {
+            var er = qs.entryRecord(rec.entries[i]);
+            advs.push(er ? er.adventure : null);
+        }
+        var k = rec.entries.length;
+        return countRow(rec.label + ' (' + k + (k === 1 ? ' entry)' : ' entries)'), function (pass) {
+            return queueMaps(rec, advs, pass);
+        }, function () {
+            var run = S.modules.adventures.run;
+            if (run) run.startQueue(rec.id);
+        });
+    }
+
+    // One flat Queues folder; broken files last. Nothing without a queue.
+    function queueItems(qs, index) {
+        if (!qs.length) return [];
+        if (!index) return [loadingRow('Queues (loading…)')];
+        var rows = [];
+        var i;
+        for (i = 0; i < qs.length; i++) {
+            if (qs[i].error === undefined) rows.push(queueItem(qs[i]));
+        }
+        for (i = 0; i < qs.length; i++) {
+            if (qs[i].error !== undefined) rows.push(queueItem(qs[i]));
+        }
+        return [{ label: 'Queues', items: rows }];
     }
 
     // Turns [{ path, item }] into menu items. Nodes are made only on insert,
@@ -250,6 +323,7 @@
         { label: 'Pause run',      name: 'pause' },
         { label: 'Resume run',     name: 'resume' },
         { label: 'End repetition', name: 'endRepetition' },
+        { label: 'Skip entry',     name: 'skipEntry' },
         { label: 'Stop run',       name: 'stop' }
     ];
 
@@ -296,7 +370,8 @@
         var recs = records();
         var scens = scenarioEntries();
         var index = readIndex();
-        lastSignature = signature(recs, scens, index);
+        var qs = queueEntries();
+        lastSignature = signature(recs, scens, index, qs);
         if (index) regrouped = true;
 
         var list = [
@@ -324,13 +399,16 @@
             list.push({ separator: true });
             list = list.concat(scenarioItems(scens, index));
         }
+        // After Scenarios; a queue alone gets its own separator from the templates.
+        if (qs.length && !scens.length) list.push({ separator: true });
+        list = list.concat(queueItems(qs, index));
         return list;
     }
 
     // Rebuilds the submenu when the template or scenario set, or a folder,
     // differs from the last build.
     function sync() {
-        if (signature(records(), scenarioEntries(), readIndex()) === lastSignature) return false;
+        if (signature(records(), scenarioEntries(), readIndex(), queueEntries()) === lastSignature) return false;
         var ui = S.kernel.ui;
         return ui && ui.refreshModuleMenu ? ui.refreshModuleMenu('adventures') : false;
     }
