@@ -495,11 +495,11 @@ t.test('the gem pit card shows the time to 20000 gems from the storehouse stock'
     S.core.resources.amount = function () { return 19976; };
     var $side = r.$('<div>');
     r.mod.side($side, r.h);
-    t.assert.ok($side.text().indexOf('20000 gems in 6d 0h 00m (now 19976)') >= 0, $side.text());
+    t.assert.ok($side.text().indexOf('20000 Gems in 6d 0h 00m (now 19976)') >= 0, $side.text());
     S.core.resources.amount = function () { return null; };
     $side = r.$('<div>');
     r.mod.side($side, r.h);
-    t.assert.strictEqual($side.text().indexOf('20000 gems'), -1);
+    t.assert.strictEqual($side.text().indexOf('20000 Gems'), -1);
 });
 
 t.test('the settings column shows no gem pit table without a pit or off the home island', function () {

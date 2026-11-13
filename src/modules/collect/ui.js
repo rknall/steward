@@ -146,7 +146,7 @@
     }
 
     // The host's resource name for gems and the stock the pits are counted towards.
-    var GEM_RESOURCE = 'Gem';
+    var GEM_RESOURCE = 'HardCurrency';
     var GEM_TARGET = 20000;
 
     // Days, hours and minutes, e.g. "2d 3h 05m".
@@ -165,11 +165,11 @@
         try { have = S.core.resources.amount(GEM_RESOURCE); }
         catch (e) { have = null; }
         if (typeof have !== 'number') return null;
-        if (have >= GEM_TARGET) return GEM_TARGET + ' gems reached';
+        if (have >= GEM_TARGET) return GEM_TARGET + ' Gems reached';
         var rate = (typeof res.totalRate12hBuffed === 'number') ? res.totalRate12hBuffed : res.totalRate12h;
         if (typeof rate !== 'number' || !(rate > 0)) return null;
         var ms = (GEM_TARGET - have) / rate * 12 * 3600000;
-        return GEM_TARGET + ' gems in ' + daysHoursMinutes(ms) + ' (now ' + have + ')';
+        return GEM_TARGET + ' Gems in ' + daysHoursMinutes(ms) + ' (now ' + have + ')';
     }
 
     function gemPitCard(h, res) {
