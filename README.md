@@ -34,6 +34,7 @@ Steward stands on the work of others, and a big thank you goes to them:
 | explorers | Sends idle explorers to the task chosen by the precedence chain in `docs/CORE_USAGE.md`. |
 | geologists | Sends idle geologists to deposit-search tasks, up to the wanted number of deposits per type. |
 | mining | Builds, upgrades, pauses and buffs the mines and masons on the home island. |
+| rebuild | Rebuilds exhausted wells and fields with the chosen well and field type, one per free build-queue slot. |
 | updater | Checks GitHub Releases, installs a chosen release and steps down to an older one. |
 
 ## Install
