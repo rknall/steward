@@ -247,6 +247,19 @@ t.test('buffBlock: a throwing blocker blocks', function () {
     t.assert.strictEqual(B.buffBlock(b), 'IsInDestruction unreadable');
 });
 
+t.test('inDestruction: true, false, absent method, throwing method, no building', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.inDestruction(H.zone.building({ productionState: 0, destroying: true })), true);
+    t.assert.strictEqual(B.inDestruction(H.zone.building({ productionState: 0, destroying: false })), false);
+    // A build without the method cannot say the building is coming down.
+    t.assert.strictEqual(B.inDestruction(H.zone.building({ productionState: 0 })), false);
+    var b = H.zone.building({ productionState: 0 });
+    b.IsInDestruction = function () { throw new Error('boom'); };
+    t.assert.strictEqual(B.inDestruction(b), null);
+    t.assert.strictEqual(B.inDestruction(null), null);
+});
+
 t.test('buffState reports presence and mBuffs_vector length', function () {
     var H = harness.boot();
     var B = H.Steward.core.buildings;

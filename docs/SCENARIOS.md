@@ -80,7 +80,19 @@ then repeats maps like a template series.
 - Send to a grid: `min(amount - taken, stock)` for an item with an amount, where
   `taken` is what all the item's grids together have taken this trip (0 at first);
   `min(1 - taken, stock)` with `taken` of that grid alone for an item without one.
-  Stock is logged before and after.
+  Stock is logged before and after. A send is also capped by the largest single
+  stack of the item: the star menu can split a stock over several entries and one
+  send takes from one entry, so with 6 and 4 in stock the most offered is 6
+  (logged as `largest stack 6`). An amount that no single entry holds is refused
+  by the send check (`no single stack of 10`) and the run pauses BuffFailed.
+- Send checks: before a send the run reads the building standing at the grid
+  again. If it differs from the one the target was chosen on (a ruin became a
+  site, a building was removed or finished its destruction), nothing is sent. The
+  log says `not sent, the building at the grid changed since the target was chosen
+  (was X, now Y)`, and the grid is decided again about 10 s later on a fresh read.
+  A grid that changes on every try pauses BuffFailed after three tries
+  ("nothing sent after 3 tries"). Every item send also logs one line
+  (`item <buff> -> <grid>: entries ...`), see In-game checks.
 - Quest gating (strict): on the run's island an item is applied and a map
   object is picked up only while a running quest asks for it explicitly. A map
   pick-up is either a click-trigger object or a host collectible that a quest's
@@ -154,13 +166,23 @@ item strings, trigger index and status) and the last-quest marker. If the
 marker is missing, Clear pauses with "last quest not listed" and the dump shows
 why.
 
+Every item send logs one line before it goes out:
+`item <buff> -> <grid>: entries <stacks>; building <name|none>[ (first seen
+<name>)] grid <grid of the building>, buffs <n>, in destruction <t|f|?>; targets
+<list|none> group <group|none> via <name|group|no|->`. `entries` lists each
+star-menu stack as `<amount>[<unique id>]` (`?` for an unreadable entry). Read
+this line first when a send was refused: it shows what the send saw.
+
 ## Known limits
 
 - Grid-done rule: each grid records what it has taken, and the item's trip total
   is the sum over its grids. A send that takes less than offered keeps the grid
   open and the rest (`amount - taken over the trip`) goes to the same grid next,
   until the item's grids together took the amount, the quest no longer wants the
-  item, or a send takes nothing. A stock-capped grid (it took everything offered)
+  item, or a send takes nothing. The exception is an item with more than one
+  grid: a short take closes that grid (logged as `grid full, the rest goes to
+  the other grids`) and the rest goes to the item's other open grids. A single-grid
+  item keeps its grid open as described above. A stock-capped grid (it took everything offered)
   whose building is gone or being destroyed is done. After a client reload the
   gone building is unknown, so the top-up send closes the grid instead.
 - Need is not reduced by what grids already took, so after a fallback stock-out

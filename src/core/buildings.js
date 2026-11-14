@@ -29,10 +29,11 @@
 
     // Optional host methods that say a building cannot take a buff right now.
     // Feature-detected: buffState records whether each exists.
+    var DESTRUCTION_METHOD = 'IsInDestruction';
     var BUFF_BLOCKERS = [
         { method: 'IsUpgradeInProgress', reason: 'upgrading' },
         { method: 'IsInConstructionMode', reason: 'under construction' },
-        { method: 'IsInDestruction', reason: 'being destroyed' }
+        { method: DESTRUCTION_METHOD, reason: 'being destroyed' }
     ];
 
     // Whether a blocker method the build does not have blocks the building.
@@ -533,6 +534,23 @@
         return null;
     }
 
+    // True when the building is being destroyed, false when it is not or the host
+    // has no such method, null when there is no building or the method is present
+    // but its call fails. Callers log this; a destroyed building is not refused
+    // on it, because a designed flow can send to a building that is coming down.
+    function inDestruction(b) {
+        var st = buffState(b);
+        if (!st) return null;
+        for (var i = 0; i < st.blockers.length; i++) {
+            var bl = st.blockers[i];
+            if (bl.method !== DESTRUCTION_METHOD) continue;
+            if (!bl.present) return false;
+            if (bl.value === null) return null;
+            return bl.value ? true : false;
+        }
+        return false;
+    }
+
     // True/false when the building shows a running production buff, null when
     // the host cannot answer.
     function hasProductionBuff(b) {
@@ -585,6 +603,7 @@
         buffRemainingMs:   buffRemainingMs,
         buffState:         buffState,
         buffBlock:         buffBlock,
+        inDestruction:     inDestruction,
         hasProductionBuff: hasProductionBuff,
         productionBuffInfo: productionBuffInfo,
         BUFF_BLOCKERS:     BUFF_BLOCKERS,

@@ -535,6 +535,140 @@ t.test('targetsOf is empty when the def or the method is missing', function () {
     assert.deepStrictEqual(plain(s2.buffs.targetsOf('ItemA')), []);
 });
 
+// A building stand-in the precheck can name.
+function standing(nm) {
+    return { GetBuildingName_string: function () { return nm; } };
+}
+
+function notSentWarns(s, text) {
+    return s.H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'buffs' && JSON.stringify(l).indexOf(text) !== -1;
+    });
+}
+
+t.test('adventureItem refuses a stock split so that no single stack holds the amount', function () {
+    var s = acting({ buffs: [
+        { type: 'ItemA', amount: 6, uid: 'a' },
+        { type: 'ItemA', amount: 4, uid: 'b' }
+    ] });
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, 'no single stack of 10');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('adventureItem sends from the stack that holds the amount', function () {
+    var big = { type: 'ItemA', amount: 10, uid: 'b' };
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 4, uid: 'a' }, big] });
+    s.env.onSend = function (a) { big.amount -= a.p3; };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10));
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions.length, 1);
+    assert.strictEqual(s.sent.actions[0].p3, 10);
+    assert.strictEqual(s.sent.actions[0].data.toKeyString(), 'b');
+});
+
+t.test('adventureItem: another building at the grid than the one chosen on sends nothing', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    s.env.buildings[7] = standing('B');
+    s.H.clearLogs();
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10, { building: 'A' }));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, 'nothing sent');
+    assert.strictEqual(s.sent.actions.length, 0);
+    assert.strictEqual(notSentWarns(s, 'was A, now B').length, 1);
+});
+
+t.test('adventureItem: a building chosen but gone from the grid sends nothing', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    s.H.clearLogs();
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10, { building: 'A' }));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, 'nothing sent');
+    assert.strictEqual(s.sent.actions.length, 0);
+    assert.strictEqual(notSentWarns(s, 'was A, now none').length, 1);
+});
+
+t.test('adventureItem: an empty grid chosen and still empty sends', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    s.env.onSend = function (a) { buff.amount -= a.p3; };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10, { building: '' }));
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions.length, 1);
+});
+
+t.test('adventureItem: the building chosen still standing sends', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    s.env.buildings[7] = standing('A');
+    s.env.onSend = function (a) { buff.amount -= a.p3; };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10, { building: 'A' }));
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(s.sent.actions.length, 1);
+});
+
+t.test('adventureItem: a grid read that throws counts as no building and sends nothing', function () {
+    var s = acting({ buffs: [{ type: 'ItemA', amount: 20 }] });
+    s.S.core.buildings.byGrid = function () { throw new Error('boom'); };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10, { building: 'A' }));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.strictEqual(res.reason, 'nothing sent');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('adventureItem without opts reads no building', function () {
+    var buff = { type: 'ItemA', amount: 20 };
+    var s = acting({ buffs: [buff] });
+    var reads = 0;
+    s.S.core.buildings.byGrid = function () { reads++; return standing('Z'); };
+    s.env.onSend = function (a) { buff.amount -= a.p3; };
+    var res = run(s, s.buffs.adventureItem('ItemA', 7, 10));
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.strictEqual(reads, 0);
+});
+
+t.test('stack returns the total and largest stack of exactly the type and resource', function () {
+    var s = acting({ buffs: [
+        { type: 'ItemA', amount: 6, uid: 'a' },
+        { type: 'ItemA', amount: 4, uid: 'b' },
+        { type: 'ItemA', amount: 9, resource: 'Coal', uid: 'c' },
+        { type: 'ItemB', amount: 50, uid: 'd' }
+    ] });
+    assert.deepStrictEqual(plain(s.buffs.stack('ItemA', '')), { total: 10, largest: 6 });
+    assert.deepStrictEqual(plain(s.buffs.stack('ItemA', 'Coal')), { total: 9, largest: 9 });
+    assert.deepStrictEqual(plain(s.buffs.stack('ItemZ', '')), { total: 0, largest: 0 });
+    breakStock(s);
+    assert.strictEqual(s.buffs.stack('ItemA', ''), null);
+});
+
+t.test('adventureTarget: name match, no match, and an empty definition', function () {
+    var s = setup({ buffs: [], buffDefs: {
+        Named: bdef(0, 'Bakery, IronMine'),
+        Other: bdef(0, 'Bakery'),
+        Empty: bdef(0, '')
+    } });
+    var named = plain(s.buffs.adventureTarget('Named', 'IronMine'));
+    assert.deepStrictEqual(named.targets, ['Bakery', 'IronMine']);
+    assert.strictEqual(named.group, '');
+    assert.strictEqual(named.via, 'name');
+    assert.strictEqual(s.buffs.adventureTarget('Other', 'IronMine').via, null);
+    var empty = plain(s.buffs.adventureTarget('Empty', 'IronMine'));
+    assert.deepStrictEqual(empty.targets, []);
+    assert.strictEqual(empty.group, '');
+    assert.strictEqual(empty.via, null);
+    // No building standing: nothing to relate the definition to.
+    assert.strictEqual(s.buffs.adventureTarget('Named', '').via, null);
+});
+
+t.test('adventureTarget reaches a building through the target group', function () {
+    var s = setup({ buffs: [], buffDefs: { Grouped: bdef(0, '', 'Mines') } });
+    withGroups(s);
+    assert.strictEqual(s.buffs.adventureTarget('Grouped', 'IronMine').group, 'Mines');
+    assert.strictEqual(s.buffs.adventureTarget('Grouped', 'IronMine').via, 'group');
+    assert.strictEqual(s.buffs.adventureTarget('Grouped', 'Bakery').via, null);
+});
+
 // ---- building production buffs ------------------------------------------------
 
 var Z = require('../stubs/zone');

@@ -35,9 +35,16 @@
  * each grid has taken so far, and while the item's grids together are short
  * of the amount the grid stays open and the rest is offered to the same grid
  * next, until the item has taken the amount, the quest no longer wants the
- * item, a send shows no drop at all (the grid was already full), or the
- * building first seen at the grid is gone or being destroyed after the grid
- * took something (nothing is left there to take more). Out of stock, Apply
+ * item, a send shows no drop at all (the grid was already full), the grid of
+ * an item with several grids took less than it was offered (it is full; the
+ * rest goes to the other grids), or the building first seen at the grid is
+ * gone or being destroyed after the grid took something (nothing is left
+ * there to take more). A send offers at most the largest single stack, since
+ * one buff action spends one star-menu entry. The building read when the
+ * target is chosen goes with the send: the action may run later, and when
+ * another building stands at the grid by then nothing is sent and the next
+ * round decides again. Every send logs one 'item ... entries' line with the
+ * star-menu entries, the building and the item's targets. Out of stock, Apply
  * first sends the other items a running quest wants that are in stock; a
  * grid the out-of-stock item still owes is held back from every later item,
  * so the file order on a shared grid holds. Once nothing else can go the run
@@ -485,6 +492,44 @@
         return { b: b, cur: cur, first: first };
     }
 
+    // The diagnostic line of an item send, from s (gridSeen of the grid): the
+    // star-menu entries of the item, the building and what the item's
+    // definition targets. A refused or refunded send can then be read from
+    // the log later. Text only, and every read is guarded so it never throws.
+    function sendNote(b, grid, s) {
+        var ents = [];
+        try {
+            var inv = S.core.buffs.inventory() || [];
+            for (var i = 0; i < inv.length; i++) {
+                if (inv[i].type !== b || (inv[i].resource || '') !== '') continue;
+                ents.push(inv[i].bad ? '?' : inv[i].amount + '[' + (inv[i].uid || '') + ']');
+            }
+        } catch (e) {
+            ents = ['?'];
+        }
+        var own = null;
+        var nb = null;
+        var des = null;
+        try { own = S.core.buildings.grid(s.b); } catch (e2) { own = null; }
+        try {
+            var bs = S.core.buildings.buffState(s.b);
+            nb = bs ? bs.buffsVector : null;
+        } catch (e3) { nb = null; }
+        try { des = S.core.buildings.inDestruction(s.b); } catch (e4) { des = null; }
+        var tgt = null;
+        try { tgt = S.core.buffs.adventureTarget(b, s.cur); } catch (e5) { tgt = null; }
+        var targets = tgt && tgt.targets && tgt.targets.length ? tgt.targets.join(',') : 'none';
+        var group = tgt && tgt.group ? tgt.group : 'none';
+        var via = !tgt ? '?' : (!s.cur ? '-' : (tgt.via || 'no'));
+        return 'item ' + b + ' -> ' + grid + ': entries ' + (ents.length ? ents.join(',') : 'none') +
+            '; building ' + (s.cur || 'none') +
+            (s.first && s.first !== s.cur ? ' (first seen ' + s.first + ')' : '') +
+            ' grid ' + (own === null ? '?' : own) +
+            ', buffs ' + (typeof nb === 'number' ? nb : '?') +
+            ', in destruction ' + (des === true ? 'true' : (des === false ? 'false' : '?')) +
+            '; targets ' + targets + ' group ' + group + ' via ' + via;
+    }
+
     // Whether the building first seen at grid is gone: no named building
     // stands there now, or the one there is being destroyed. A grid never
     // named on this run and trip is never gone, since there is nothing to
@@ -493,17 +538,11 @@
         var s = gridSeen(r, grid);
         if (!s.first) return false;
         if (s.cur === '') return true;
-        var bs = null;
         try {
-            bs = S.core.buildings.buffState(s.b);
+            return S.core.buildings.inDestruction(s.b) === true;
         } catch (e) {
-            bs = null;
+            return false;
         }
-        var list = bs && bs.blockers ? bs.blockers : [];
-        for (var i = 0; i < list.length; i++) {
-            if (list[i].method === 'IsInDestruction' && list[i].value === true) return true;
-        }
-        return false;
     }
 
     // What grid has taken of buff on this trip so far (its part mark).
@@ -616,7 +655,12 @@
     // the next round offers the rest, unless the grid took all it was offered
     // and its building is gone (nothing left there to take more). A take of
     // nothing ends the grid as before, so a grid is never offered forever.
-    function applied(name, part, b, grid, offered, goal, before, given, q0, def) {
+    // A grid that took some but less than it was offered is full. When the
+    // item has other grids (multi) that grid is done and its part mark keeps
+    // the take, so the rest is offered to the next open grid; a single-grid
+    // item has nowhere else to go and is offered the rest on the same grid,
+    // since the game can take an item in several parts there.
+    function applied(name, part, b, grid, offered, goal, before, given, q0, def, multi) {
         return function (result, cur) {
             if (!result || result.status !== S.ActionResult.Verified) return;
             var took = def.dropped();
@@ -641,6 +685,12 @@
             if (took >= offered && buildingGone(cur, grid)) {
                 ld().markSeen(cur, name);
                 log(b + ' -> ' + grid + ': took all ' + offered + ' offered; building gone, grid done');
+                return;
+            }
+            if (took < offered && multi) {
+                ld().markSeen(cur, name);
+                log(b + ' -> ' + grid + ': took ' + took + ' of ' + offered + ' (' + sofar + ' of ' + goal +
+                    ' so far); grid full, the rest goes to the other grids');
                 return;
             }
             ld().dropMark(cur, name);
@@ -785,13 +835,14 @@
             }
             if (at === null) continue;
             if (wants === 'open') {
-                var have = S.core.buffs.stock(buff, '');
-                if (typeof have !== 'number') {
+                var sk = S.core.buffs.stack(buff, '');
+                if (!sk || typeof sk.total !== 'number') {
                     ld().waitRead(r, 'item stock');
                     return;
                 }
+                var have = sk.total;
                 if (have > 0) {
-                    target = { item: items[i], grid: at, stock: have };
+                    target = { item: items[i], grid: at, stock: have, largest: sk.largest };
                     break;
                 }
                 shorts.push({ buff: buff, left: openOf[i].length - skipped });
@@ -876,16 +927,26 @@
             log(b + ' -> ' + tg + ': amount already taken; grid done');
             return;
         }
+        // One buff action spends one star-menu entry, so the offer is capped
+        // at the largest stack; a capped send that is taken in full is a
+        // stock-capped take and the grid stays open for the next stack.
         var stock = target.stock;
-        var amount = Math.min(remaining, stock);
+        var largest = typeof target.largest === 'number' ? target.largest : stock;
+        var amount = Math.min(remaining, stock, largest);
         var q0 = S.core.production.queuedItems(b);
-        log('apply ' + b + ' x' + amount + ' -> ' + tg + ' (stock ' + stock + ')');
+        // The grid as the send was decided on: the send refuses (NOT_SENT) if
+        // another building stands there by the time the action runs.
+        var seen = gridSeen(r, tg);
+        log(sendNote(b, tg, seen));
+        log('apply ' + b + ' x' + amount + ' -> ' + tg + ' (stock ' + stock +
+            (largest < stock ? ', largest stack ' + largest : '') + ')');
         // A send is progress: the next item wait starts its quiet time afresh.
         st().current().applyClock = null;
-        var def = S.core.buffs.adventureItem(b, tg, amount);
+        var def = S.core.buffs.adventureItem(b, tg, amount, { building: seen.cur });
         var round = ld().startRound(r, RS.Apply, []);
         ld().attempt(round, an, ld().wrapSend(r, an, def),
-            applied(an, pn, b, tg, amount, goal, goal - remaining, given, q0, def));
+            applied(an, pn, b, tg, amount, goal, goal - remaining, given, q0, def,
+                target.item.grids.length > 1));
     }
 
     // Closes the open grids nothing is left to send to, before a target is

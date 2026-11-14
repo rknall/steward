@@ -682,14 +682,18 @@ function dynSends(w) {
 t.test('grid-done rule: a capped grid stays open, the trip home orders for it, and the top-up fills it', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [41, 2, 0], [42, 2, 2], [42, 4, 1], [42, 3, 0], [43, 3, 2],
-        [43, 1, 0], [44, 1, 1]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 41: took 4 of 6, 4 of 10 so far; sending the other 6/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [42, 2, 2], [42, 4, 1], [43, 3, 2], [44, 1, 1]],
+        JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 41: took 4 of 6 \(4 of 10 so far\); grid full, the rest goes to the other grids/),
+        logLines(w).join('\n'));
     assert.ok(logged(w, /SmallDynamite -> 42: took all 2 offered \(6 of 10 so far\); grid stays open/), logLines(w).join('\n'));
     assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_SmallDynamite with 3 grid\(s\) left; going home for more/),
         logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took 1 of 4, 7 of 10 so far; sending the other 3/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/));
+    assert.ok(logged(w, /SmallDynamite -> 42: took 1 of 4 \(7 of 10 so far\); grid full, the rest goes to the other grids/),
+        logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite -> 43: took 2 of 3 \(9 of 10 so far\); grid full, the rest goes to the other grids/),
+        logLines(w).join('\n'));
+    assert.ok(!logged(w, /SmallDynamite -> 4\d: took nothing more/), 'a full grid is not offered the rest');
     assert.ok(logged(w, /SmallDynamite -> 44: took 1 of 1; grid done/), logLines(w).join('\n'));
     var made = w.productionOrders.filter(function (o) { return o.unit === DYN; });
     assert.deepStrictEqual(plain(made.map(function (o) { return o.amount; })), [10], 'the trip total, not per grid');
@@ -701,13 +705,13 @@ t.test('grid-done rule: a capped grid stays open, the trip home orders for it, a
 t.test('grid-done rule: a capped grid that was already full takes nothing on the top-up and is done, no pause', function () {
     var w = storm({ need: { 42: 2 } });
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [41, 2, 0], [42, 2, 2], [42, 4, 0], [43, 4, 2], [43, 2, 0],
-        [44, 2, 1]], JSON.stringify(dynSends(w)));
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [42, 2, 2], [42, 4, 0], [43, 4, 2], [44, 2, 1]],
+        JSON.stringify(dynSends(w)));
     assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /run paused/), 'no pause');
     // The top-up after the trip home shows no drop; the next grid's send waits for its result.
     var s = sendsTo(w, DYN);
-    var gap = s[4].t - s[3].t;
+    var gap = s[3].t - s[2].t;
     assert.ok(gap >= 15000, 'the top-up result came in first: ' + gap);
     assert.ok(gap < w.S.modules.adventures.loader.ORDER_WAIT_MS, 'no order-wait stale wait: ' + gap);
 });
@@ -715,7 +719,7 @@ t.test('grid-done rule: a capped grid that was already full takes nothing on the
 t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2, name) {
-        return name === 'Apply' && sendsTo(w2, DYN).length === 3 && w2.stockOf(DYN) > 0;
+        return name === 'Apply' && sendsTo(w2, DYN).length === 2 && w2.stockOf(DYN) > 0;
     } });
     assertStep(w, 'Apply');
     // The top-up is planned, then the stock is gone before its precheck runs.
@@ -724,7 +728,7 @@ t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', fun
     play(w);
     passesFor(w, 30000);
     assertPaused(w, w.S.RunPause.BuffFailed, /apply BattleBuffHurt_BuffAd_SmallDynamite to 42 failed/);
-    assert.strictEqual(sendsTo(w, DYN).length, 3);
+    assert.strictEqual(sendsTo(w, DYN).length, 2);
 });
 
 t.test('Apply: an item whose grids together took its amount is done, its other grids are not sent', function () {
@@ -1034,12 +1038,14 @@ t.test('Apply: Storm Recovery 15:16 totals finish the trip without a home trip',
     var steps = [];
     drive(w, { max: 400, until: at('Trip'), on: stepRecorder(steps) });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(sendList(w, DYN), [[5680, 10, 2], [5680, 8, 0], [4394, 8, 5], [4394, 3, 0], [2152, 3, 2],
-        [2152, 1, 0], [2070, 1, 1]], JSON.stringify(sendList(w, DYN)));
-    assert.deepStrictEqual(sendList(w, MEDIUM), [[5680, 6, 2], [5680, 4, 0], [2152, 4, 1], [2152, 3, 0], [2014, 3, 2],
-        [2014, 1, 0], [5814, 1, 1]], JSON.stringify(sendList(w, MEDIUM)));
-    assert.deepStrictEqual(sendList(w, BIG), [[2275, 5, 2], [2275, 3, 0], [2014, 3, 2], [2014, 1, 0], [5814, 1, 1]],
+    assert.deepStrictEqual(sendList(w, DYN), [[5680, 10, 2], [4394, 8, 5], [2152, 3, 2], [2070, 1, 1]],
+        JSON.stringify(sendList(w, DYN)));
+    assert.deepStrictEqual(sendList(w, MEDIUM), [[5680, 6, 2], [2152, 4, 1], [2014, 3, 2], [5814, 1, 1]],
+        JSON.stringify(sendList(w, MEDIUM)));
+    assert.deepStrictEqual(sendList(w, BIG), [[2275, 5, 2], [2014, 3, 2], [5814, 1, 1]],
         JSON.stringify(sendList(w, BIG)));
+    assert.ok(logged(w, /SmallDynamite -> 5680: took 2 of 10 \(2 of 10 so far\); grid full, the rest goes to the other grids/),
+        logLines(w).join('\n'));
     assert.ok(logged(w, /SmallDynamite -> 2070: took 1 of 1; grid done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /going home/), logLines(w).join('\n'));
     assert.ok(steps.indexOf('JumpHome:0') < 0, 'no home trip: ' + steps.join(' '));
@@ -1886,4 +1892,133 @@ t.test('Reload: notSent, notSentAt, count and text marks survive a reload; other
     assert.ok(!('text' in sh) && !('notSent' in sh), JSON.stringify(sh));
     assert.deepStrictEqual(Object.keys(back(w13, 'plain:0')).sort(), ['seen', 'sentAt', 'sentOnce']);
     assert.deepStrictEqual(back(w13, 'plain:0'), { sentAt: 7, seen: true, sentOnce: true });
+});
+
+// ---- the send as it was decided --------------------------------------------------------
+
+// Warn lines of the item core (category buffs).
+function buffWarns(w) {
+    return w.H.logs().filter(function (l) { return l.category === 'buffs'; })
+        .map(function (l) { return l.args.join(' '); });
+}
+
+// The 'item <buff> -> <grid>: entries' lines trips logs when it decides a send.
+function entryLines(w, buff) {
+    var re = new RegExp('item ' + buff + ' -> \\d+: entries ');
+    return logLines(w).filter(function (l) { return re.test(l); });
+}
+
+var MOVED = /not sent, the building at the grid changed since the target was chosen/;
+
+function movedWarns(w) {
+    return buffWarns(w).filter(function (l) { return MOVED.test(l); });
+}
+
+// Passes like drive(), but each pass whose tick decides a DYN send runs
+// change(w, n) (n: the decisions so far) between that tick and its play, the
+// window in which the action runs later than the read it was decided on.
+function driveWindow(w, change, o) {
+    o = o || {};
+    var max = o.max || 400;
+    var n = 0;
+    for (var i = 0; i < max; i++) {
+        var r = w.st.run();
+        if (!r || r.status !== w.S.RunStatus.Running) return;
+        if (o.until && o.until(w)) return;
+        var before = entryLines(w, DYN).length;
+        tick(w);
+        if (entryLines(w, DYN).length > before) {
+            n++;
+            change(w, n);
+        }
+        play(w);
+        w.t += 5000;
+    }
+}
+
+t.test('Apply: a building renamed after the target was chosen sends nothing, and the next round sends', function () {
+    var w = storm();
+    var refusedAt = null;
+    w.gridBuildings[41] = 'Boulder_A';
+    driveWindow(w, function (w2, n) {
+        if (n !== 1) return;
+        w2.gridBuildings[41] = 'Boulder_B';
+        refusedAt = w2.t;
+    }, { until: function (w2) { return sendsTo(w2, DYN).length > 0; } });
+    var warns = movedWarns(w);
+    assert.strictEqual(warns.length, 1, buffWarns(w).join('\n'));
+    assert.ok(/SmallDynamite -> 41: not sent, .*\(was Boulder_A, now Boulder_B\)/.test(warns[0]), warns[0]);
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running, 'no pause');
+    var s = sendsTo(w, DYN);
+    assert.deepStrictEqual(plain(s.map(function (x) { return [x.grid, x.amount, x.took]; })), [[41, 6, 4]]);
+    assert.strictEqual(w.buffActions.length, 1, 'one packet, after the retry');
+    var spacing = w.S.modules.adventures.trips.NOT_SENT_RETRY_MS;
+    assert.ok(s[0].t - refusedAt >= spacing, 'retried after the gap: ' + (s[0].t - refusedAt));
+    var lines = entryLines(w, DYN);
+    assert.ok(lines.length === 2 && /building Boulder_B \(first seen Boulder_A\)/.test(lines[1]), lines.join('\n'));
+});
+
+t.test('Apply: a ruin replaced by its building site after the target was chosen sends nothing, then sends', function () {
+    var w = storm();
+    w.gridBuildings[41] = 'BuffAd_Ruin_01';
+    driveWindow(w, function (w2, n) {
+        if (n === 1) w2.gridBuildings[41] = SITE;
+    }, { until: function (w2) { return sendsTo(w2, DYN).length > 0; } });
+    var warns = movedWarns(w);
+    assert.strictEqual(warns.length, 1, buffWarns(w).join('\n'));
+    assert.ok(/\(was BuffAd_Ruin_01, now BuffAd_Site\)/.test(warns[0]), warns[0]);
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running, 'no pause');
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 4]], JSON.stringify(dynSends(w)));
+});
+
+t.test('Apply: a building that changes on every try pauses BuffFailed after three tries, no packet', function () {
+    var w = storm();
+    w.gridBuildings[41] = 'Boulder_A';
+    driveWindow(w, function (w2) {
+        w2.gridBuildings[41] = w2.gridBuildings[41] === 'Boulder_A' ? 'Boulder_B' : 'Boulder_A';
+    }, { max: 400 });
+    assertPaused(w, w.S.RunPause.BuffFailed, /nothing sent after 3 tries/);
+    assert.strictEqual(movedWarns(w).length, 3, buffWarns(w).join('\n'));
+    assert.strictEqual(w.buffActions.length, 0, 'no packet');
+    assert.strictEqual(w.itemSends.length, 0);
+});
+
+t.test('Apply: a stock split 6 + 4 offers the largest stack, then the next one', function () {
+    var w = storm({ need: { 41: 10 } });
+    w.stock.push({ type: DYN, resource: '', amount: 4, uid: 'item:' + DYN + ':2' });
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[41, 6, 6], [41, 4, 4]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x6 -> 41 \(stock 10, largest stack 6\)/),
+        logLines(w).join('\n'));
+    assert.ok(!buffWarns(w).some(function (l) { return /no single stack/.test(l); }), 'no refused precheck');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a short take on an item with several grids ends that grid, the rest goes to the next', function () {
+    var w = storm({ stock: 10, need: { 41: 2, 42: 5 } });
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 2], [42, 8, 5], [43, 3, 2], [44, 1, 1]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite -> 41: took 2 of 10 \(2 of 10 so far\); grid full, the rest goes to the other grids/),
+        logLines(w).join('\n'));
+    assert.strictEqual(sendsTo(w, DYN).filter(function (s) { return s.grid === 41; }).length, 1, 'no second send to 41');
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: every item send logs one entries line', function () {
+    var w = storm();
+    drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
+    var lines = entryLines(w, DYN);
+    assert.strictEqual(lines.length, sendsTo(w, DYN).length, lines.join('\n'));
+    assert.ok(/-> 41: entries 6\[item:BattleBuffHurt_BuffAd_SmallDynamite\]; building none grid \?, buffs \?,/
+        .test(lines[0]), lines[0]);
+    assert.ok(/, in destruction \?; targets none group none via -$/.test(lines[0]), lines[0]);
+    var x = sabotage();
+    drive(x, { until: at('Trip'), on: function (x2) {
+        if (sendsTo(x2, BLAST).length) delete x2.gridBuildings[SABOTAGE_GRID];
+    } });
+    var sp = entryLines(x, EXPERT);
+    assert.strictEqual(sp.length, 1, sp.join('\n'));
+    assert.ok(/-> 2631: entries .*; building none/.test(sp[0]), sp[0]);
 });

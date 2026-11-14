@@ -609,12 +609,22 @@
     // saw, which the caller uses to tell a full grid from a stock-capped send.
     // The star menu is read once, in the precheck, and the send uses that
     // entry: the AIR bridge can miss the menu on a re-read within the same
-    // step, which would otherwise leave the send with no entry. A send with no
-    // usable entry makes no host call and says so with NOT_SENT, so it can be
-    // tried again later; only a packet that could not be sent is a failure.
-    function adventureItem(name, grid, amount) {
+    // step, which would otherwise leave the send with no entry. One buff
+    // action spends one entry, so the precheck refuses a stock that is split
+    // so that no single stack holds the amount. A send with no usable entry
+    // makes no host call and says so with NOT_SENT, so it can be tried again
+    // later; only a packet that could not be sent is a failure.
+    // opts.building (a string, '' for an empty grid) is the building the
+    // caller saw at the grid when it chose to send. The action may run later
+    // than that read, so the precheck reads the grid again and, when another
+    // building stands there now, the send is a NOT_SENT: nothing goes out and
+    // the caller decides again on a fresh read. Without opts no building is
+    // read.
+    function adventureItem(name, grid, amount, opts) {
         var drop = null;
         var found = null;
+        var moved = null;
+        var expected = opts && typeof opts.building === 'string' ? opts.building : null;
         return {
             label:     'item ' + name + ' x' + amount + ' -> ' + grid,
             category:  'buffs',
@@ -624,18 +634,35 @@
                 if (!isNum(amount) || amount !== Math.floor(amount) || !(amount > 0)) return 'invalid amount';
                 if (S.core.zone.isAdventure() !== true) return 'not on an adventure';
                 found = null;
+                moved = null;
                 var raw = readEntries();
                 var n = raw ? stockIn(raw, name, '') : null;
                 if (!isNum(n)) return 'buff stock unreadable';
                 if (n < amount) return 'not enough in stock';
-                found = entryIn(raw, name, '', 0);
+                found = entryIn(raw, name, '', amount);
+                if (!found) return 'no single stack of ' + amount;
+                if (expected !== null) {
+                    var nm = '';
+                    try {
+                        S.core.buildings.invalidate();
+                        nm = S.core.buildings.name(S.core.buildings.byGrid(grid));
+                        if (typeof nm !== 'string') nm = '';
+                    } catch (e) { nm = ''; }
+                    if (nm !== expected) {
+                        moved = 'the building at the grid changed since the target was chosen (was ' +
+                            (expected || 'none') + ', now ' + (nm || 'none') + ')';
+                        return null;
+                    }
+                }
                 return null;
             },
             baseline: function () { return { stock: stock(name, '') }; },
             send: function () {
                 var e = found;
+                var m = moved;
                 found = null;
-                var why = !e ? 'no star-menu entry' : (!e.uid ? 'its star-menu entry has no unique id' : null);
+                moved = null;
+                var why = m || (!e ? 'no star-menu entry' : (!e.uid ? 'its star-menu entry has no unique id' : null));
                 if (why) {
                     S.kernel.warn('buffs', 'item ' + name + ' -> ' + grid + ': not sent, ' + why);
                     return S.core.actions.NOT_SENT;
@@ -657,23 +684,43 @@
         };
     }
 
-    // Population buff stock: { total, largest } over the population entries,
-    // or null when the menu cannot be read. largest is the biggest amount one
-    // buff action can send.
-    function populationStock() {
+    // How the definition of an adventure item relates to the building at a
+    // grid, for the diagnostic line of a send: { targets, group, via }. via is
+    // null when no building stands (buildingName ''), else what viaOf says
+    // ('name', 'group', or null when the definition does not reach it). Text
+    // only: no send decision reads it.
+    function adventureTarget(name, buildingName) {
+        var targets = targetsOf(name);
+        var group = groupOf(name);
+        var via = null;
+        if (buildingName) {
+            try { via = viaOf(targets, group, buildingName, false); } catch (e) { via = null; }
+        }
+        return { targets: targets, group: group, via: via };
+    }
+
+    // Stock of exactly this type and resource: { total, largest } over its
+    // entries, or null when the menu or an entry that may be this stock cannot
+    // be read. largest is the biggest amount one buff action can send.
+    function stack(type, resource) {
         var raw = readEntries();
         if (!raw) return null;
-        var res = populationResource();
+        var res = resource || '';
         var total = 0;
         var largest = 0;
         for (var i = 0; i < raw.length; i++) {
-            if (unreadableAs(raw[i], POPULATION_TYPE)) return null;
-            if (raw[i].type !== POPULATION_TYPE || (raw[i].resource || '') !== res) continue;
+            if (unreadableAs(raw[i], type)) return null;
+            if (raw[i].type !== type || (raw[i].resource || '') !== res) continue;
             var a = raw[i].amount || 0;
             total += a;
             if (a > largest) largest = a;
         }
         return { total: total, largest: largest };
+    }
+
+    // Population buff stock: stack() of the population entries.
+    function populationStock() {
+        return stack(POPULATION_TYPE, populationResource());
     }
 
     // Population buff: the exact amount the caller asks for, sent from a
@@ -797,6 +844,7 @@
         inventory:     inventory,
         entry:         entry,
         stock:         stock,
+        stack:         stack,
         isRunning:     isRunning,
         send:          send,
         amount:        amount,
@@ -804,6 +852,7 @@
         camp:          camp,
         adventureItem: adventureItem,
         targetsOf:     targetsOf,
+        adventureTarget: adventureTarget,
         buffTypeOf:    buffTypeOf,
         buildingBuffCandidates: candidatesOnce,
         buildingBuffs: buildingBuffs,
