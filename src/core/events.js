@@ -10,6 +10,10 @@
  *
  * core/specialists.pickTask consults active() and treasureValues() so
  * modules don't need event-awareness themselves.
+ *
+ * resourceLive(name) answers whether a resource's required event is live
+ * (true), not live (false) or unknown (null); held rows and callers that
+ * decide by liveness share that one rule.
  */
 
 (function (S) {
@@ -176,11 +180,39 @@
         });
     }
 
+    // One liveness rule for a resource's required event name. '' means the
+    // resource is not an event item, so it is always usable. A name with a
+    // base code is live when that event is; a name without one (relics,
+    // seasonal items the data table lacks) is live when a live raw event
+    // name contains it or is contained by it.
+    function liveOf(ev, liveCodes, liveRaw) {
+        if (ev === '') return true;
+        var code = matchBaseCode(ev);
+        if (code) return !!liveCodes[code];
+        for (var i = 0; i < liveRaw.length; i++) {
+            if (liveRaw[i].indexOf(ev) !== -1 || ev.indexOf(liveRaw[i]) !== -1) return true;
+        }
+        return false;
+    }
+
+    function liveCodesOf(act) {
+        var liveCodes = {};
+        for (var a = 0; a < act.length; a++) liveCodes[act[a].code] = true;
+        return liveCodes;
+    }
+
+    // True when the resource's required event is live, false when it is not,
+    // null when the host gives no definition (the resource is not offered).
+    function resourceLive(name) {
+        var ev = S.core.resources.eventName(name);
+        if (typeof ev !== 'string') return null;
+        return liveOf(ev, liveCodesOf(active()), liveEventNames());
+    }
+
     function computeHeld() {
         var codes = Object.keys(table());
-        var liveCodes = {};
-        var act = active();
-        for (var a = 0; a < act.length; a++) liveCodes[act[a].code] = true;
+        var liveCodes = liveCodesOf(active());
+        var liveRaw = liveEventNames();
         var rows = [];
         var read = S.core.resources.listRead();
         var held = S.kernel.read.has(read) ? read.value : null;
@@ -197,7 +229,7 @@
                     amount:    held[i].amount,
                     eventName: ev,
                     code:      code,
-                    live:      !!(code && liveCodes[code])
+                    live:      liveOf(ev, liveCodes, liveRaw)
                 });
             }
             // A partial list may have lost the unnamed entries, so an event
@@ -368,6 +400,7 @@
     S.core.events.eventResourceAmount = eventResourceAmount;
     S.core.events.heldResources       = heldResources;
     S.core.events.levelMultiplier     = levelMultiplier;
+    S.core.events.resourceLive        = resourceLive;
     // Suffix vocabulary — see EVENT_SUFFIX_TO_CODE comment above.
     S.core.events.suffixToCode        = suffixToCode;
     S.core.events.suffixList          = suffixList;

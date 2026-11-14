@@ -5,9 +5,16 @@
  * definitions, and builds the action defs that apply a buff (speed, camp,
  * population, building production buffs) or start an adventure map. A def is run with
  * S.core.actions.attempt. Adventure items (a buff applied to a grid on the
- * island) and the quest targets of a buff are here too. Every reader reports an unreadable host as null, and
+ * island) and the quest targets of a buff are here too, and so are the star
+ * resource items (AddResource entries bound to a resource other than
+ * population): starResources lists them, storeNext says how much the next
+ * transfer of one would move, and toStore moves one entry into the warehouse,
+ * never past its capacity. Every reader reports an unreadable host as null, and
  * a def treats null as not observed: an unreadable stock never counts as
- * "the stock dropped". Inside a host-read pass (S.kernel.hostRead) the star
+ * "the stock dropped". The star menu is the buffs.menu source of
+ * S.kernel.read (inventoryRead gives its Result): partial while an entry is
+ * caught mid-update, so only a complete menu proves an item is not there.
+ * Inside a host-read pass (S.kernel.hostRead) the star
  * menu and the target table are read once; buildingBuffCandidates and
  * speedBuffs read them once per call even outside a pass, and the action defs
  * always read live, except that an adventure item sends the entry its
@@ -43,6 +50,13 @@
     // only copy of the literal; other files read it from S.core.buffs.
     var ADD_RESOURCE_TYPE = 'AddResource';
 
+    // Precheck refusals of a star-to-store send that only say a read failed:
+    // nothing went out, and a later look may read. Registered as read
+    // refusals, so a caller waits instead of counting a miss.
+    var STAR_UNREADABLE = S.kernel.read.readRefusal('star stock unreadable');
+    var CAPACITY_UNREADABLE = S.kernel.read.readRefusal('capacity unreadable');
+    var STORE_UNREADABLE = S.kernel.read.readRefusal('store stock unreadable');
+
     var BUFF_TIMEOUT_MS = 15000;
     // A camp buff has no retry, so it gets the window of a send and a retry.
     var CAMP_TIMEOUT_MS = 2 * BUFF_TIMEOUT_MS;
@@ -69,7 +83,27 @@
     // read once and the list is shared, so no caller may change it or its
     // items.
     function readEntries() {
-        return S.kernel.hostRead.cached('buffs.readEntries', readEntriesNow);
+        var r = menuRead();
+        return S.kernel.read.has(r) ? r.value : null;
+    }
+
+    // The star menu as a Result: ok when every entry read fully, partial
+    // (lost counts the entries caught mid-update, kept with bad set) when
+    // some did not, unreadable when the player or the menu could not be read.
+    function readMenu() {
+        var raw = readEntriesNow();
+        if (!raw) return S.kernel.read.unreadable('star menu unreadable');
+        var lost = 0;
+        for (var i = 0; i < raw.length; i++) {
+            if (raw[i].bad) lost++;
+        }
+        return lost ? S.kernel.read.partial(raw, lost, 'entry mid-update') : S.kernel.read.ok(raw);
+    }
+
+    S.kernel.read.source('buffs.menu', { read: readMenu, scope: 'pass' });
+
+    function menuRead(opts) {
+        return S.kernel.read.get('buffs.menu', undefined, opts);
     }
 
     function readEntriesNow() {
@@ -104,11 +138,14 @@
         }
     }
 
-    // null while the star menu cannot be read, so an unreadable menu never
-    // looks like an empty stock.
-    function inventory() {
-        var raw = readEntries();
-        if (!raw) return null;
+    // The star menu as a Result of [{ type, resource, amount, uid, bad }],
+    // uid as its key string; the state, lost and why of the menu read are
+    // kept, so a partial menu stays partial. opts as for S.kernel.read.get.
+    function inventoryRead(opts) {
+        var R = S.kernel.read;
+        var r = menuRead(opts);
+        if (!R.has(r)) return r;
+        var raw = r.value;
         var out = [];
         for (var i = 0; i < raw.length; i++) {
             var key = '';
@@ -117,7 +154,14 @@
             // mid-update for a real amount.
             out.push({ type: raw[i].type, resource: raw[i].resource, amount: raw[i].amount, uid: key, bad: raw[i].bad });
         }
-        return out;
+        return R.isOk(r) ? R.ok(out) : R.partial(out, r.lost, r.why);
+    }
+
+    // null while the star menu cannot be read, so an unreadable menu never
+    // looks like an empty stock.
+    function inventory() {
+        var r = inventoryRead();
+        return S.kernel.read.has(r) ? r.value : null;
     }
 
     // The same as entryAtLeast with no minimum, so empty entries are skipped.
@@ -802,23 +846,202 @@
     // be read. largest is the biggest amount one buff action can send.
     function stack(type, resource) {
         var raw = readEntries();
-        if (!raw) return null;
+        var t = raw ? tally(raw, type, resource) : null;
+        return t ? { total: t.total, largest: t.largest } : null;
+    }
+
+    // stack() over a list already read, with entries, the count of in-stock
+    // entries, besides total and largest. null when an entry that may be this
+    // stock cannot be read, so a half-read menu never looks smaller.
+    function tally(raw, type, resource) {
         var res = resource || '';
         var total = 0;
         var largest = 0;
+        var entries = 0;
         for (var i = 0; i < raw.length; i++) {
             if (unreadableAs(raw[i], type)) return null;
             if (raw[i].type !== type || (raw[i].resource || '') !== res) continue;
             var a = raw[i].amount || 0;
             total += a;
             if (a > largest) largest = a;
+            if (a > 0) entries++;
         }
-        return { total: total, largest: largest };
+        return { total: total, largest: largest, entries: entries };
     }
 
     // Population buff stock: stack() of the population entries.
     function populationStock() {
         return stack(ADD_RESOURCE_TYPE, populationResource());
+    }
+
+    // The resource items of the star menu: every resource an AddResource entry
+    // is bound to, except population and entries bound to none, as
+    // [{ name, total, largest, entries }] sorted by name, only those in stock.
+    // The menu itself is the list, so no resource names are kept here. One
+    // menu read per call; null when the menu or an entry that may be of this
+    // type cannot be read.
+    function starResources() {
+        var raw = readEntries();
+        if (!raw) return null;
+        var pop = populationResource();
+        var seen = {};
+        var names = [];
+        var i;
+        for (i = 0; i < raw.length; i++) {
+            if (unreadableAs(raw[i], ADD_RESOURCE_TYPE)) return null;
+            if (raw[i].type !== ADD_RESOURCE_TYPE) continue;
+            var r = raw[i].resource || '';
+            if (!r || r === pop || Object.prototype.hasOwnProperty.call(seen, r)) continue;
+            seen[r] = true;
+            names.push(r);
+        }
+        names.sort();
+        var out = [];
+        for (i = 0; i < names.length; i++) {
+            var t = tally(raw, ADD_RESOURCE_TYPE, names[i]);
+            if (!t || !(t.total > 0)) continue;
+            out.push({ name: names[i], total: t.total, largest: t.largest, entries: t.entries });
+        }
+        return out;
+    }
+
+    // The one transfer rule: how much of one resource the next star-to-store
+    // send moves, from one star-menu Result. One send spends one entry and
+    // never more than the warehouse still takes, so the amount is the smaller
+    // of the first in-stock entry and capacity - stock; the rest stays in the
+    // star menu. Returns { amount, room, capacity, stock, star, entry, reason }:
+    // reason is null when a send may go out, and amount is 0 whenever it is
+    // set. A failed read gives its read refusal; 'none in star' needs a
+    // complete menu, since a partial one may have lost the entry, and
+    // 'warehouse full' needs both the capacity and the stock read.
+    function storePick(menu, name) {
+        var R = S.kernel.read;
+        var out = { amount: 0, room: null, capacity: null, stock: null, star: null, entry: null, reason: null };
+        if (typeof name !== 'string' || !name) {
+            out.reason = 'no resource name';
+            return out;
+        }
+        var star = R.has(menu) ? tally(menu.value, ADD_RESOURCE_TYPE, name) : null;
+        if (!star) {
+            out.reason = STAR_UNREADABLE;
+            return out;
+        }
+        out.star = star;
+        if (!(star.total > 0)) {
+            out.reason = R.isOk(menu) ? 'none in star' : STAR_UNREADABLE;
+            return out;
+        }
+        var cap = S.core.resources.capacity();
+        if (!isNum(cap)) {
+            out.reason = CAPACITY_UNREADABLE;
+            return out;
+        }
+        out.capacity = cap;
+        var held = S.core.resources.amount(name);
+        if (!isNum(held)) {
+            out.reason = STORE_UNREADABLE;
+            return out;
+        }
+        out.stock = held;
+        out.room = cap - held;
+        if (!(out.room > 0)) {
+            out.reason = 'warehouse full';
+            return out;
+        }
+        var e = entryIn(menu.value, ADD_RESOURCE_TYPE, name, 0);
+        if (!e) {
+            out.reason = R.isOk(menu) ? 'none in star' : STAR_UNREADABLE;
+            return out;
+        }
+        var n = Math.floor(Math.min(e.amount, out.room));
+        if (!(n >= 1)) {
+            out.reason = 'warehouse full';
+            return out;
+        }
+        out.entry = e;
+        out.amount = n;
+        return out;
+    }
+
+    // storePick over one menu read, for views and planners: the same answer
+    // the def's precheck gives, without the entry, whose uid object stays in
+    // this file.
+    function storeNext(name) {
+        var p = storePick(menuRead(), name);
+        return {
+            amount:   p.amount,
+            room:     p.room,
+            capacity: p.capacity,
+            stock:    p.stock,
+            star:     p.star,
+            reason:   p.reason
+        };
+    }
+
+    // Star stock of one resource item: a number, or null when unreadable.
+    function starStock(name) {
+        return stock(ADD_RESOURCE_TYPE, name);
+    }
+
+    // Star to store: one AddResource entry of a resource item sent to the
+    // player grid in the amount storePick gives, only on the home island.
+    // Verified by the star stock dropping by that amount, which nothing else
+    // consumes meanwhile, or by the storehouse rising by it. No retry: a resend
+    // after an effect that was not seen could move a second stack. The star
+    // menu is read once, in the precheck, and the send uses that entry; with
+    // no usable entry nothing goes out (NOT_SENT). sent() is the amount that
+    // went out, 0 before the send.
+    function toStore(name, opts) {
+        var found = null;
+        var sentAmount = 0;
+        return {
+            label:     'star to store ' + name,
+            category:  (opts && opts.category) || 'buffs',
+            timeoutMs: BUFF_TIMEOUT_MS,
+            retries:   0,
+            precheck: function () {
+                found = null;
+                var off = S.core.zone.homeRefusal();
+                if (off) return off;
+                if (name === populationResource()) return 'population is not a store item';
+                var p = storePick(menuRead(), name);
+                if (p.reason) return p.reason;
+                found = { entry: p.entry, amount: p.amount };
+                return null;
+            },
+            baseline: function () {
+                return {
+                    amount: found ? found.amount : 0,
+                    star:   starStock(name),
+                    stock:  S.core.resources.amount(name)
+                };
+            },
+            send: function () {
+                var f = found;
+                found = null;
+                if (!f || !f.entry || !f.entry.uid) {
+                    S.kernel.warn('buffs', 'star to store ' + name + ': not sent, no usable star-menu entry');
+                    return S.core.actions.NOT_SENT;
+                }
+                var ok = sendEntry(f.entry, PLAYER_GRID, f.amount);
+                if (ok) sentAmount = f.amount;
+                return ok;
+            },
+            check: function (base) {
+                if (!base || !(base.amount > 0)) return false;
+                var n = starStock(name);
+                if (isNum(n) && isNum(base.star) && n <= base.star - base.amount) return true;
+                var held = S.core.resources.amount(name);
+                return isNum(held) && isNum(base.stock) && held >= base.stock + base.amount;
+            },
+            describe: function (base) {
+                if (!base) return '';
+                return 'sent ' + sentAmount +
+                    '; star ' + fmtStock(base.star) + ' -> ' + fmtStock(starStock(name)) +
+                    '; store ' + fmtStock(base.stock) + ' -> ' + fmtStock(S.core.resources.amount(name));
+            },
+            sent: function () { return sentAmount; }
+        };
     }
 
     // Population buff: the exact amount the caller asks for, sent from a
@@ -943,6 +1166,7 @@
         ZONE_GRID:     ZONE_GRID,
         ADD_RESOURCE_TYPE: ADD_RESOURCE_TYPE,
         inventory:     inventory,
+        inventoryRead: inventoryRead,
         entry:         entry,
         stock:         stock,
         stack:         stack,
@@ -964,6 +1188,9 @@
         WORKYARD_TARGET: WORKYARD_TARGET,
         population:    population,
         populationStock: populationStock,
+        starResources: starResources,
+        storeNext:     storeNext,
+        toStore:       toStore,
         map:           map,
         mapStock:      mapStock,
         mapReadRefusal: mapReadRefusal,
