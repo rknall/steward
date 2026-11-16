@@ -12,10 +12,10 @@ function boot() {
 
 // Runs the captured 'core.attempt' entries until none are queued. onStep(n)
 // runs after the n-th round so a test can change state between polls.
-function drive(b, onStep) {
+function drive(b, onStep, maxRounds) {
     var rounds = 0;
     var delays = [];
-    for (var n = 0; n < 50; n++) {
+    for (var n = 0; n < (maxRounds || 50); n++) {
         var entries = b.H.queued().filter(function (e) { return e.name === b.A.STEP; });
         if (entries.length === 0) break;
         b.H.clearQueued();
