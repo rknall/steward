@@ -19,6 +19,10 @@
  *   check(base)  true when the expected effect is observed
  *   describe(base)  optional extra text for the final log line
  *   timeoutMs    verify window per send
+ *   checkAfterMs no check runs before this much time has passed since the
+ *                send, counted in polls like timeoutMs; it must be below
+ *                timeoutMs. For a send whose effect is only read once the
+ *                game has settled, so an early read cannot end it
  *   retries      how many more sends may follow the first (default RETRIES);
  *                0 for an action that must not go out twice
  * Every callback is wrapped in try/catch. satisfied, precheck, check and
@@ -200,8 +204,16 @@
         enqueue(state);
     }
 
+    // Whether this poll is still inside the def's quiet time. It uses the
+    // poll count that also closes the window, so the quiet time and the
+    // window can never disagree.
+    function quiet(state) {
+        var after = state.def.checkAfterMs;
+        return typeof after === 'number' && (state.polls + 1) * pollGap() < after;
+    }
+
     function checkStep(state) {
-        if (observed(state)) {
+        if (!quiet(state) && observed(state)) {
             finish(state, S.ActionResult.Verified, '');
             return;
         }
@@ -242,6 +254,11 @@
         }
         if (typeof def.timeoutMs !== 'number' || !(def.timeoutMs > 0)) {
             S.kernel.error(categoryOf(def), labelOf(def) + ': attempt needs timeoutMs > 0');
+            return false;
+        }
+        if (def.checkAfterMs !== undefined &&
+            (typeof def.checkAfterMs !== 'number' || !(def.checkAfterMs >= 0) || !(def.checkAfterMs < def.timeoutMs))) {
+            S.kernel.error(categoryOf(def), labelOf(def) + ': attempt needs checkAfterMs >= 0 and below timeoutMs');
             return false;
         }
         var state = { def: def, onDone: onDone, phase: 'send', sends: 0, polls: 0, base: undefined, started: false };

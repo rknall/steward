@@ -629,7 +629,7 @@ t.test('Trip: after the last object is picked the map must stay clear for READ_L
 
 // ---- amounts and stock --------------------------------------------------------------
 
-t.test('Apply: a send offers min(amount, stock); a full-bound send taken whole is done', function () {
+t.test('Apply: a burst offers the remaining trip total; a burst taken whole is done', function () {
     var rec = { id: 'amt', label: 'Amount (test)', trips: [{ items: [{ buff: DYN, grids: [41], amount: 10 }] }, {}] };
     var w = scenWorld({ quests: [{ key: 'qd', name: 'Rocks', item: DYN, grids: [41] },
         { key: 'q9', name: 'Final', last: true }], gridNeed: { 41: 10 } });
@@ -637,8 +637,8 @@ t.test('Apply: a send offers min(amount, stock); a full-bound send taken whole i
     onIsland(w, record(w, rec), 0);
     drive(w, { until: at('Trip') });
     assert.deepStrictEqual(plain(sendsTo(w, DYN).map(function (s) { return [s.grid, s.amount, s.took]; })), [[41, 10, 10]]);
-    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x10 -> 41 \(stock 20\)/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 41: took 10 of 10; grid done/), 'a full-bound send taken whole is done');
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x10 -> 41 \(stock 20, need 10\)/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 41: took 10 of 10; 1 grid\(s\) done/), 'a burst taken whole is done');
     assert.strictEqual(w.stockOf(DYN), 10);
 });
 
@@ -661,16 +661,34 @@ t.test('Apply: out of stock with grids left goes home and comes back to the same
     assert.strictEqual(w.zoneSends.length, 0);
 });
 
+t.test('Apply: an item without an amount bursts to as many grids as its stack holds, then goes home', function () {
+    var rec = { id: 'cut', label: 'Cut (test)', trips: [{ items: [{ buff: BRIDGE, grids: [11, 12, 13] }] }, {}] };
+    var w = scenWorld({ quests: [{ key: 'qb', name: 'Bridges', item: BRIDGE, grids: [11, 12, 13] },
+        { key: 'q9', name: 'Final', last: true }] });
+    w.setStock(BRIDGE, 2);
+    onIsland(w, record(w, rec), 0);
+    var home = null;
+    drive(w, { max: 400, until: function (w2, name) { return name === 'Trip' && home !== null; }, on: function (w2, name) {
+        if (home === null && name === 'JumpHome') home = plain(w2.itemSends.map(function (s) { return [s.grid, s.amount]; }));
+    } });
+    assert.deepStrictEqual(home, [[11, 1], [12, 1]], 'one burst of 1 per grid to the first two: ' + JSON.stringify(home));
+    assert.ok(logged(w, /apply ChangeSkin_BuffAd_Bridge x1 -> 11,12 \(stock 2, need 2, cut to 2 of 3 grids\)/),
+        logLines(w).join('\n'));
+    assert.ok(logged(w, /out of ChangeSkin_BuffAd_Bridge with 1 grid\(s\) left; going home for more/), logLines(w).join('\n'));
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(sendsTo(w, BRIDGE).map(function (s) { return s.grid; }), [11, 12, 13]);
+});
+
 // Storm-like small dynamite: amount 10 over four grids whose needs add up to
-// it (41:4, 42:3, 43:2, 44:1), stock 6, so the stock runs out on 42 and the
-// trip home brings the rest.
+// it (41:4, 42:3, 43:2, 44:1), stock 10 (o.stock), so one burst of 10 to the
+// four grids takes 4, 3, 2 and 1 from the one stack.
 function storm(o) {
     o = o || {};
     var need = { 41: 4, 42: 3, 43: 2, 44: 1 };
     for (var k in (o.need || {})) if (Object.prototype.hasOwnProperty.call(o.need, k)) need[k] = o.need[k];
     var w = scenWorld({ quests: [{ key: 'qd', name: 'Rocks', item: DYN, grids: [41, 42, 43, 44] },
         { key: 'q9', name: 'Final', last: true }], gridNeed: need });
-    w.setStock(DYN, typeof o.stock === 'number' ? o.stock : 6);
+    w.setStock(DYN, typeof o.stock === 'number' ? o.stock : 10);
     onIsland(w, record(w, STORM), 0);
     return w;
 }
@@ -679,74 +697,114 @@ function dynSends(w) {
     return plain(sendsTo(w, DYN).map(function (s) { return [s.grid, s.amount, s.took]; }));
 }
 
-t.test('grid-done rule: a capped grid stays open, the trip home orders for it, and the top-up fills it', function () {
+// The 'item <buff> burst ...' lines the item core logs once per burst.
+function burstLines(w, buff) {
+    var re = new RegExp('^item ' + buff + ' burst ');
+    return w.H.logs().filter(function (l) { return l.category === 'buffs'; })
+        .map(function (l) { return l.args.join(' '); })
+        .filter(function (l) { return re.test(l); });
+}
+
+t.test('Apply: one burst sends the item to every grid from one stack, each grid takes what it needs', function () {
     var w = storm();
-    drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [42, 2, 2], [42, 4, 1], [43, 3, 2], [44, 1, 1]],
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 10, 3], [43, 10, 2], [44, 10, 1]],
         JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 41: took 4 of 6 \(4 of 10 so far\); grid full, the rest goes to the other grids/),
+    var s = sendsTo(w, DYN);
+    s.forEach(function (x) { assert.strictEqual(x.t, s[0].t, 'one burst: ' + x.grid + ' at ' + x.t); });
+    var uids = w.buffActions.map(function (b) { return b.type; });
+    assert.deepStrictEqual(uids, [DYN, DYN, DYN, DYN], 'four packets, nothing else');
+    var bl = burstLines(w, DYN);
+    assert.strictEqual(bl.length, 1, bl.join('\n'));
+    assert.ok(/burst x10 -> 4 grid\(s\): 41@\+\d+, 42@\+\d+, 43@\+\d+, 44@\+\d+ \(stack 10\[/.test(bl[0]), bl[0]);
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x10 -> 41,42,43,44 \(stock 10, need 10\)/),
         logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took all 2 offered \(6 of 10 so far\); grid stays open/), logLines(w).join('\n'));
-    assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_SmallDynamite with 3 grid\(s\) left; going home for more/),
-        logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 42: took 1 of 4 \(7 of 10 so far\); grid full, the rest goes to the other grids/),
-        logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 43: took 2 of 3 \(9 of 10 so far\); grid full, the rest goes to the other grids/),
-        logLines(w).join('\n'));
-    assert.ok(!logged(w, /SmallDynamite -> 4\d: took nothing more/), 'a full grid is not offered the rest');
-    assert.ok(logged(w, /SmallDynamite -> 44: took 1 of 1; grid done/), logLines(w).join('\n'));
-    var made = w.productionOrders.filter(function (o) { return o.unit === DYN; });
-    assert.deepStrictEqual(plain(made.map(function (o) { return o.amount; })), [10], 'the trip total, not per grid');
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 41,42,43,44: took 10 of 10; 4 grid\(s\) done/), logLines(w).join('\n'));
+    assert.strictEqual(w.stockOf(DYN), 0);
     var q = w.quests.filter(function (x) { return x.key === 'qd'; })[0];
     assert.ok(!q || q.finished, 'the item quest finished');
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('grid-done rule: a capped grid that was already full takes nothing on the top-up and is done, no pause', function () {
-    var w = storm({ need: { 42: 2 } });
-    drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 4], [42, 2, 2], [42, 4, 0], [43, 4, 2], [44, 2, 1]],
+t.test('Apply: a short total stock goes home before any send, then one burst of the trip total', function () {
+    var w = storm({ stock: 6 });
+    var home = null;
+    drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; }, on: function (w2, name) {
+        if (home === null && name === 'JumpHome') home = w2.itemSends.length;
+    } });
+    assert.strictEqual(home, 0, 'nothing sent before the home trip');
+    assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_SmallDynamite with 4 grid\(s\) left; going home for more/),
+        logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 10, 3], [43, 10, 2], [44, 10, 1]],
         JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 42: took nothing more; grid done/), logLines(w).join('\n'));
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 41,42,43,44: took 10 of 10; 4 grid\(s\) done/), logLines(w).join('\n'));
+    var made = w.productionOrders.filter(function (o) { return o.unit === DYN; });
+    assert.deepStrictEqual(plain(made.map(function (o) { return o.amount; })), [4], 'what the stock lacks of the trip total');
     assert.ok(!logged(w, /run paused/), 'no pause');
-    // The top-up after the trip home shows no drop; the next grid's send waits for its result.
-    var s = sendsTo(w, DYN);
-    var gap = s[3].t - s[2].t;
-    assert.ok(gap >= 15000, 'the top-up result came in first: ' + gap);
-    assert.ok(gap < w.S.modules.adventures.loader.ORDER_WAIT_MS, 'no order-wait stale wait: ' + gap);
 });
 
-t.test('grid-done rule: a top-up whose send really fails pauses BuffFailed', function () {
+t.test('Apply: the burst is verified only after BURST_GAP_MS, and the next burst waits as long', function () {
+    var w = totalsWorld({ 5680: 2, 4394: 5, 2152: 2, 2070: 1 }, 10);
+    var trips = w.S.modules.adventures.trips;
+    var gap = trips.BURST_GAP_MS;
+    assert.strictEqual(gap, 15000);
+    var r = w.st.run();
+    var first = trips.applyMark(r, DYN, 5680);
+    var seenAt = null;
+    for (var i = 0; i < 200 && seenAt === null; i++) {
+        tick(w);
+        play(w, function () {
+            var m = w.st.run().marks[first];
+            return !!(m && m.seen);
+        });
+        var m = w.st.run().marks[first];
+        if (m && m.seen) seenAt = w.t;
+        else w.t += 5000;
+    }
+    var s = sendsTo(w, DYN);
+    assert.strictEqual(s.length, 4, JSON.stringify(dynSends(w)));
+    assert.ok(seenAt !== null && seenAt - s[0].t >= gap, 'verified ' + (seenAt - s[0].t) + ' ms after the burst');
+    drive(w, { max: 400, until: at('Trip') });
+    assertStep(w, 'Trip');
+    var bursts = [DYN, MEDIUM, BIG].map(function (b) {
+        var x = sendsTo(w, b);
+        x.forEach(function (y) { assert.strictEqual(y.t, x[0].t, b + ': every send of a burst at one time'); });
+        return x[0].t;
+    });
+    assert.ok(bursts[1] - bursts[0] >= gap, 'Medium ' + (bursts[1] - bursts[0]) + ' ms after Small');
+    assert.ok(bursts[2] - bursts[1] >= gap, 'Big ' + (bursts[2] - bursts[1]) + ' ms after Medium');
+});
+
+t.test('Apply: the stock gone before the burst\'s precheck pauses BuffFailed naming its grids, no packet', function () {
     var w = storm();
-    drive(w, { max: 500, until: function (w2, name) {
-        return name === 'Apply' && sendsTo(w2, DYN).length === 2 && w2.stockOf(DYN) > 0;
-    } });
-    assertStep(w, 'Apply');
-    // The top-up is planned, then the stock is gone before its precheck runs.
     tick(w);
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x10 -> 41,42,43,44/), logLines(w).join('\n'));
     w.setStock(DYN, 0);
     play(w);
     passesFor(w, 30000);
-    assertPaused(w, w.S.RunPause.BuffFailed, /apply BattleBuffHurt_BuffAd_SmallDynamite to 42 failed/);
-    assert.strictEqual(sendsTo(w, DYN).length, 2);
+    assertPaused(w, w.S.RunPause.BuffFailed,
+        /apply BattleBuffHurt_BuffAd_SmallDynamite to 41,42,43,44 failed: .*not enough in stock/);
+    assert.strictEqual(w.buffActions.length, 0, 'no packet');
 });
 
-t.test('Apply: an item whose grids together took its amount is done, its other grids are not sent', function () {
+t.test('Apply: a burst that took more than the amount says so and closes every grid', function () {
     var w = storm({ stock: 20, need: { 41: 10 } });
     drive(w, { until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 10]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 41: took 10 of 10; grid done/), logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite: trip total 10 taken; 3 grid\(s\) done/), logLines(w).join('\n'));
-    assert.strictEqual(w.stockOf(DYN), 10);
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 10], [42, 10, 3], [43, 10, 2], [44, 10, 1]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 41,42,43,44: took 16 of 10 \(more than the 10 needed\); 4 grid\(s\) done/),
+        logLines(w).join('\n'));
+    assert.strictEqual(sendsTo(w, DYN).length, 4, 'no grid offered twice');
+    assert.strictEqual(w.stockOf(DYN), 4);
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('grid-done rule: a run landing in the stock during a capped send still leaves the grid open', function () {
-    var rec = { id: 'land', label: 'Land (test)', trips: [{ items: [{ buff: DYN, grids: [43], amount: 10 }] }, {}] };
+t.test('Apply: a run landing in the stock during a burst counts in its take', function () {
+    var rec = { id: 'land', label: 'Land (test)', trips: [{ items: [{ buff: DYN, grids: [43], amount: 4 }] }, {}] };
     var w = scenWorld({ quests: [{ key: 'qd', name: 'Rocks', item: DYN, grids: [43] },
         { key: 'q9', name: 'Final', last: true }], gridNeed: { 43: 4 } });
-    w.setStock(DYN, 2);
+    w.setStock(DYN, 4);
     w.queues[1].entries.push({ type: DYN, amount: 1 });
     onIsland(w, record(w, rec), 0);
     var gi = w.H.host.game.gi;
@@ -761,22 +819,22 @@ t.test('grid-done rule: a run landing in the stock during a capped send still le
     };
     tick(w);
     play(w);
-    assert.deepStrictEqual(dynSends(w), [[43, 2, 2]]);
-    assert.strictEqual(w.stockOf(DYN), 1, 'the stock dropped by 1 only');
-    assert.ok(logged(w, /SmallDynamite -> 43: took all 2 offered \(2 of 10 so far\); grid stays open/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[43, 4, 4]]);
+    assert.strictEqual(w.stockOf(DYN), 1, 'the stock dropped by 3 only');
+    assert.ok(logged(w, /SmallDynamite burst x4 -> 43: took 4 of 4; 1 grid\(s\) done/), logLines(w).join('\n'));
     var r = w.st.run();
     var m = r.marks[w.S.modules.adventures.trips.applyMark(r, DYN, 43)];
-    assert.ok(!(m && m.seen), 'the grid is open');
+    assert.ok(m && m.seen, 'the grid is done');
     var part = r.marks['part:0:' + DYN + ':43'];
     assert.ok(part && part.seen, 'the part mark is set');
-    assert.strictEqual(part.taken, 2, 'the part mark keeps what the grid took');
+    assert.strictEqual(part.taken, 4, 'the part mark keeps what the burst took');
 });
 
 // ---- items asked for by the building at the grid ------------------------------------
 
 // Riches-like sabotage: four items to the building at 2631, whose quest names
-// none of them, only a trigger on the building. One WaterSplash send takes at
-// most 9 (o.cap), so 10 needs a second send.
+// none of them, only a trigger on the building. One WaterSplash packet takes at
+// most 9 (o.cap), so a burst of 10 takes 9 and the grid is done with it.
 var SABOTAGE_GRID = 2631;
 var SABOTAGE = {
     id: 'sabotage_test', label: 'Sabotage (test)',
@@ -814,25 +872,26 @@ function sabotageQuest(w) {
     return w.quests.filter(function (q) { return q.key === 'q6'; })[0];
 }
 
-t.test('Apply: a quest whose trigger names the building at the grid takes the items in file order, the short WaterSplash send gets its remainder', function () {
+t.test('Apply: a quest whose trigger names the building at the grid takes the items in file order, a short WaterSplash take is not topped up', function () {
     var w = sabotage();
     drive(w, { until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 1], [BLAST, 1, 1], [EXPERT, 1, 1]],
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [BLAST, 1, 1], [EXPERT, 1, 1]],
         JSON.stringify(itemSends(w)));
-    assert.ok(logged(w, /WaterSplash -> 2631: took 9 of 10, 9 of 10 so far; sending the other 1/), logLines(w).join('\n'));
+    assert.ok(logged(w, /WaterSplash burst x10 -> 2631: took 9 of 10; 1 grid\(s\) done; the grids took what they needed, nothing more is sent/),
+        logLines(w).join('\n'));
     assert.ok(logged(w, /Apply -> Trip \(items applied\)/), logLines(w).join('\n'));
     assert.ok(!logged(w, /waiting for a quest that wants/), 'no item wait');
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('Apply: a building-trigger remainder that takes nothing ends the grid without a pause', function () {
-    var w = sabotage({ splash: 9 });
+t.test('Apply: a grid that needs less than the amount takes it in one burst, no second send', function () {
+    var w = sabotage({ splash: 9, cap: 20 });
     drive(w, { until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 0], [BLAST, 1, 1], [EXPERT, 1, 1]],
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [BLAST, 1, 1], [EXPERT, 1, 1]],
         JSON.stringify(itemSends(w)));
-    assert.ok(logged(w, /WaterSplash -> 2631: took nothing more; grid done/), logLines(w).join('\n'));
+    assert.ok(logged(w, /WaterSplash burst x10 -> 2631: took 9 of 10; 1 grid\(s\) done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
@@ -868,7 +927,7 @@ t.test('Apply: no building name at the grid waits for a quest that wants the ite
     assert.ok(logged(w, /waiting for a quest that wants BattleBuffHurt_BuffAd_Glue/), logLines(w).join('\n'));
 });
 
-t.test('Apply: a client restart between the short take and the remainder offers only the remainder', function () {
+t.test('Apply: a client restart after a short burst take sends nothing more to the grid', function () {
     var w = sabotage();
     var pn = 'part:0:' + SPLASH + ':' + SABOTAGE_GRID;
     drive(w, { until: function (w2) {
@@ -885,7 +944,7 @@ t.test('Apply: a client restart between the short take and the remainder offers 
     drive(w2, { until: at('Trip') });
     assertStep(w2, 'Trip');
     var splash = sendsTo(w2, SPLASH);
-    assert.deepStrictEqual(plain(splash.map(function (s) { return [s.amount, s.took]; })), [[10, 9], [1, 1]],
+    assert.deepStrictEqual(plain(splash.map(function (s) { return [s.amount, s.took]; })), [[10, 9]],
         JSON.stringify(itemSends(w2)));
     assert.strictEqual(sendsTo(w2, EXPERT).length, 1);
 });
@@ -979,6 +1038,31 @@ t.test('Apply: an unread onmap quest holds the dynamite', function () {
     assert.ok(logged(w, /waiting for quest Buff_Adv_StormRecovery_SubQuest02 to be running, mode 2/), logLines(w).join('\n'));
 });
 
+t.test('Apply: the open grids of an item go in one burst while a grid whose quest is not running waits', function () {
+    var rec = { id: 'mixed', label: 'Mixed (test)', trips: [{ items: [{ buff: DYN, grids: [2014, 5680] }] }, {}] };
+    var need = {};
+    need[DYN + ':2014'] = 1;
+    need[DYN + ':5680'] = 1;
+    var w = scenWorld({
+        quests: [{ key: 'q3', name: 'Boulders02', onmap: ['buffad_boulder_02'], unread: true },
+            { key: 'q2', name: 'Boulders01', onmap: ['buffad_boulder_01'] }, { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need, world: { gridBuildings: { 2014: 'buffad_boulder_02', 5680: 'buffad_boulder_01' } }
+    });
+    w.auto.readFails = true;
+    w.setStock(DYN, 5);
+    onIsland(w, record(w, rec), 0);
+    passesFor(w, 120000);
+    assertStep(w, 'Apply');
+    assert.deepStrictEqual(sentTo(w, DYN), [5680], 'the open grid went past the held one');
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x1 -> 5680 \(stock 5, need 1; 2014 left for a later burst\)/),
+        logLines(w).join('\n'));
+    w.auto.readFails = false;
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(sentTo(w, DYN), [5680, 2014]);
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
 // ---- out of stock, other items first ----------------------------------------------
 
 // Storm Recovery trip 2 as the 15:16 log has it: the three dynamites with
@@ -1033,27 +1117,27 @@ function assertFileOrder(w, order) {
     }
 }
 
-t.test('Apply: Storm Recovery 15:16 totals finish the trip without a home trip', function () {
+t.test('Apply: Storm Recovery 15:16 totals finish the trip without a home trip, one burst per item', function () {
     var w = totalsWorld({ 5680: 2, 4394: 5, 2152: 2, 2070: 1 }, 10);
     var steps = [];
     drive(w, { max: 400, until: at('Trip'), on: stepRecorder(steps) });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(sendList(w, DYN), [[5680, 10, 2], [4394, 8, 5], [2152, 3, 2], [2070, 1, 1]],
+    assert.deepStrictEqual(sendList(w, DYN), [[5680, 10, 2], [4394, 10, 5], [2152, 10, 2], [2070, 10, 1]],
         JSON.stringify(sendList(w, DYN)));
-    assert.deepStrictEqual(sendList(w, MEDIUM), [[5680, 6, 2], [2152, 4, 1], [2014, 3, 2], [5814, 1, 1]],
+    assert.deepStrictEqual(sendList(w, MEDIUM), [[5680, 6, 2], [2152, 6, 1], [2014, 6, 2], [5814, 6, 1]],
         JSON.stringify(sendList(w, MEDIUM)));
-    assert.deepStrictEqual(sendList(w, BIG), [[2275, 5, 2], [2014, 3, 2], [5814, 1, 1]],
+    assert.deepStrictEqual(sendList(w, BIG), [[2275, 5, 2], [2014, 5, 2], [5814, 5, 1]],
         JSON.stringify(sendList(w, BIG)));
-    assert.ok(logged(w, /SmallDynamite -> 5680: took 2 of 10 \(2 of 10 so far\); grid full, the rest goes to the other grids/),
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 5680,4394,2152,2070: took 10 of 10; 4 grid\(s\) done/),
         logLines(w).join('\n'));
-    assert.ok(logged(w, /SmallDynamite -> 2070: took 1 of 1; grid done/), logLines(w).join('\n'));
+    assert.ok(logged(w, /BigDynamite burst x5 -> 2275,2014,5814: took 5 of 5; 3 grid\(s\) done/), logLines(w).join('\n'));
     assert.ok(!logged(w, /going home/), logLines(w).join('\n'));
     assert.ok(steps.indexOf('JumpHome:0') < 0, 'no home trip: ' + steps.join(' '));
     assertFileOrder(w, [DYN, MEDIUM, BIG]);
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('Apply: out of the first dynamite, the others go before the home trip', function () {
+t.test('Apply: out of the first dynamite, the others go to their own grids before the home trip', function () {
     var w = totalsWorld({ 5680: 2, 4394: 5, 2152: 1, 2070: 2 }, 9);
     var steps = [];
     var home = null;
@@ -1062,23 +1146,25 @@ t.test('Apply: out of the first dynamite, the others go before the home trip', f
         if (home === null && name === 'JumpHome') home = w2.itemSends.length;
     } });
     assert.ok(home !== null, 'went home: ' + steps.join(' '));
-    var before = w.itemSends.slice(0, home);
-    var after = w.itemSends.slice(home);
-    [MEDIUM, BIG].forEach(function (b) {
-        assert.ok(before.some(function (s) { return s.buff === b; }), b + ' sent before the home trip');
-        assert.ok(!after.some(function (s) { return s.buff === b; }), b + ' all sent before the home trip');
-    });
-    assert.ok(after.length > 0 && after.every(function (s) { return s.buff === DYN && s.grid === 2070; }),
-        'after the return only Small to 2070: ' + JSON.stringify(plain(after)));
+    function list(x) { return plain(x.map(function (s) { return [s.buff, s.grid, s.amount, s.took]; })); }
+    var before = list(w.itemSends.slice(0, home));
+    var after = list(w.itemSends.slice(home));
+    // Small is short, so no Small burst goes out; Medium's grids that Small
+    // still owes wait for it, its own grids and all of Big go now.
+    assert.deepStrictEqual(before, [[MEDIUM, 2014, 6, 2], [MEDIUM, 5814, 6, 1],
+        [BIG, 2275, 5, 2], [BIG, 2014, 5, 2], [BIG, 5814, 5, 1]], JSON.stringify(before));
+    assert.deepStrictEqual(after, [[DYN, 5680, 10, 2], [DYN, 4394, 10, 5], [DYN, 2152, 10, 1], [DYN, 2070, 10, 2],
+        [MEDIUM, 5680, 3, 2], [MEDIUM, 2152, 3, 1]], JSON.stringify(after));
     var lines = logLines(w);
     assert.strictEqual(lines.filter(function (l) {
-        return /out of BattleBuffHurt_BuffAd_SmallDynamite with 1 grid\(s\) left; going home for more/.test(l);
+        return /out of BattleBuffHurt_BuffAd_SmallDynamite with 4 grid\(s\) left; going home for more/.test(l);
     }).length, 1, lines.join('\n'));
     assert.strictEqual(lines.filter(function (l) {
         return /out of BattleBuffHurt_BuffAd_SmallDynamite; continuing with the other items first/.test(l);
     }).length, 1, lines.join('\n'));
     assert.ok(steps.lastIndexOf('Apply:0') > steps.indexOf('JumpHome:0'), 'back to the same trip: ' + steps.join(' '));
-    assert.strictEqual(sendsTo(w, DYN).reduce(function (n, s) { return n + s.took; }, 0), 10, 'Small trip total');
+    assert.strictEqual(tookOf(w, DYN), 10, 'Small trip total');
+    assert.strictEqual(tookOf(w, MEDIUM), 6, 'Medium trip total');
     assertFileOrder(w, [DYN, MEDIUM, BIG]);
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
@@ -1095,7 +1181,7 @@ t.test('Apply: an out-of-stock item holds its grid for later items on it (Riches
     assert.strictEqual(home, 0, 'nothing sent before the home trip: ' + steps.join(' '));
     assertStep(w, 'Trip');
     assert.strictEqual(w.st.run().trip, 0, 'the same trip');
-    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [SPLASH, 1, 1], [BLAST, 1, 1], [EXPERT, 1, 1]],
+    assert.deepStrictEqual(itemSends(w), [[GLUE, 1, 1], [SPLASH, 10, 9], [BLAST, 1, 1], [EXPERT, 1, 1]],
         JSON.stringify(itemSends(w)));
     assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_Glue with 1 grid\(s\) left; going home for more/), logLines(w).join('\n'));
     assert.ok(!logged(w, /continuing with the other items first/), 'nothing else could go');
@@ -1126,8 +1212,9 @@ var GONE = {
     trips: [{ items: [{ buff: DYN, grids: [5680], amount: 4 }] }, {}]
 };
 
-// One boulder at 5680 that needs 4 Small, stock 2. o.noBuilding: no name at
-// the grid, the item asked for by a quest that names it.
+// One boulder at 5680 that needs 4 Small, stock 2 (o.stock), short of the
+// amount 4. o.noBuilding: no name at the grid, the item asked for by a quest
+// that names it.
 function goneWorld(o) {
     o = o || {};
     var need = {};
@@ -1138,26 +1225,35 @@ function goneWorld(o) {
         : [{ key: 'q2', name: 'Buff_Adv_StormRecovery_SubQuest02', onmap: ['buffad_boulder_01'], stayOpen: true }];
     quests.push({ key: 'q9', name: 'Final', last: true });
     var w = scenWorld({ quests: quests, gridNeed: need, world: { gridBuildings: buildings } });
-    w.setStock(DYN, 2);
+    w.setStock(DYN, typeof o.stock === 'number' ? o.stock : 2);
     onIsland(w, record(w, GONE), 0);
     return w;
 }
 
-t.test('Apply: a stock-capped grid whose boulder is gone is done', function () {
+t.test('Apply: a grid that took some, whose boulder goes before its burst, is done with no packet', function () {
+    // The grid took 2 of the 4 on an earlier leg, so the stock of 2 covers
+    // the rest; the boulder goes between the decision and the burst.
     var w = goneWorld();
-    drive(w, { max: 100, until: at('Trip'), on: function (w2) {
-        if (sendsTo(w2, DYN).length) delete w2.gridBuildings[5680];
-    } });
+    var r = w.st.run();
+    var ld = w.S.modules.adventures.loader;
+    var pn = 'part:0:' + DYN + ':5680';
+    ld.markSeen(r, pn);
+    ld.marked(r, pn).taken = 2;
+    w.st.save();
+    tick(w);
+    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x2 -> 5680 \(stock 2, need 2\)/), logLines(w).join('\n'));
+    delete w.gridBuildings[5680];
+    play(w);
+    drive(w, { max: 100, until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered \(2 of 4 so far\); grid stays open/), logLines(w).join('\n'));
+    assert.strictEqual(w.buffActions.length, 0, 'no packet');
     assert.ok(logged(w, /SmallDynamite -> 5680: building gone after 2; grid done/), logLines(w).join('\n'));
     assert.ok(!transitions(w).some(function (x) { return x.to === 'JumpHome'; }), JSON.stringify(transitions(w)));
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('Apply: a boulder gone during the capped send ends the grid at its check', function () {
-    var w = goneWorld();
+t.test('Apply: a boulder gone right after the burst does not hold its check', function () {
+    var w = goneWorld({ stock: 4 });
     var gi = w.H.host.game.gi;
     var real = gi.SendServerAction;
     gi.SendServerAction = function (id) {
@@ -1166,17 +1262,19 @@ t.test('Apply: a boulder gone during the capped send ends the grid at its check'
     };
     drive(w, { max: 100, until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered; building gone, grid done/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [[5680, 4, 4]], JSON.stringify(dynSends(w)));
+    assert.ok(logged(w, /SmallDynamite burst x4 -> 5680: took 4 of 4; 1 grid\(s\) done/), logLines(w).join('\n'));
     assert.ok(!transitions(w).some(function (x) { return x.to === 'JumpHome'; }), JSON.stringify(transitions(w)));
+    assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('Apply: a stock-capped grid with no building name stays open and the run goes home', function () {
+t.test('Apply: a stock short of the amount sends no partial burst and the run goes home', function () {
     var w = goneWorld({ noBuilding: true });
     drive(w, { max: 100, until: function (w2, name) { return name !== 'Apply'; } });
-    assert.deepStrictEqual(dynSends(w), [[5680, 2, 2]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 5680: took all 2 offered \(2 of 4 so far\); grid stays open/), logLines(w).join('\n'));
-    assert.ok(!logged(w, /building gone/), logLines(w).join('\n'));
+    assert.deepStrictEqual(dynSends(w), [], JSON.stringify(dynSends(w)));
+    assert.strictEqual(w.buffActions.length, 0, 'no packet');
+    assert.ok(logged(w, /out of BattleBuffHurt_BuffAd_SmallDynamite with 1 grid\(s\) left; going home for more/),
+        logLines(w).join('\n'));
     assert.ok(transitions(w).some(function (x) { return x.from === 'Apply' && x.to === 'JumpHome'; }),
         JSON.stringify(transitions(w)));
 });
@@ -1616,15 +1714,28 @@ t.test('reload mid-Apply: the restarted run sends nothing twice and waits, then 
     w.setStock(BRIDGE, 5);
     onIsland(w, record(w, ONE), 0);
     tick(w);
-    play(w, function () { return w.itemSends.length === 1; });
-    assert.strictEqual(w.itemSends.length, 1);
+    play(w, function () { return w.itemSends.length > 0; });
+    assert.strictEqual(w.itemSends.length, 2, 'one burst to both grids');
     w = restart(w);
     passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS - PASS_MS);
     assertStep(w, 'Apply');
-    assert.strictEqual(w.itemSends.length, 1, 'no second send while the first is unseen');
+    assert.strictEqual(w.itemSends.length, 2, 'no second send while the burst is unseen');
     passesFor(w, 3 * PASS_MS);
     assertPaused(w, w.S.RunPause.NotObserved, /item ChangeSkin_BuffAd_Bridge sent to 11 but not seen/);
-    assert.strictEqual(w.itemSends.length, 1);
+    assert.strictEqual(w.itemSends.length, 2);
+});
+
+t.test('reload mid-Apply: a script reload during the burst\'s quiet check sends nothing twice', function () {
+    var w = storm();
+    tick(w);
+    play(w, function () { return w.itemSends.length > 0; });
+    assert.strictEqual(w.itemSends.length, 4, 'the burst went out');
+    reload(w);
+    passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 3 * PASS_MS);
+    assert.strictEqual(w.buffActions.length, 4, 'no packet twice: ' + JSON.stringify(dynSends(w)));
+    [41, 42, 43, 44].forEach(function (g) {
+        assert.strictEqual(sendsTo(w, DYN).filter(function (s) { return s.grid === g; }).length, 1, 'grid ' + g + ' once');
+    });
 });
 
 t.test('reload mid-Apply: a script reload keeps the round and sends nothing twice', function () {
@@ -1675,12 +1786,13 @@ t.test('Pause and Resume mid-trip: nothing is sent while paused, every grid once
     w.setStock(BRIDGE, 3);
     w.setStock(SHEET, 3);
     onIsland(w, record(w, TWINS), 1);
-    drive(w, { until: function (w2) { return w2.itemSends.length === 2; } });
+    drive(w, { until: function (w2) { return w2.itemSends.length > 0; } });
+    assert.strictEqual(w.itemSends.length, 3, 'the Bridge burst');
     var run = w.S.modules.adventures.run;
     assert.strictEqual(run.pause(), true);
     w.kernelPause();
     passesFor(w, 120000);
-    assert.strictEqual(w.itemSends.length, 2, 'nothing sent while paused');
+    assert.strictEqual(w.itemSends.length, 3, 'nothing sent while paused');
     assert.strictEqual(run.resume(), true);
     drive(w, { until: at('Trip') });
     assertStep(w, 'Trip');
@@ -1847,6 +1959,56 @@ t.test('Apply: a real packet failure still pauses BuffFailed', function () {
     assert.ok(name && typeof mk[name].sentAt === 'number', 'the mark keeps sentAt');
 });
 
+// The packets of action 61 never reach the game: nothing is taken and the
+// stock stays as it was. Returns the list of the grids they were for.
+function loseItemPackets(w) {
+    var gi = w.H.host.game.gi;
+    var real = gi.SendServerAction;
+    var lost = [];
+    gi.SendServerAction = function (id, p1, p2) {
+        if (id === 61) {
+            lost.push(p2);
+            return;
+        }
+        real.apply(this, arguments);
+    };
+    return lost;
+}
+
+t.test('Apply: a burst the stock never shows pauses NotObserved after ORDER_WAIT_MS, nothing resent', function () {
+    var w = storm();
+    var lost = loseItemPackets(w);
+    var wait = w.S.modules.adventures.loader.ORDER_WAIT_MS;
+    tick(w);
+    play(w, function () { return lost.length > 0; });
+    var sentAt = w.t;
+    assert.deepStrictEqual(lost, [41, 42, 43, 44], 'one burst');
+    passesFor(w, wait - 2 * PASS_MS);
+    assertStep(w, 'Apply');
+    drive(w, { max: 100 });
+    assertPaused(w, w.S.RunPause.NotObserved, /item BattleBuffHurt_BuffAd_SmallDynamite sent to 41 but not seen/);
+    assert.ok(w.t - sentAt >= wait, 'not before ORDER_WAIT_MS: ' + (w.t - sentAt));
+    assert.deepStrictEqual(lost, [41, 42, 43, 44], 'nothing resent');
+});
+
+t.test('Apply: a packet failing on the second grid stops the burst and pauses BuffFailed naming its grids', function () {
+    var w = storm();
+    var gi = w.H.host.game.gi;
+    var real = gi.SendServerAction;
+    var calls = 0;
+    gi.SendServerAction = function (id) {
+        if (id === 61 && ++calls === 2) throw new Error('buff packet refused');
+        real.apply(this, arguments);
+    };
+    drive(w, { max: 400 });
+    assertPaused(w, w.S.RunPause.BuffFailed,
+        /apply BattleBuffHurt_BuffAd_SmallDynamite to 41,42,43,44 failed: send failed/);
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4]], JSON.stringify(dynSends(w)));
+    var bl = burstLines(w, DYN);
+    assert.strictEqual(bl.length, 1, bl.join('\n'));
+    assert.ok(/: 41@\+\d+; 42 failed; not sent 43,44 \(/.test(bl[0]), bl[0]);
+});
+
 t.test('Reload: notSent, notSentAt, count and text marks survive a reload; other marks keep their shape', function () {
     // A no-packet send leaves notSent and notSentAt on the apply mark.
     var w = bridgeTrip();
@@ -1936,7 +2098,7 @@ function driveWindow(w, change, o) {
     }
 }
 
-t.test('Apply: a building renamed after the target was chosen sends nothing, and the next round sends', function () {
+t.test('Apply: a building renamed after the target was chosen sends nothing, and the next round sends the whole burst', function () {
     var w = storm();
     var refusedAt = null;
     w.gridBuildings[41] = 'Boulder_A';
@@ -1947,15 +2109,16 @@ t.test('Apply: a building renamed after the target was chosen sends nothing, and
     }, { until: function (w2) { return sendsTo(w2, DYN).length > 0; } });
     var warns = movedWarns(w);
     assert.strictEqual(warns.length, 1, buffWarns(w).join('\n'));
-    assert.ok(/SmallDynamite -> 41: not sent, .*\(was Boulder_A, now Boulder_B\)/.test(warns[0]), warns[0]);
+    assert.ok(/SmallDynamite -> 41,42,43,44: not sent, .*: 41 \(was Boulder_A, now Boulder_B\)$/.test(warns[0]), warns[0]);
     assert.strictEqual(w.st.run().status, w.S.RunStatus.Running, 'no pause');
     var s = sendsTo(w, DYN);
-    assert.deepStrictEqual(plain(s.map(function (x) { return [x.grid, x.amount, x.took]; })), [[41, 6, 4]]);
-    assert.strictEqual(w.buffActions.length, 1, 'one packet, after the retry');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 10, 3], [43, 10, 2], [44, 10, 1]], JSON.stringify(dynSends(w)));
+    assert.strictEqual(w.buffActions.length, 4, 'one burst, after the retry');
     var spacing = w.S.modules.adventures.trips.NOT_SENT_RETRY_MS;
     assert.ok(s[0].t - refusedAt >= spacing, 'retried after the gap: ' + (s[0].t - refusedAt));
     var lines = entryLines(w, DYN);
-    assert.ok(lines.length === 2 && /building Boulder_B \(first seen Boulder_A\)/.test(lines[1]), lines.join('\n'));
+    assert.strictEqual(lines.length, 8, 'four entries lines per decision: ' + lines.join('\n'));
+    assert.ok(/-> 41: entries .*building Boulder_B \(first seen Boulder_A\)/.test(lines[4]), lines.join('\n'));
 });
 
 t.test('Apply: a ruin replaced by its building site after the target was chosen sends nothing, then sends', function () {
@@ -1968,7 +2131,7 @@ t.test('Apply: a ruin replaced by its building site after the target was chosen 
     assert.strictEqual(warns.length, 1, buffWarns(w).join('\n'));
     assert.ok(/\(was BuffAd_Ruin_01, now BuffAd_Site\)/.test(warns[0]), warns[0]);
     assert.strictEqual(w.st.run().status, w.S.RunStatus.Running, 'no pause');
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 4]], JSON.stringify(dynSends(w)));
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 10, 3], [43, 10, 2], [44, 10, 1]], JSON.stringify(dynSends(w)));
 });
 
 t.test('Apply: a building that changes on every try pauses BuffFailed after three tries, no packet', function () {
@@ -1983,35 +2146,41 @@ t.test('Apply: a building that changes on every try pauses BuffFailed after thre
     assert.strictEqual(w.itemSends.length, 0);
 });
 
-t.test('Apply: a stock split 6 + 4 offers the largest stack, then the next one', function () {
-    var w = storm({ need: { 41: 10 } });
+t.test('Apply: a stock split 6 + 4 for an amount of 10 pauses BuffFailed, no packet', function () {
+    var w = storm({ stock: 6, need: { 41: 10 } });
     w.stock.push({ type: DYN, resource: '', amount: 4, uid: 'item:' + DYN + ':2' });
+    drive(w, { max: 100 });
+    assertPaused(w, w.S.RunPause.BuffFailed,
+        /apply BattleBuffHurt_BuffAd_SmallDynamite to 41,42,43,44 failed: no single stack of 10 \(largest 6, stock 10\); a burst sends from one stack/);
+    assert.strictEqual(w.buffActions.length, 0, 'no packet');
+    var left = w.stock.filter(function (e) { return e.type === DYN; }).map(function (e) { return e.amount; });
+    assert.deepStrictEqual(plain(left), [6, 4], 'both stacks untouched');
+});
+
+t.test('Apply: a short burst take warns, closes every grid of the burst, and sends nothing more', function () {
+    var w = storm({ stock: 10, need: { 41: 2, 42: 2, 43: 1, 44: 1 } });
     drive(w, { until: at('Trip') });
     assertStep(w, 'Trip');
-    assert.deepStrictEqual(dynSends(w), [[41, 6, 6], [41, 4, 4]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /apply BattleBuffHurt_BuffAd_SmallDynamite x6 -> 41 \(stock 10, largest stack 6\)/),
-        logLines(w).join('\n'));
-    assert.ok(!buffWarns(w).some(function (l) { return /no single stack/.test(l); }), 'no refused precheck');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 2], [42, 10, 2], [43, 10, 1], [44, 10, 1]], JSON.stringify(dynSends(w)));
+    var warn = w.H.logs().filter(function (l) {
+        return l.category === 'adventures' && l.level === 'warn' &&
+            /SmallDynamite burst x10 -> 41,42,43,44: took 6 of 10; 4 grid\(s\) done; the grids took what they needed, nothing more is sent/
+                .test(l.args.join(' '));
+    });
+    assert.strictEqual(warn.length, 1, logLines(w).join('\n'));
+    passesFor(w, 60000);
+    assert.strictEqual(sendsTo(w, DYN).length, 4, 'no top-up');
+    assert.strictEqual(w.stockOf(DYN), 4);
     assert.ok(!logged(w, /run paused/), 'no pause');
 });
 
-t.test('Apply: a short take on an item with several grids ends that grid, the rest goes to the next', function () {
-    var w = storm({ stock: 10, need: { 41: 2, 42: 5 } });
-    drive(w, { until: at('Trip') });
-    assertStep(w, 'Trip');
-    assert.deepStrictEqual(dynSends(w), [[41, 10, 2], [42, 8, 5], [43, 3, 2], [44, 1, 1]], JSON.stringify(dynSends(w)));
-    assert.ok(logged(w, /SmallDynamite -> 41: took 2 of 10 \(2 of 10 so far\); grid full, the rest goes to the other grids/),
-        logLines(w).join('\n'));
-    assert.strictEqual(sendsTo(w, DYN).filter(function (s) { return s.grid === 41; }).length, 1, 'no second send to 41');
-    assert.ok(!logged(w, /run paused/), 'no pause');
-});
-
-t.test('Apply: every item send logs one entries line', function () {
+t.test('Apply: every grid of a burst logs one entries line', function () {
     var w = storm();
     drive(w, { max: 500, until: function (w2) { return w2.st.run().trip === 1; } });
     var lines = entryLines(w, DYN);
     assert.strictEqual(lines.length, sendsTo(w, DYN).length, lines.join('\n'));
-    assert.ok(/-> 41: entries 6\[item:BattleBuffHurt_BuffAd_SmallDynamite\]; building none grid \?, buffs \?,/
+    assert.strictEqual(lines.length, 4, lines.join('\n'));
+    assert.ok(/-> 41: entries 10\[item:BattleBuffHurt_BuffAd_SmallDynamite\]; building none grid \?, buffs \?,/
         .test(lines[0]), lines[0]);
     assert.ok(/, in destruction \?; targets none group none via -$/.test(lines[0]), lines[0]);
     var x = sabotage();

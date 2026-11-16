@@ -381,3 +381,98 @@ t.test('NOT_SENT is exported as the nothing-sent reason', function () {
     var b = boot();
     assert.strictEqual(b.A.NOT_SENT, 'nothing sent');
 });
+
+// ---- checkAfterMs: a quiet time before the first check ----------------------
+
+t.test('checkAfterMs keeps check uncalled until the quiet time has passed, then verifies', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        checkAfterMs: 3 * gap(b),
+        // The effect is there from the send on: only the quiet time holds the check back.
+        send:  function () { world.sends++; return true; },
+        check: function () { world.checks++; return true; }
+    }));
+    assert.strictEqual(r.results.length, 1);
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(world.checks, 1);
+    // One send step and three check polls: two quiet ones and the one that reads.
+    assert.strictEqual(r.drove.rounds, 4);
+    assert.strictEqual(world.sends, 1);
+});
+
+t.test('without checkAfterMs the first poll already checks', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        send:  function () { world.sends++; return true; },
+        check: function () { world.checks++; return true; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.drove.rounds, 2);
+});
+
+t.test('checkAfterMs does not stop the timeout: an unseen effect still fails at timeoutMs', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 5 * gap(b),
+        checkAfterMs: 3 * gap(b),
+        send:  function () { world.sends++; return true; },
+        check: function () { world.checks++; return false; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(r.results[0].unseen, true);
+    assert.strictEqual(r.results[0].reason, 'not observed within ' + (5 * gap(b)) + ' ms');
+    // Polls 3 to 5 read; the two quiet ones do not.
+    assert.strictEqual(world.checks, 3);
+    assert.strictEqual(world.sends, 1);
+});
+
+t.test('an effect that appears during the quiet time is verified at its end', function () {
+    var b = boot();
+    var world = { sends: 0, done: false };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        checkAfterMs: 3 * gap(b)
+    }), function (n) { if (n === 2) world.done = true; });
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.drove.rounds, 4);
+});
+
+t.test('attempt rejects a checkAfterMs that is negative, not below timeoutMs or not a number', function () {
+    var b = boot();
+    var world = { sends: 0 };
+    var bad = [
+        def(world, { timeoutMs: 5 * gap(b), checkAfterMs: -1 }),
+        def(world, { timeoutMs: 5 * gap(b), checkAfterMs: 5 * gap(b) }),
+        def(world, { timeoutMs: 5 * gap(b), checkAfterMs: 9 * gap(b) }),
+        def(world, { timeoutMs: 5 * gap(b), checkAfterMs: '1000' }),
+        def(world, { timeoutMs: 5 * gap(b), checkAfterMs: NaN })
+    ];
+    for (var i = 0; i < bad.length; i++) {
+        assert.strictEqual(b.A.attempt(bad[i], function () {}), false);
+    }
+    assert.strictEqual(b.H.queued().length, 0);
+    assert.strictEqual(world.sends, 0);
+});
+
+t.test('checkAfterMs 0 is accepted and behaves as no quiet time', function () {
+    var b = boot();
+    var world = { sends: 0, done: false };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 3 * gap(b),
+        checkAfterMs: 0,
+        send: function () { world.sends++; world.done = true; return true; }
+    }));
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.drove.rounds, 2);
+});

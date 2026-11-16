@@ -492,16 +492,20 @@
     // about the zone the step observes. unseen stays only on a marked round:
     // the mark is what bounds its wait. Without one nothing would end it, and a
     // raise never seen would read as packed and go out again for ever, so an
-    // unmarked round keeps its failure.
-    function record(round, key, after) {
+    // unmarked round keeps its failure. keys lists the round keys of one
+    // action: a burst passes all its grids' marks and every key gets the same
+    // result, each with its own unseen, while after runs once.
+    function record(round, keys, after) {
         return function (result) {
             var rs = st().current();
             var r = rs.run;
             if (rs.round !== round || !r || r.id !== round.runId) return;
             if (S.core.zone.id() !== round.zoneId) return;
-            var stored = { status: result.status, reason: result.reason || '' };
-            if (result.unseen === true && marked(r, key)) stored.unseen = true;
-            round.results[key] = stored;
+            for (var i = 0; i < keys.length; i++) {
+                var stored = { status: result.status, reason: result.reason || '' };
+                if (result.unseen === true && marked(r, keys[i])) stored.unseen = true;
+                round.results[keys[i]] = stored;
+            }
             // A later attempt added to this round writes this again when it ends.
             if (complete(round)) round.doneAt = now();
             if (after) after(result, r);
@@ -510,9 +514,12 @@
 
     // A queued order never goes out on another zone than the one its round
     // started on, at home and on the island alike: the queue may run it after
-    // the user switched, and the step's read no longer holds there.
+    // the user switched, and the step's read no longer holds there. key is a
+    // round key, or an array of them for one action that sends several marked
+    // orders (a burst passes all its grids' marks); a string acts as before.
     function attempt(round, key, def, after) {
-        round.expected[key] = true;
+        var keys = Array.isArray(key) ? key : [key];
+        for (var i = 0; i < keys.length; i++) round.expected[keys[i]] = true;
         if (def && typeof def === 'object') {
             var pre = def.precheck;
             var zoneId = round.zoneId;
@@ -521,8 +528,10 @@
                 return typeof pre === 'function' ? pre.call(def, arg) : null;
             };
         }
-        if (!S.core.actions.attempt(def, record(round, key, after))) {
-            round.results[key] = { status: S.ActionResult.Failed, reason: 'attempt not started' };
+        if (!S.core.actions.attempt(def, record(round, keys, after))) {
+            for (var j = 0; j < keys.length; j++) {
+                round.results[keys[j]] = { status: S.ActionResult.Failed, reason: 'attempt not started' };
+            }
         }
     }
 
@@ -946,21 +955,31 @@
     // A send that made no host call (NOT_SENT) gives the mark back, so the
     // order may go out in a later round, and counts that on the mark
     // (notSent, notSentAt). The 'sent' line was logged before the packet and
-    // stays; the 'not sent' line after it says nothing went out.
+    // stays; the 'not sent' line after it says nothing went out. name is one
+    // mark, or an array of them for a send that issues several packets (a
+    // burst passes all its grids' marks): every mark is written before the
+    // first packet and saved once, and every mark is given back on NOT_SENT.
+    // A string acts as before.
     function wrapSend(r, name, def) {
         if (!def || typeof def.send !== 'function') return def;
         var send = def.send;
         var runId = r.id;
+        var names = Array.isArray(name) ? name : [name];
+        var label = names.join(', ');
         def.send = function (b) {
             var cur = st().run();
             var was = null;
+            var i;
             if (cur && cur.id === runId) {
-                var rec = mark(cur, name);
-                was = { sentAt: rec.sentAt, sentOnce: rec.sentOnce };
-                rec.sentAt = now();
-                rec.sentOnce = true;
+                was = [];
+                for (i = 0; i < names.length; i++) {
+                    var rec = mark(cur, names[i]);
+                    was.push({ sentAt: rec.sentAt, sentOnce: rec.sentOnce });
+                    rec.sentAt = now();
+                    rec.sentOnce = true;
+                }
                 st().save();
-                S.kernel.log(CATEGORY, st().label() + ': ' + name + ' sent');
+                S.kernel.log(CATEGORY, st().label() + ': ' + label + ' sent');
             }
             var res = send(b);
             // Only a mark written above is given back; with no mark written
@@ -968,13 +987,15 @@
             if (was && res === S.core.actions.NOT_SENT) {
                 var c = st().run();
                 if (c && c.id === runId) {
-                    var m = mark(c, name);
-                    m.sentAt = was.sentAt;
-                    m.sentOnce = was.sentOnce;
-                    m.notSent = (m.notSent || 0) + 1;
-                    m.notSentAt = now();
+                    for (i = 0; i < names.length; i++) {
+                        var m = mark(c, names[i]);
+                        m.sentAt = was[i].sentAt;
+                        m.sentOnce = was[i].sentOnce;
+                        m.notSent = (m.notSent || 0) + 1;
+                        m.notSentAt = now();
+                    }
                     st().save();
-                    S.kernel.log(CATEGORY, st().label() + ': ' + name +
+                    S.kernel.log(CATEGORY, st().label() + ': ' + label +
                         ' not sent (nothing went out); tried again in a later round');
                 }
             }

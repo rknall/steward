@@ -602,61 +602,123 @@
         };
     }
 
-    // Adventure item: one buff of this name applied to a grid on the island, in
-    // the amount given. Verified by the stock dropping below the baseline.
-    // The game takes at most what the grid still needs, so the drop can be
-    // smaller than the amount sent; dropped() reports what the verifying check
-    // saw, which the caller uses to tell a full grid from a stock-capped send.
-    // The star menu is read once, in the precheck, and the send uses that
-    // entry: the AIR bridge can miss the menu on a re-read within the same
-    // step, which would otherwise leave the send with no entry. One buff
-    // action spends one entry, so the precheck refuses a stock that is split
-    // so that no single stack holds the amount. A send with no usable entry
-    // makes no host call and says so with NOT_SENT, so it can be tried again
-    // later; only a packet that could not be sent is a failure.
-    // opts.building (a string, '' for an empty grid) is the building the
-    // caller saw at the grid when it chose to send. The action may run later
-    // than that read, so the precheck reads the grid again and, when another
-    // building stands there now, the send is a NOT_SENT: nothing goes out and
-    // the caller decides again on a fresh read. Without opts no building is
-    // read.
-    function adventureItem(name, grid, amount, opts) {
+    // HH:MM:SS.mmm of a ms time, for the burst line: the packets of a burst
+    // are ms apart, so the logger's second stamp cannot tell them apart.
+    function clockMs(ms) {
+        var d = new Date(ms);
+        var m = d.getMilliseconds();
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + '.' +
+            (m < 10 ? '00' : (m < 100 ? '0' : '')) + m;
+    }
+
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+    function uidText(e) {
+        try {
+            if (e && e.uid && typeof e.uid.toKeyString === 'function') return String(e.uid.toKeyString());
+        } catch (err) { /* left as unknown */ }
+        return '?';
+    }
+
+    function isArray(v) {
+        return Object.prototype.toString.call(v) === '[object Array]';
+    }
+
+    function gridsText(grids) {
+        return isArray(grids) ? grids.join(',') : String(grids);
+    }
+
+    // Buffs on the building at each grid ('<grid>:<count>', '?' when there is
+    // no building or no readable list). A count that grew while the stock did
+    // not drop points at client lag; both unchanged point at a server refusal.
+    function gridBuffs(grids) {
+        var out = [];
+        for (var i = 0; i < grids.length; i++) {
+            var c = null;
+            try {
+                var st = S.core.buildings.buffState(S.core.buildings.byGrid(grids[i]));
+                c = st ? st.buffsVector : null;
+            } catch (e) { c = null; }
+            out.push(grids[i] + ':' + (isNum(c) ? c : '?'));
+        }
+        return out.join(',');
+    }
+
+    // Adventure item burst: one buff of this name applied to every grid in
+    // `grids`, each offered `amount`, as one action whose single send issues
+    // one packet per grid back to back. No queue step, poll, read or log sits
+    // between two packets, so the server gets the whole item at once, as the
+    // client's own multi-target apply does. Every packet spends the one
+    // star-menu entry the precheck chose: the AIR bridge can miss the menu on
+    // a re-read within the same step, and one stack holding opts.need (what
+    // the whole burst may take, default amount) means no packet finds it
+    // empty. The game takes at most what each grid still needs, so the stock
+    // drop can be smaller than the offer; dropped() reports the drop of the
+    // whole burst, since the takes of single grids are not known.
+    // opts.quietMs holds the check back for that long after the send, so the
+    // burst is read only once the server has reacted to it; the verify window
+    // runs on top of it. The baseline is the stock the precheck read, so a
+    // missed re-read cannot leave the burst unverifiable.
+    // opts.buildings (parallel to grids, '' for an empty grid) are the
+    // buildings the caller saw when it chose to send. The action may run later
+    // than that read, so the precheck reads every grid again before the first
+    // packet; when any grid shows another building, the whole burst is a
+    // NOT_SENT: nothing goes out and the caller decides again on a fresh read.
+    // Without it no building is read. A send with no usable entry is a
+    // NOT_SENT too, so it can be tried again later; only a packet that could
+    // not be sent is a failure, and the burst stops at that grid, so no later
+    // grid is sent.
+    function adventureBurst(name, grids, amount, opts) {
         var drop = null;
         var found = null;
         var moved = null;
-        var expected = opts && typeof opts.building === 'string' ? opts.building : null;
-        return {
-            label:     'item ' + name + ' x' + amount + ' -> ' + grid,
+        var pre = null;
+        var need = opts && opts.need !== undefined && opts.need !== null ? opts.need : amount;
+        var expected = opts && isArray(opts.buildings) ? opts.buildings : null;
+        var quietMs = opts && isNum(opts.quietMs) && opts.quietMs > 0 ? opts.quietMs : 0;
+        var def = {
+            label:     'item ' + name + ' x' + amount + ' -> ' + gridsText(grids),
             category:  'buffs',
-            timeoutMs: BUFF_TIMEOUT_MS,
+            timeoutMs: quietMs + BUFF_TIMEOUT_MS,
             precheck: function () {
-                if (!isNum(grid) || !(grid > 0)) return 'no target grid';
+                if (!isArray(grids) || grids.length === 0) return 'no target grid';
+                for (var g = 0; g < grids.length; g++) {
+                    if (!isNum(grids[g]) || !(grids[g] > 0)) return 'no target grid';
+                }
                 if (!isNum(amount) || amount !== Math.floor(amount) || !(amount > 0)) return 'invalid amount';
                 if (S.core.zone.isAdventure() !== true) return 'not on an adventure';
                 found = null;
                 moved = null;
+                pre = null;
                 var raw = readEntries();
                 var n = raw ? stockIn(raw, name, '') : null;
                 if (!isNum(n)) return 'buff stock unreadable';
-                if (n < amount) return 'not enough in stock';
-                found = entryIn(raw, name, '', amount);
-                if (!found) return 'no single stack of ' + amount;
+                if (!isNum(need) || need !== Math.floor(need) || need < amount) return 'invalid amount';
+                if (n < need) return 'not enough in stock';
+                found = entryIn(raw, name, '', need);
+                if (!found) return 'no single stack of ' + need;
+                pre = n;
                 if (expected !== null) {
-                    var nm = '';
-                    try {
-                        S.core.buildings.invalidate();
-                        nm = S.core.buildings.name(S.core.buildings.byGrid(grid));
-                        if (typeof nm !== 'string') nm = '';
-                    } catch (e) { nm = ''; }
-                    if (nm !== expected) {
-                        moved = 'the building at the grid changed since the target was chosen (was ' +
-                            (expected || 'none') + ', now ' + (nm || 'none') + ')';
-                        return null;
+                    var list = [];
+                    try { S.core.buildings.invalidate(); } catch (e) { /* the reads below still run */ }
+                    for (var i = 0; i < grids.length; i++) {
+                        if (typeof expected[i] !== 'string') continue;
+                        var nm = '';
+                        try {
+                            nm = S.core.buildings.name(S.core.buildings.byGrid(grids[i]));
+                            if (typeof nm !== 'string') nm = '';
+                        } catch (e2) { nm = ''; }
+                        if (nm !== expected[i]) {
+                            list.push(grids[i] + ' (was ' + (expected[i] || 'none') + ', now ' + (nm || 'none') + ')');
+                        }
+                    }
+                    if (list.length) {
+                        moved = 'the building at the grid changed since the target was chosen: ' + list.join(', ');
                     }
                 }
                 return null;
             },
-            baseline: function () { return { stock: stock(name, '') }; },
+            baseline: function () { return { stock: isNum(pre) ? pre : stock(name, '') }; },
             send: function () {
                 var e = found;
                 var m = moved;
@@ -664,10 +726,30 @@
                 moved = null;
                 var why = m || (!e ? 'no star-menu entry' : (!e.uid ? 'its star-menu entry has no unique id' : null));
                 if (why) {
-                    S.kernel.warn('buffs', 'item ' + name + ' -> ' + grid + ': not sent, ' + why);
+                    S.kernel.warn('buffs', 'item ' + name + ' -> ' + gridsText(grids) + ': not sent, ' + why);
                     return S.core.actions.NOT_SENT;
                 }
-                return sendEntry(e, grid, amount);
+                var t0 = new Date().getTime();
+                var went = [];
+                var failed = -1;
+                for (var i = 0; i < grids.length; i++) {
+                    if (sendEntry(e, grids[i], amount) === false) {
+                        failed = i;
+                        break;
+                    }
+                    went.push(grids[i] + '@+' + (new Date().getTime() - t0));
+                }
+                // Written after the loop, so no log call delays a packet.
+                var text = 'item ' + name + ' burst x' + amount + ' -> ' + grids.length + ' grid(s): ' +
+                    (went.length ? went.join(', ') : 'none');
+                if (failed >= 0) {
+                    text += '; ' + grids[failed] + ' failed';
+                    if (failed + 1 < grids.length) text += '; not sent ' + grids.slice(failed + 1).join(',');
+                }
+                text += ' (stack ' + e.amount + '[' + uidText(e) + '], stock ' + fmtStock(pre) +
+                    ', need ' + need + ', first at ' + clockMs(t0) + ')';
+                S.kernel.log('buffs', text);
+                return failed < 0;
             },
             check: function (base) {
                 var n = stock(name, '');
@@ -677,11 +759,27 @@
                 }
                 return false;
             },
+            // The buffs per grid are read only when the caller named the
+            // buildings: without them the action reads no building at all.
             describe: function (base) {
-                return 'stock ' + (base ? base.stock : '?') + ' -> ' + stock(name, '');
+                var text = 'stock ' + (base ? base.stock : '?') + ' -> ' + stock(name, '');
+                if (expected !== null && isArray(grids)) text += '; buffs ' + gridBuffs(grids);
+                return text;
             },
             dropped: function () { return drop; }
         };
+        if (quietMs > 0) def.checkAfterMs = quietMs;
+        return def;
+    }
+
+    // Adventure item on one grid: a burst of one, so a single send and a
+    // burst share one implementation. opts.building (a string, '' for an empty
+    // grid) is the building the caller saw at the grid, checked as in the
+    // burst; without it no building is read.
+    function adventureItem(name, grid, amount, opts) {
+        return adventureBurst(name, [grid], amount, {
+            buildings: opts && typeof opts.building === 'string' ? [opts.building] : null
+        });
     }
 
     // How the definition of an adventure item relates to the building at a
@@ -851,6 +949,7 @@
         speed:         speed,
         camp:          camp,
         adventureItem: adventureItem,
+        adventureBurst: adventureBurst,
         targetsOf:     targetsOf,
         adventureTarget: adventureTarget,
         buffTypeOf:    buffTypeOf,
@@ -862,7 +961,7 @@
         WORKYARD_TARGET: WORKYARD_TARGET,
         population:    population,
         populationStock: populationStock,
-        map:          map,
+        map:           map,
         mapStock:      mapStock,
         mapReadRefusal: mapReadRefusal,
         mapCounts:     mapCounts,

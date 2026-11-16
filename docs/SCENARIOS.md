@@ -53,9 +53,9 @@ then repeats maps like a template series.
 - `amount` is the item's total need over its grids for the trip (default: one
   per grid), for example Storm small dynamite 10 for four boulder groups. Each
   grid is a group that takes only what it needs. Production makes that total at
-  home in one go. For an item with an amount each send offers `min(amount - taken over
-  the trip, stock)`, and the item is done once its grids together took the amount; without
-  an amount each grid is offered `1 - taken`. What a grid does not take stays in stock.
+  home in one go. For an item with an amount each grid of a burst is offered the
+  remaining trip total, takes only what it needs, and the item is done after one burst;
+  without an amount each grid is offered 1. What a grid does not take stays in stock.
   A return trip when stock runs out is only a fallback.
 - `quest` is an optional full quest name. When it is set, only that quest can
   make the item wanted for Apply: the quest must be running, and where the
@@ -77,21 +77,24 @@ then repeats maps like a template series.
   both still hold on a second read about 10 s later. Stock left from an earlier
   run never counts while that item is still queued. The wait has no limit and is
   logged once a minute as `waiting for production: ...`.
-- Send to a grid: `min(amount - taken, stock)` for an item with an amount, where
-  `taken` is what all the item's grids together have taken this trip (0 at first);
-  `min(1 - taken, stock)` with `taken` of that grid alone for an item without one.
-  Stock is logged before and after. A send is also capped by the largest single
-  stack of the item: the star menu can split a stock over several entries and one
-  send takes from one entry, so with 6 and 4 in stock the most offered is 6
-  (logged as `largest stack 6`). An amount that no single entry holds is refused
-  by the send check (`no single stack of 10`) and the run pauses BuffFailed.
-- Send checks: before a send the run reads the building standing at the grid
-  again. If it differs from the one the target was chosen on (a ruin became a
-  site, a building was removed or finished its destruction), nothing is sent. The
-  log says `not sent, the building at the grid changed since the target was chosen
-  (was X, now Y)`, and the grid is decided again about 10 s later on a fresh read.
+- Apply burst: all open wanted grids of one item go out together, back to back, from one
+  star-menu stack, as autoTSO does. For an item with an amount every grid is offered the
+  remaining trip total (`amount - taken over the trip`); each grid takes only what it needs
+  and the rest stays in stock. The burst needs one stack holding that total: when the total
+  stock is lower the run goes home for more first and sends nothing, and when the stock is
+  split so that no stack holds it the run pauses BuffFailed (`no single stack of N`) before
+  any packet. An item without an amount offers 1 per grid and the burst is cut to the
+  largest stack, so the stack cannot run dry mid-burst; the other grids go in the next burst.
+  After the burst the run waits 15 s (BURST_GAP_MS) before it reads the stock to verify, and
+  the next burst goes out no sooner than 15 s after the last packet. Stock is logged before and
+  after. One verified burst closes the item's grids of that burst.
+- Burst checks: before the first packet the run reads the building standing at every grid
+  of the burst again. If any differs from the one the target was chosen on (a ruin became a
+  site, a building was removed or finished its destruction), nothing is sent for the whole
+  burst. The log says `not sent, the building at the grid changed since the target was chosen
+  (was X, now Y)`, and the grids are decided again about 10 s later on a fresh read.
   A grid that changes on every try pauses BuffFailed after three tries
-  ("nothing sent after 3 tries"). Every item send also logs one line
+  ("nothing sent after 3 tries"). Every item send also logs one line per grid
   (`item <buff> -> <grid>: entries ...`), see In-game checks.
 - Quest gating (strict): on the run's island an item is applied and a map
   object is picked up only while a running quest asks for it explicitly. A map
@@ -171,25 +174,30 @@ Every item send logs one line before it goes out:
 <name>)] grid <grid of the building>, buffs <n>, in destruction <t|f|?>; targets
 <list|none> group <group|none> via <name|group|no|->`. `entries` lists each
 star-menu stack as `<amount>[<unique id>]` (`?` for an unreadable entry). Read
-this line first when a send was refused: it shows what the send saw.
+this line first when a send was refused: it shows what the send saw. Each burst also logs
+one core line (category `buffs`):
+`item <buff> burst x<amount> -> <n> grid(s): <g>@+<ms>, ... (stack <amount>[<id>], stock <n>,
+need <need>, first at <time>)`, with the ms offset of each packet from the first one, and
+`; <g> failed; not sent <g,...>` when a packet failed. The verified or failed line ends
+with `stock <before> -> <now>; buffs <g>:<n>,...`, the buff count of every grid. If the stock
+fell, the server took the burst. If the buff counts grew with the stock unchanged, the client
+is only late reading it. If both are unchanged, the server refused. Read the entries line
+first, then the burst line, then this one.
 
 ## Known limits
 
-- Grid-done rule: each grid records what it has taken, and the item's trip total
-  is the sum over its grids. A send that takes less than offered keeps the grid
-  open and the rest (`amount - taken over the trip`) goes to the same grid next,
-  until the item's grids together took the amount, the quest no longer wants the
-  item, or a send takes nothing. The exception is an item with more than one
-  grid: a short take closes that grid (logged as `grid full, the rest goes to
-  the other grids`) and the rest goes to the item's other open grids. A single-grid
-  item keeps its grid open as described above. A stock-capped grid (it took everything offered)
-  whose building is gone or being destroyed is done. After a client reload the
-  gone building is unknown, so the top-up send closes the grid instead.
+- Burst take: the item's trip total is the sum of the burst takes. A verified burst
+  closes every grid it covered, whatever it took, and nothing is sent to those grids
+  again. A grid whose building is gone or being destroyed is done as before.
 - Need is not reduced by what grids already took, so after a fallback stock-out
   home trip the run may reorder up to the already-taken count.
-- A top-up send to a grid that shows no stock drop is counted done, also when
-  the drop was only missed by a read lag. The item's quest then stays open
-  until Clear pauses.
+- A burst that took less than it offered closes all its grids, with a warn line and
+  no top-up send. The takes of the single grids are not known, only their sum, which
+  is booked on the burst's first grid. The item's quest then stays open until Clear
+  pauses if the grids still owe something.
+- A burst that fails part-way (a packet that cannot be sent) pauses BuffFailed and names
+  the grids that went out. Resume sends every grid without a seen mark again, also the
+  ones that already went out, so check the star menu stock first.
 - Quest gating is per item, not per grid, so the grid order in the file decides
   which grid goes first (same as autoTSO). A quest matched by the building at the
   grid is read per grid instead: a grid whose building's condition is met is
