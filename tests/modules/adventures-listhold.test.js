@@ -601,16 +601,113 @@ t.test('a general not listed before the deadline does not end a busy wait: gathe
 
 // ---- refusals over an unreadable general --------------------------------------------
 
-t.test('settleRound: a round refused unreadable is a round without effect', function () {
+// A finished round with these results; each value is a result, or a reason
+// string for a first-attempt refusal that sent nothing.
+function finishedRound(w, r, results) {
+    var keys = Object.keys(results);
+    var round = ld(w).startRound(r, r.step, keys);
+    keys.forEach(function (k) {
+        var v = results[k];
+        round.results[k] = typeof v === 'string' ? { status: w.S.ActionResult.Refused, reason: v } : v;
+    });
+    return round;
+}
+
+function verified(w) { return { status: w.S.ActionResult.Verified }; }
+
+[
+    { name: 'specialist unreadable', get: function (w) { return w.S.core.specialists.UNREADABLE; } },
+    { name: 'nothing sent', get: function (w) { return w.S.core.actions.NOT_SENT; } },
+    { name: 'viewed zone changed', get: function (w) { return ld(w).ZONE_CHANGED; } }
+].forEach(function (c) {
+    t.test('settleRound: a round refused unreadable is dropped without counting: ' + c.name, function () {
+        var w = islandWorld();
+        var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
+        finishedRound(w, r, { '1.1': c.get(w) });
+        var failed = 0;
+        var res = ld(w).settleRound(r, r.step, function () { failed++; }, 'positioning');
+        assert.strictEqual(res, 'wait');
+        assert.strictEqual(failed, 0);
+        assert.strictEqual(r.rounds, 0);
+        assert.strictEqual(ld(w).currentRound(r, r.step), null);
+        assert.strictEqual(ld(w).settleRound(r, r.step, function () { failed++; }, 'positioning'), 'new');
+    });
+});
+
+t.test('settleRound: with open, a shown verified key and an unreadable one drop uncounted', function () {
     var w = islandWorld();
     var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
-    var round = ld(w).startRound(r, r.step, ['1.1']);
-    round.results['1.1'] = { status: w.S.ActionResult.Refused, reason: w.S.core.specialists.UNREADABLE };
+    finishedRound(w, r, { '1.1': verified(w), '1.2': w.S.core.specialists.UNREADABLE });
     var failed = 0;
-    var res = ld(w).settleRound(r, r.step, function () { failed++; }, 'positioning');
-    assert.strictEqual(res, 'new');
+    var res = ld(w).settleRound(r, r.step, function () { failed++; }, 'departure', ['1.2']);
+    assert.strictEqual(res, 'wait');
     assert.strictEqual(failed, 0);
+    assert.strictEqual(r.rounds, 0);
+    assert.strictEqual(ld(w).currentRound(r, r.step), null);
+});
+
+t.test('settleRound: a verified key still open makes the round count', function () {
+    var w = islandWorld();
+    var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
+    finishedRound(w, r, { '1.1': verified(w), '1.2': w.S.core.specialists.UNREADABLE });
+    var res = ld(w).settleRound(r, r.step, function () {}, 'departure', ['1.1', '1.2']);
+    if (res === 'wait') {
+        // The order may still show late: it counts once the settling time is over.
+        w.t += ld(w).ORDER_WAIT_MS + 1000;
+        res = ld(w).settleRound(r, r.step, function () {}, 'departure', ['1.1', '1.2']);
+    }
+    assert.strictEqual(res, 'new');
     assert.strictEqual(r.rounds, 1);
+});
+
+t.test('settleRound: unreadable retries pause through onFailure after NOT_SENT_MAX tries and READ_MAX_MS', function () {
+    var w = islandWorld();
+    var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
+    var max = w.S.modules.adventures.trips.NOT_SENT_MAX;
+    var failed = [];
+    var res;
+    for (var i = 0; i < max; i++) {
+        finishedRound(w, r, { '1.1': w.S.core.specialists.UNREADABLE });
+        if (i === max - 1) w.t += ld(w).READ_MAX_MS;
+        res = ld(w).settleRound(r, r.step, function (f) { failed.push(f); }, 'departure', ['1.1']);
+        if (i < max - 1) assert.strictEqual(res, 'wait');
+    }
+    assert.strictEqual(res, 'paused');
+    assert.strictEqual(failed.length, 1);
+    assert.strictEqual(failed[0].key, '1.1');
+    assert.ok(/specialist unreadable/.test(failed[0].reason), failed[0].reason);
+    assert.ok(new RegExp(max + ' times').test(failed[0].reason), failed[0].reason);
+    assert.strictEqual(r.rounds, 0);
+});
+
+t.test('settleRound: quick unreadable retries under READ_MAX_MS never pause', function () {
+    var w = islandWorld();
+    var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
+    var failed = 0;
+    for (var i = 0; i < 6; i++) {
+        finishedRound(w, r, { '1.1': w.S.core.specialists.UNREADABLE });
+        assert.strictEqual(ld(w).settleRound(r, r.step, function () { failed++; }, 'departure', ['1.1']), 'wait');
+    }
+    assert.strictEqual(failed, 0);
+});
+
+t.test('settleRound: a verified result in between restarts the unreadable count', function () {
+    var w = islandWorld();
+    var r = startRun(w, [WAVE], { step: w.S.WaveStep.Position });
+    var max = w.S.modules.adventures.trips.NOT_SENT_MAX;
+    var failed = 0;
+    function onFailure() { failed++; }
+    for (var i = 0; i < max - 1; i++) {
+        finishedRound(w, r, { '1.1': w.S.core.specialists.UNREADABLE });
+        ld(w).settleRound(r, r.step, onFailure, 'departure', ['1.1']);
+    }
+    // 1.1 then went out and was decided, so it is no longer open.
+    finishedRound(w, r, { '1.1': verified(w), '1.2': w.S.core.specialists.UNREADABLE });
+    ld(w).settleRound(r, r.step, onFailure, 'departure', ['1.2']);
+    w.t += ld(w).READ_MAX_MS * 2;
+    finishedRound(w, r, { '1.1': w.S.core.specialists.UNREADABLE });
+    assert.strictEqual(ld(w).settleRound(r, r.step, onFailure, 'departure', ['1.1']), 'wait');
+    assert.strictEqual(failed, 0);
 });
 
 t.test('settleRound: a retry refused unreadable went out once and stays a failure', function () {
@@ -641,6 +738,90 @@ t.test('Depart: a marked send whose verify ran into a ghost is not sent again, a
     W.ticksFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 10000);
     assertPaused(w, w.S.RunPause.NotObserved);
     assert.strictEqual(w.zoneSends.length, 2, 'still no second send');
+});
+
+// ---- Depart over an unreadable general -------------------------------------------
+
+function departWorld() {
+    var w = homeWorld({ mapOpen: true });
+    startRun(w, [WAVE], { step: w.S.RunStep.Depart });
+    return w;
+}
+
+// The next step pass reads clean and its send finds g unreadable at the precheck,
+// as the bridge does for a moment: the ghost starts when the read ends and lasts
+// past the tick that runs the pass.
+function refuseNext(w, g) {
+    w.afterRead(function () { w.ghost(g, 2); });
+}
+
+function zoneSendsOf(w, key) {
+    return w.zoneSends.filter(function (z) { return z.key === key; }).length;
+}
+
+t.test('Depart: two ghosts in a row on one general do not pause; each general departs once', function () {
+    var w = departWorld();
+    for (var i = 0; i < 12; i++) {
+        if (i < 2) refuseNext(w, w.g2);
+        tick(w);
+        play(w);
+        assert.strictEqual(w.st.run().status, w.S.RunStatus.Running, 'pass ' + i + ': ' +
+            (w.st.run().pause ? w.st.run().pause.message : ''));
+    }
+    assert.notStrictEqual(stepName(w), 'Depart');
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1);
+    assert.strictEqual(zoneSendsOf(w, '1.2'), 1);
+});
+
+t.test('Depart: one general leaves, the other is refused unreadable: the round is not counted and the other goes out next pass', function () {
+    var w = departWorld();
+    refuseNext(w, w.g2);
+    tick(w);
+    play(w);
+    assertStep(w, 'Depart');
+    assert.strictEqual(w.st.run().rounds, 0);
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1);
+    assert.strictEqual(zoneSendsOf(w, '1.2'), 0);
+    for (var i = 0; i < 4 && zoneSendsOf(w, '1.2') === 0; i++) {
+        tick(w);
+        play(w);
+    }
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1);
+    assert.strictEqual(zoneSendsOf(w, '1.2'), 1);
+    assert.strictEqual(w.st.run().rounds, 0);
+});
+
+t.test('Depart: a general unreadable on every send pauses DepartFailed naming him and the read', function () {
+    var w = departWorld();
+    // Each send of Bert is refused at its precheck; Anna leaves on the first pass.
+    for (var n = 0; n < 400 && w.st.run().status === w.S.RunStatus.Running; n++) {
+        w.t += 2000;
+        refuseNext(w, w.g2);
+        tick(w);
+        play(w);
+    }
+    assertPaused(w, w.S.RunPause.DepartFailed, /1\.2.*specialist unreadable/);
+    assert.ok(!/verified but not observed/.test(w.st.run().pause.message), w.st.run().pause.message);
+    assert.strictEqual(zoneSendsOf(w, '1.2'), 0);
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1);
+});
+
+t.test('Depart: a second general refused unreadable in the round does not send the marked one again', function () {
+    var w = departWorld();
+    w.auto.travel = false;
+    refuseNext(w, w.g2);
+    tick(w);
+    play(w);
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1);
+    w.ghost(w.g1);
+    tick(w);
+    tick(w);
+    play(w);
+    assertStep(w, 'Depart');
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1, 'no second send of the marked general');
+    W.ticksFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 10000);
+    assertPaused(w, w.S.RunPause.NotObserved);
+    assert.strictEqual(zoneSendsOf(w, '1.1'), 1, 'still no second send');
 });
 
 t.test('Attack: a line refused unreadable is paced again and goes out on the clean read', function () {
