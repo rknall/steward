@@ -17,6 +17,12 @@
  *   send(base)   issues the host call(s); true when they were issued;
  *                NOT_SENT when it made no host call (nothing went out)
  *   check(base)  true when the expected effect is observed
+ *   observable() false while the effect cannot be read right now (for
+ *                example the caller's zone is not viewed). Such a poll runs
+ *                no check and does not use up the window or the quiet time.
+ *                Held polls are capped at HOLD_MAX_MS per attempt; after
+ *                that every poll counts again. A throwing observable counts
+ *                as observable
  *   describe(base)  optional extra text for the final log line
  *   timeoutMs    verify window per send
  *   checkAfterMs no check runs before this much time has passed since the
@@ -42,7 +48,8 @@
  * unseen: true on its result, so a caller can tell it from a refusal or a send
  * that failed; the action may still have gone out.
  * The window counts the polls that actually ran, not wall time: a check that
- * the modal guard or a queue backlog deferred does not use up the window.
+ * the modal guard or a queue backlog deferred does not use up the window,
+ * and neither does a poll held because observable() returned false.
  *
  * Every step runs as a 'core.attempt' queue entry carrying the poll gap, so
  * the gap between a send and its first check, and between checks, is one
@@ -76,6 +83,11 @@
     // Reason of a Failed result whose last send returned false: the host call
     // was made, so whether the packet went out is not known.
     var SEND_FAILED = 'send failed';
+
+    // Most time per attempt that polls may be held by observable(). A held
+    // attempt stays queued and keeps its module busy, so a hold must end on
+    // its own even when the effect never becomes readable.
+    var HOLD_MAX_MS = 60000;
 
     // Poll gap: the kernel's own spacing between queued actions, read at call
     // time. A non-positive value would make the window never close, so it is
@@ -212,7 +224,36 @@
         return typeof after === 'number' && (state.polls + 1) * pollGap() < after;
     }
 
+    // Whether this poll is held: observable() returned false, so a check
+    // now could only read the wrong state. A held poll is not counted, which
+    // keeps the window and the quiet time on polls that could observe. Once
+    // HOLD_MAX_MS of held polls are used up the hook is no longer asked.
+    function hold(state) {
+        if (state.holdDone) return false;
+        var r = call(state, 'observable');
+        if (!r.ok || r.value !== false) {
+            state.holding = false;
+            return false;
+        }
+        if (state.held * pollGap() >= HOLD_MAX_MS) {
+            state.holdDone = true;
+            S.kernel.warn(categoryOf(state.def), labelOf(state.def) + ': not observable for ' +
+                HOLD_MAX_MS + ' ms, checking again');
+            return false;
+        }
+        if (!state.holding) {
+            state.holding = true;
+            S.kernel.log(categoryOf(state.def), labelOf(state.def) + ': not observable, holding the check');
+        }
+        state.held++;
+        return true;
+    }
+
     function checkStep(state) {
+        if (hold(state)) {
+            enqueue(state);
+            return;
+        }
         if (!quiet(state) && observed(state)) {
             finish(state, S.ActionResult.Verified, '');
             return;
@@ -261,7 +302,10 @@
             S.kernel.error(categoryOf(def), labelOf(def) + ': attempt needs checkAfterMs >= 0 and below timeoutMs');
             return false;
         }
-        var state = { def: def, onDone: onDone, phase: 'send', sends: 0, polls: 0, base: undefined, started: false };
+        var state = {
+            def: def, onDone: onDone, phase: 'send', sends: 0, polls: 0, base: undefined, started: false,
+            held: 0, holding: false, holdDone: false
+        };
         return enqueue(state);
     }
 
@@ -270,6 +314,7 @@
         STEP:     STEP,
         NOT_SENT: NOT_SENT,
         SEND_FAILED: SEND_FAILED,
+        HOLD_MAX_MS: HOLD_MAX_MS,
         attempt:  attempt,
         step:     step
     };

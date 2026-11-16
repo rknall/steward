@@ -45,10 +45,10 @@ function def(world, extra) {
     return d;
 }
 
-function run(b, d, onStep) {
+function run(b, d, onStep, maxRounds) {
     var results = [];
     var ok = b.A.attempt(d, function (r) { results.push(r); });
-    var drove = drive(b, onStep);
+    var drove = drive(b, onStep, maxRounds);
     return { ok: ok, results: results, drove: drove };
 }
 
@@ -475,4 +475,137 @@ t.test('checkAfterMs 0 is accepted and behaves as no quiet time', function () {
     assert.strictEqual(r.ok, true);
     assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
     assert.strictEqual(r.drove.rounds, 2);
+});
+
+// ---- observable: a held check ----
+
+// An observable() that returns false for its first n calls, then true.
+function falseFor(n, world) {
+    return function () {
+        world.obsCalls = (world.obsCalls || 0) + 1;
+        return world.obsCalls > n;
+    };
+}
+
+t.test('observable false runs no check and does not use up the window', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var obs = falseFor(5, world);
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 3 * gap(b),
+        observable: function () {
+            var v = obs();
+            if (!v) world.heldAt = world.checks;
+            return v;
+        },
+        check: function () { world.checks++; return true; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(world.checks, 1);
+    assert.strictEqual(world.heldAt, 0);
+    assert.strictEqual(world.sends, 1);
+    // The send step, five held polls and the poll that reads.
+    assert.strictEqual(r.drove.rounds, 7);
+});
+
+t.test('an effect seen only once observable turns true is verified', function () {
+    var b = boot();
+    var world = { sends: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 2 * gap(b),
+        observable: falseFor(4, world),
+        send: function () { world.sends++; world.done = true; return true; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.results[0].sends, 1);
+    assert.strictEqual(world.sends, 1);
+    // More rounds than the two-poll window alone would allow.
+    assert.strictEqual(r.drove.rounds, 6);
+});
+
+t.test('held polls do not count toward checkAfterMs', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        checkAfterMs: 3 * gap(b),
+        observable: falseFor(3, world),
+        check: function () { world.checks++; return true; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(world.checks, 1);
+    // The send step, three held polls, then two quiet polls and the one that reads.
+    assert.strictEqual(r.drove.rounds, 7);
+});
+
+t.test('the hold cap ends the hold and the attempt fails unseen at the timeout', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0, obsCalls: 0 };
+    var cap = b.A.HOLD_MAX_MS / gap(b);
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 3 * gap(b),
+        observable: function () {
+            world.obsCalls++;
+            if (world.obsCalls <= cap) world.heldChecks = world.checks;
+            return false;
+        },
+        check: function () { world.checks++; return false; }
+    }), null, 200);
+    assert.strictEqual(r.results.length, 1);
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(r.results[0].unseen, true);
+    assert.strictEqual(r.results[0].reason, 'not observed within ' + (3 * gap(b)) + ' ms');
+    assert.strictEqual(world.heldChecks || 0, 0);
+    // The cap is used up once; after that the hook is no longer asked.
+    assert.strictEqual(world.obsCalls, cap + 1);
+    assert.strictEqual(world.sends, 1);
+    var capped = logsAt(b, 'warn', 'testcat').filter(function (l) {
+        return String(l.args[0]).indexOf('checking again') !== -1;
+    });
+    assert.strictEqual(capped.length, 1);
+});
+
+t.test('a throwing observable counts as observable', function () {
+    var b = boot();
+    var world = { sends: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 3 * gap(b),
+        observable: function () { throw new Error('boom'); },
+        send: function () { world.sends++; world.done = true; return true; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.drove.rounds, 2);
+    var threw = logsAt(b, 'warn', 'testcat').filter(function (l) {
+        return String(l.args[0]).indexOf('observable threw') !== -1;
+    });
+    assert.ok(threw.length >= 1);
+});
+
+t.test('the hold logs once per stretch', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0 };
+    // Held, observable (check misses), held, observable (check reads).
+    var seq = [false, false, true, false, true];
+    var i = 0;
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        observable: function () { return i < seq.length ? seq[i++] : true; },
+        check: function () { world.checks++; return world.checks >= 2; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    var holds = logsAt(b, 'log', 'testcat').filter(function (l) {
+        return String(l.args[0]).indexOf('holding the check') !== -1;
+    });
+    assert.strictEqual(holds.length, 2);
+});
+
+t.test('HOLD_MAX_MS is exported', function () {
+    var b = boot();
+    assert.strictEqual(b.A.HOLD_MAX_MS, 60000);
 });

@@ -1991,6 +1991,83 @@ t.test('Apply: a burst the stock never shows pauses NotObserved after ORDER_WAIT
     assert.deepStrictEqual(lost, [41, 42, 43, 44], 'nothing resent');
 });
 
+// Every log line of any category, joined, for the lines the action core
+// writes under its def's category.
+function allLines(w) {
+    return w.H.logs().map(function (l) { return l.args.join(' '); });
+}
+
+// Sends the storm burst, plays until just before its check may read, then
+// views HOME, so the verify would land while another zone is viewed. Returns
+// the time of the send.
+function burstThenHome(w) {
+    tick(w);
+    play(w, function () { return sendsTo(w, DYN).length === 4; });
+    var sentAt = w.t;
+    var gap = w.S.modules.adventures.trips.BURST_GAP_MS;
+    var poll = w.S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS;
+    // Each queued poll advances the clock by one gap; the poll that reaches
+    // BURST_GAP_MS is the first that reads, so stop two gaps short of it.
+    play(w, function () { return w.t >= sentAt + gap - 2 * poll; });
+    assert.ok(w.t < sentAt + gap, 'stopped before the check read');
+    w.gi.visitZone(HOME);
+    assert.strictEqual(w.S.core.zone.id(), HOME, 'viewing home');
+    assert.ok(!logged(w, /burst x10 -> 41,42,43,44: took/), 'not verified yet');
+    return sentAt;
+}
+
+t.test('Apply: a short zone switch while the burst verifies does not lose the result', function () {
+    var w = storm();
+    var sentAt = burstThenHome(w);
+    var gap = w.S.modules.adventures.trips.BURST_GAP_MS;
+    // Six seconds on HOME, past the time the check would first have read.
+    // Only queued entries run: the held attempt keeps the module busy, so
+    // the scheduler gives it no plan() meanwhile.
+    play(w, function () { return w.t >= sentAt + gap + 6000; });
+    assert.strictEqual(w.S.core.zone.id(), HOME, 'still on home: the hold was exercised');
+    assert.ok(w.pending.length > 0, 'the attempt is still queued');
+    assert.ok(allLines(w).some(function (l) { return /not observable, holding the check/.test(l); }),
+        allLines(w).join('\n'));
+    assert.ok(!logged(w, /burst x10 -> 41,42,43,44: took/), 'nothing read on home');
+    w.gi.visitZone(ZONE);
+    play(w);
+    assert.strictEqual(w.pending.length, 0, 'the attempt ended on the round\'s zone');
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(dynSends(w), [[41, 10, 4], [42, 10, 3], [43, 10, 2], [44, 10, 1]],
+        'sent once per grid: ' + JSON.stringify(dynSends(w)));
+    assert.strictEqual(w.buffActions.length, 4, 'four packets, nothing resent');
+    var r = w.st.run();
+    var mark = r.marks[w.S.modules.adventures.trips.applyMark(r, DYN, 41)];
+    assert.ok(!mark || mark.seen, 'the burst\'s mark is seen: ' + JSON.stringify(mark));
+    assert.ok(logged(w, /SmallDynamite burst x10 -> 41,42,43,44: took 10 of 10; 4 grid\(s\) done/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /action round dropped/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /sent, waiting to see it/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+});
+
+t.test('Apply: a zone switch longer than the hold cap waits on the mark and sends nothing again', function () {
+    var w = storm();
+    burstThenHome(w);
+    // The hold runs out on HOME and the attempt ends there, so record()
+    // discards its result.
+    play(w);
+    assert.strictEqual(w.pending.length, 0, 'the attempt ended');
+    assert.strictEqual(w.S.core.zone.id(), HOME, 'still on home');
+    var warns = w.H.logs().filter(function (l) {
+        return l.level === 'warn' && /not observable for \d+ ms, checking again/.test(l.args.join(' '));
+    });
+    assert.strictEqual(warns.length, 1, allLines(w).join('\n'));
+    assert.ok(!logged(w, /burst x10 -> 41,42,43,44: took/), 'the result read on home is not taken');
+    passesFor(w, 30000);
+    w.gi.visitZone(ZONE);
+    drive(w, { max: 100 });
+    assert.strictEqual(sendsTo(w, DYN).length, 4, 'nothing resent: ' + JSON.stringify(dynSends(w)));
+    assert.strictEqual(w.buffActions.length, 4, 'four packets');
+    assert.ok(logged(w, /attempt no longer queued or its result came on another zone/) ||
+        logged(w, /sent, waiting to see it/), logLines(w).join('\n'));
+});
+
 t.test('Apply: a packet failing on the second grid stops the burst and pauses BuffFailed naming its grids', function () {
     var w = storm();
     var gi = w.H.host.game.gi;

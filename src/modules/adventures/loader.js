@@ -494,7 +494,9 @@
     // raise never seen would read as packed and go out again for ever, so an
     // unmarked round keeps its failure. keys lists the round keys of one
     // action: a burst passes all its grids' marks and every key gets the same
-    // result, each with its own unseen, while after runs once.
+    // result, each with its own unseen, while after runs once. The attempt
+    // holds its check while another zone is viewed, so a result only arrives
+    // off-zone once that hold ran out.
     function record(round, keys, after) {
         return function (result) {
             var rs = st().current();
@@ -517,6 +519,9 @@
     // the user switched, and the step's read no longer holds there. key is a
     // round key, or an array of them for one action that sends several marked
     // orders (a burst passes all its grids' marks); a string acts as before.
+    // While another zone is viewed the attempt also holds its check instead of
+    // reading there, so a verify that lands during a short zone switch is read
+    // on the round's zone once it is back and counts.
     function attempt(round, key, def, after) {
         var keys = Array.isArray(key) ? key : [key];
         for (var i = 0; i < keys.length; i++) round.expected[keys[i]] = true;
@@ -526,6 +531,11 @@
             def.precheck = function (arg) {
                 if (S.core.zone.id() !== zoneId) return ZONE_CHANGED;
                 return typeof pre === 'function' ? pre.call(def, arg) : null;
+            };
+            var obs = def.observable;
+            def.observable = function () {
+                if (S.core.zone.id() !== zoneId) return false;
+                return typeof obs === 'function' ? obs.call(def) : true;
             };
         }
         if (!S.core.actions.attempt(def, record(round, keys, after))) {
@@ -547,12 +557,16 @@
 
     // plan() runs only while the module has no queue work, so a round of this
     // run that is still incomplete when a step runs lost its attempts to a
-    // kernel Pause (queue reset) or a module disable (queue cancel), and its
-    // sends may already have gone out. Dropping it keeps a step from taking it
-    // for a round still running or from reading it as a reason to send again.
+    // kernel Pause (queue reset) or a module disable (queue cancel), or its
+    // result arrived while another zone was viewed and record() discarded it;
+    // its sends may already have gone out. Dropping it keeps a step from
+    // taking it for a round still running or from reading it as a reason to
+    // send again.
     function dropOrphan(r) {
         var rs = st().current();
-        if (rs.round && rs.round.runId === r.id && !complete(rs.round)) st().dropRound('attempt no longer queued');
+        if (rs.round && rs.round.runId === r.id && !complete(rs.round)) {
+            st().dropRound('attempt no longer queued or its result came on another zone');
+        }
     }
 
     // Whether a finished round without failure is a read round: at least one
