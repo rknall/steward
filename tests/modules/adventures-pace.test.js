@@ -546,7 +546,7 @@ t.test('runmenu: Done hides without a rebuild, the next map of a series neither 
     w.S.kernel.ui.refreshBarMenu = function (id) { rebuilds.push(id); return true; };
     w.S.kernel.ui.showBarMenu = function (id, show) { shown.push(show); return true; };
     var req = { templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 2, ended: false,
-        requested: w.t, finished: 0, closedAt: null };
+        requested: w.t, finished: 0 };
     var mk = function (id) {
         return w.st.newRun({
             id: id, templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', zoneId: null,

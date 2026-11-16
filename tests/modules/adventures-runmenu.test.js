@@ -45,7 +45,7 @@ function setup(o) {
     }
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: o.count || 1, ended: false,
-        requested: w.t, finished: o.finished || 0, closedAt: null
+        requested: w.t, finished: o.finished || 0
     }, r);
     if (o.paused) w.st.pause(w.S.RunPause.User, 'paused by you');
     return w;
@@ -587,7 +587,7 @@ t.test('sync does not rebuild across a series, rebuilds on start and only hides 
         paths: WAVES.slice(0, 2), loadoutPath: W.LOADOUT, loadoutKeys: {}, step: w.S.RunStep.Muster
     });
     var req = { templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 2, ended: false,
-        requested: w.t, finished: 0, closedAt: null };
+        requested: w.t, finished: 0 };
     w.st.begin(req, r);
     assert.deepStrictEqual(calls, ['adventures'], 'start rebuilds');
     assert.deepStrictEqual(shown[shown.length - 1], ['adventures', true], 'and shows');

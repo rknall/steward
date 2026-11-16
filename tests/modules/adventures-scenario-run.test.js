@@ -1761,7 +1761,7 @@ t.test('series of 2 maps: map 2 waits the gap and starts again at trip 1', funct
     drive(w, { max: 1500, on: function (w2, name) {
         var r = w2.st.run();
         if (name === 'Produce') produce.push(r.id + ':' + r.trip);
-        if (closed1 === null && w2.st.current().request.finished === 1) closed1 = w2.st.current().request.closedAt;
+        if (closed1 === null && w2.st.current().request.finished === 1) closed1 = w2.st.maps().closedAt;
         if (name === 'Clear' && !lastQuest(w2)) w2.quests.push({ key: 'q' + r.id, name: 'Final', last: true });
     } });
     var r = w.st.run();
@@ -1770,7 +1770,7 @@ t.test('series of 2 maps: map 2 waits the gap and starts again at trip 1', funct
     assert.strictEqual(w.st.current().request.finished, 2);
     var maps = w.buffActions.filter(function (b) { return b.type === 'Adventure'; });
     assert.strictEqual(maps.length, 2);
-    assert.ok(typeof closed1 === 'number', 'run 1 stored closedAt');
+    assert.ok(typeof closed1 === 'number', 'run 1 stored the map closing');
     assert.ok(maps[1].t >= closed1 + w.S.modules.adventures.home.GAP_MS, 'map 2 after the gap');
     var ids = [];
     produce.forEach(function (x) {
@@ -1779,6 +1779,31 @@ t.test('series of 2 maps: map 2 waits the gap and starts again at trip 1', funct
     });
     assert.strictEqual(ids.length, 2, 'two runs: ' + produce.join(' '));
     assert.strictEqual(produce.filter(function (x) { return x.split(':')[0] === ids[1]; })[0], ids[1] + ':0');
+});
+
+t.test('scenario: Stop mid-map, map closed by hand, new scenario at once waits GAP_MS from the first read that lacks it', function () {
+    var w = scenWorld();
+    var rec = { id: 'visits', label: 'Visits (test)', trips: [{}] };
+    W.startScenario(w, record(w, rec), { count: 1 });
+    drive(w, { max: 1500, until: at('Clear') });
+    assertStep(w, 'Clear');
+    assert.strictEqual(w.adventures.length, 1, 'the map is open');
+    assert.strictEqual(w.buffActions.filter(function (b) { return b.type === 'Adventure'; }).length, 1);
+    w.S.modules.adventures.run.pause();
+    w.kernelPause();
+    assert.strictEqual(w.st.clear(), true);
+    // The user closes the map by hand; the first read that lacks it dates the close.
+    w.adventures = [];
+    w.gi.visitZone(W.HOME);
+    w.t += 20000;
+    var firstRead = w.t;
+    assert.deepStrictEqual(plain(w.st.ownRead()), []);
+    assert.strictEqual(w.st.maps().closedAt, firstRead);
+    W.startScenario(w, record(w, rec), { count: 1 });
+    drive(w, { max: 1500, until: function () { return w.buffActions.filter(function (b) { return b.type === 'Adventure'; }).length > 1; } });
+    var starts = w.buffActions.filter(function (b) { return b.type === 'Adventure'; });
+    assert.strictEqual(starts.length, 2, 'the new series started its map');
+    assert.ok(starts[1].t >= firstRead + w.S.modules.adventures.home.GAP_MS, 'the new map start waited the gap');
 });
 
 t.test('Pause and Resume mid-trip: nothing is sent while paused, every grid once after Resume', function () {

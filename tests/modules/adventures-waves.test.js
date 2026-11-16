@@ -81,10 +81,88 @@ t.test('state: clear() writes run null and request null with no stale keys', fun
     startRun(w, ['C:/b/w1.txt']);
     w.st.clear();
     var data = JSON.parse(w.fs.disk[RUN_FILE]);
-    assert.deepStrictEqual(Object.keys(data).sort(), ['request', 'run', 'version']);
+    assert.deepStrictEqual(Object.keys(data).sort(), ['maps', 'request', 'run', 'version']);
     assert.strictEqual(data.run, null);
     assert.strictEqual(data.request, null);
     assert.strictEqual(data.version, w.st.FILE_VERSION);
+});
+
+t.test('state: load: a file without maps gives an unknown history (open null)', function () {
+    var w = attackWorld();
+    writeJson(w.fs, RUN_FILE, { version: w.st.FILE_VERSION, request: null, run: null });
+    var w2 = world({ fs: w.fs });
+    w2.mod.boot();
+    assert.deepStrictEqual(plain(w2.st.maps()), { open: null, closedAt: null, sentAt: null });
+});
+
+t.test('state: load: maps is normalised (bad open entries dropped, non-number times null)', function () {
+    var w = attackWorld();
+    writeJson(w.fs, RUN_FILE, {
+        version: w.st.FILE_VERSION, request: null, run: null,
+        maps: {
+            open: [{ name: 'BlackKnights', zoneId: 7 }, { name: 5, zoneId: 1 }, null, 'x', { name: 'Twins', zoneId: 'z' }],
+            closedAt: 'soon', sentAt: 1234
+        }
+    });
+    var w2 = world({ fs: w.fs });
+    w2.mod.boot();
+    assert.deepStrictEqual(plain(w2.st.maps()), {
+        open: [{ name: 'BlackKnights', zoneId: 7 }, { name: 'Twins', zoneId: null }],
+        closedAt: null, sentAt: 1234
+    });
+    writeJson(w.fs, RUN_FILE, { version: w.st.FILE_VERSION, request: null, run: null, maps: { open: 'bad', closedAt: 9 } });
+    var w3 = world({ fs: w.fs });
+    w3.mod.boot();
+    assert.deepStrictEqual(plain(w3.st.maps()), { open: null, closedAt: 9, sentAt: null });
+});
+
+t.test('state: clear and begin keep maps and carry an unseen map start\'s sentAt', function () {
+    var w = attackWorld();
+    var r = startRun(w, ['C:/b/w1.txt']);
+    w.st.maps().closedAt = 111;
+    r.marks = { map: { sentAt: 5000, seen: false, sentOnce: true, stock: 3 } };
+    w.st.clear();
+    assert.strictEqual(w.st.maps().closedAt, 111);
+    assert.strictEqual(w.st.maps().sentAt, 5000);
+    var data = JSON.parse(w.fs.disk[RUN_FILE]);
+    assert.strictEqual(data.maps.sentAt, 5000);
+    assert.strictEqual(data.maps.closedAt, 111);
+    var r2 = startRun(w, ['C:/b/w1.txt']);
+    r2.marks = { map: { sentAt: 9000, seen: false, sentOnce: true, stock: 3 } };
+    w.st.begin({ templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 1, ended: false,
+        requested: w.t, finished: 0 }, null);
+    assert.strictEqual(w.st.maps().sentAt, 9000);
+    assert.strictEqual(JSON.parse(w.fs.disk[RUN_FILE]).maps.sentAt, 9000);
+    var r3 = startRun(w, ['C:/b/w1.txt']);
+    r3.marks = { map: { sentAt: 100, seen: true, sentOnce: true } };
+    w.st.clear();
+    assert.strictEqual(w.st.maps().sentAt, 9000, 'an older mark changes nothing');
+});
+
+t.test('state: resume keeps an unseen map mark and clears the others', function () {
+    var w = attackWorld();
+    var r = startRun(w, ['C:/b/w1.txt']);
+    r.marks = {
+        map: { sentAt: 5000, seen: false, sentOnce: true, stock: 3 },
+        other: { sentAt: 6000, seen: false, sentOnce: true }
+    };
+    w.st.pause(w.S.RunPause.User, 'look');
+    assert.strictEqual(w.st.resume(), true);
+    assert.strictEqual(r.marks.map.sentAt, 5000);
+    assert.strictEqual(r.marks.map.stock, 3);
+    assert.strictEqual(r.marks.other.sentAt, null);
+    assert.ok(w.H.logs().some(function (l) { return /map start marker kept/.test(l.args.join(' ')); }));
+});
+
+t.test('state: normLines keeps a map mark\'s stock across a load', function () {
+    var w = attackWorld();
+    var r = startRun(w, ['C:/b/w1.txt']);
+    r.marks = { map: { sentAt: 5000, seen: false, sentOnce: true, stock: 4 } };
+    w.st.save();
+    var w2 = world({ fs: w.fs });
+    w2.mod.boot();
+    assert.strictEqual(w2.st.run().marks.map.stock, 4);
+    assert.strictEqual(w2.st.run().marks.map.sentAt, 5000);
 });
 
 t.test('state: an unknown step loads as Gate', function () {
@@ -274,7 +352,7 @@ t.test('state: a 0.6.0 run file loads Running at its step with the new fields de
     var q = w.st.current().request;
     assert.strictEqual(q.count, 2);
     assert.strictEqual(q.finished, 0);
-    assert.strictEqual(q.closedAt, null);
+    assert.ok(!('closedAt' in q));
     assert.strictEqual(w.st.status(), 'Running: Black Knights, run 1/2, wave 1/1, Attack');
 });
 

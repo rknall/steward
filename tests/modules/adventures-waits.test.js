@@ -89,7 +89,7 @@ function series(w, step, o) {
     for (k in (o.run || {})) if (Object.prototype.hasOwnProperty.call(o.run, k)) r[k] = o.run[k];
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: o.count || 1, ended: false,
-        requested: w.t, finished: 0, closedAt: null
+        requested: w.t, finished: 0
     }, r);
     return w.st.run();
 }
@@ -527,7 +527,7 @@ function packWorld(fields) {
     });
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 1, ended: false,
-        requested: w.t, finished: 0, closedAt: null
+        requested: w.t, finished: 0
     }, r);
     return w;
 }

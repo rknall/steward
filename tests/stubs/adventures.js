@@ -271,7 +271,10 @@ function homeStock(o, popName) {
 // through w.fighters); o.free: free pool map; o.camps: grid -> true (enemy)
 // or 'own'; o.quests: [{ key, name, finished, last, unread }] or null (unreadable);
 // o.fs: an airfs disk to boot on (fresh boot on the same disk); o.settings:
-// the module's stored settings, written right after boot.
+// the module's stored settings, written right after boot; o.mapsUnknown (off
+// by default) leaves the map record unknown, so no earlier map is assumed
+// (a fresh world otherwise has seen no map for long: open [], closedAt null).
+// A restart on a disk that holds the file takes the file's record instead.
 //
 // o.home (off by default) builds two zones, HOME (viewed at start, holding
 // o.generals and o.free) and ZONE (o.away generals, o.awayFree pool):
@@ -375,6 +378,11 @@ function world(o) {
     w.mod = H.module('adventures');
 
     w.st.now = function () { return w.t; };
+    // A fresh world has seen no map for long: the history is known and empty.
+    // o.mapsUnknown keeps the module's own default (no history at all).
+    if (o.mapsUnknown !== true) {
+        S.modules.adventures.runState.maps = { open: [], closedAt: null, sentAt: null };
+    }
     gi.mCurrentViewedZoneID = home ? HOME : ZONE;
     gi.mCurrentPlayer.mIsAdventureZone = !home;
     gi.isOnHomzone = function () { return gi.mCurrentViewedZoneID === HOME; };
@@ -1002,7 +1010,7 @@ function startRun(w, paths, over) {
     if (over.step) r.step = over.step;
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 1, ended: false,
-        requested: w.t, finished: 0, closedAt: null
+        requested: w.t, finished: 0
     }, r);
     return w.st.run();
 }
@@ -1010,7 +1018,7 @@ function startRun(w, paths, over) {
 // A scenario run at opts.step (default Muster), trip opts.trip (default 0),
 // of a series of opts.count maps. rec: { id, label, trips } as the scenario
 // store gives it; the map is the world's BlackKnights. opts.zoneId is the
-// open map's zone (default none); opts.closedAt the end of the previous map.
+// open map's zone (default none); opts.closedAt the end of the previous map, stored in the map record.
 function startScenario(w, rec, opts) {
     opts = opts || {};
     var r = w.st.newRun({
@@ -1022,8 +1030,9 @@ function startScenario(w, rec, opts) {
     });
     w.st.begin({
         templateId: '', label: rec.label, adventure: 'BlackKnights', count: opts.count || 1, ended: false,
-        requested: w.t, finished: 0, closedAt: opts.closedAt === undefined ? null : opts.closedAt
+        requested: w.t, finished: 0
     }, r);
+    if (opts.closedAt !== undefined) w.st.maps().closedAt = opts.closedAt;
     return w.st.run();
 }
 

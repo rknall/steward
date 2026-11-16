@@ -79,7 +79,7 @@ function series(w, o) {
     for (k in (o.run || {})) if (Object.prototype.hasOwnProperty.call(o.run, k)) r[k] = o.run[k];
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: 2, ended: false,
-        requested: w.t, finished: 0, closedAt: null
+        requested: w.t, finished: 0
     }, r);
     return w.st.run();
 }
@@ -252,10 +252,11 @@ function queueLags(w) {
 // comes. fail: the words of a failure that pauses at once. seen: how the site
 // ends when the send verified and its effect stays away, for the sites where
 // that is a wait of its own; resends says whether a Resume sends again then.
+// resumeSends false: a Resume after the pause never sends again (the map start).
 var SITES = [
     {
         name: 'Map start', mark: 'map', step: 'StartMap', next: 'Depart', wait: 'map start',
-        reason: 'NotObserved', text: /map start sent but not seen/, failure: 'MapFailed', fail: /start map failed/,
+        reason: 'MapFailed', text: /map started but not listed/, failure: 'MapFailed', fail: /start map failed/,
         core: function (S) { return [S.core.buffs, 'map']; },
         // A failed map send goes out once more after the stock shows no map
         // started (#62).
@@ -268,7 +269,10 @@ var SITES = [
         },
         sends: function (w) { return w.buffActions.filter(function (b) { return b.type === 'Adventure'; }).length; },
         effect: function (w) { w.adventures.push({ adventureName: 'BlackKnights', zoneID: ZONE }); },
-        seen: { reason: 'MapFailed', text: /map started but not listed/, resends: false }
+        seen: { reason: 'MapFailed', text: /map started but not listed/, resends: false },
+        // The withheld map spends the stock, so a stale start is a start that
+        // happened; Resume never sends the map start again.
+        resumeSends: false
     },
     {
         name: 'Depart', mark: 'depart:1.1', step: 'Depart', next: 'Jump', wait: 'departure of 1.1',
@@ -432,6 +436,14 @@ SITES.forEach(function (site) {
         slow(w, site);
         assertPausesAtWait(w, site, sendAndFinish(w, site));
         assert.strictEqual(w.S.modules.adventures.run.resume(), true);
+        if (site.resumeSends === false) {
+            drive(w, { max: 60 });
+            assert.strictEqual(site.sends(w), 1, 'never sent again');
+            passTo(w, w.t + orderWait(w));
+            assertPaused(w, site.reason, site.text);
+            assert.strictEqual(site.sends(w), 1, 'still one send');
+            return;
+        }
         drive(w, { until: function () { return site.sends(w) > 1; }, max: 60 });
         assert.strictEqual(site.sends(w), 2, 'the user looked, so it goes out again');
         play(w);

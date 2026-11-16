@@ -456,18 +456,18 @@ function runSetup(maps, extra) {
         return s.answer === undefined ? def : s.answer;
     };
     H.ctx.confirm = function (text) { s.confirms.push(text); return s.agree === true; };
-    if (extra && extra.open) {
-        var prev = H.host.game.def;
-        H.host.game.def = function (name) {
-            if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
-                return { getInstance: function () { return {
-                    getAdventures: function () { return [{ adventureName: 'BlackKnights' }]; },
-                    isMyAdventure: function () { return true; }
-                }; } };
-            }
-            return prev(name);
-        };
-    }
+    // The own adventures must be readable for a start to go on; extra.open lists
+    // the map as open (zone 7).
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return extra && extra.open ? [{ adventureName: 'BlackKnights', zoneID: 7 }] : []; },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
     // The executor's file check needs battle files on disk; the tests stand in
     // for it (opts.realCheck keeps the real one). `checks` records the options
     // each call got, `problems` makes the stand-in report fatal problems.
@@ -533,7 +533,7 @@ t.test('start at home with the map not open stores a Muster run with no zone and
     assert.strictEqual(req.count, 3);
     assert.strictEqual(req.ended, false);
     assert.strictEqual(req.finished, 0);
-    assert.strictEqual(req.closedAt, null);
+    assert.ok(!('closedAt' in req));
     assert.strictEqual(req.templateId, s.id);
     assert.strictEqual(s.prompts.length, 1);
     assert.strictEqual(s.prompts[0].def, '3');
@@ -551,7 +551,6 @@ t.test('start at home stores the template horseshoe choice', function () {
 
 t.test('start at home with the map open stores the zone and counts one more', function () {
     var s = runSetup(3, { open: true });
-    s.S.core.adventures.zoneIdOf = function () { return 7; };
     assert.strictEqual(s.run.start(s.id), true);
     var run = s.S.modules.adventures.state.run();
     assert.strictEqual(run.zoneId, 7);
@@ -563,7 +562,6 @@ t.test('start at home with the map open stores the zone and counts one more', fu
 
 t.test('start on the open map stores a run at Gate of the chosen wave', function () {
     var s = runSetup(3, { open: true });
-    s.S.core.adventures.zoneIdOf = function () { return 7; };
     s.S.core.zone.id = function () { return 7; };
     s.H.host.game.gi.isOnHomzone = function () { return false; };
     s.answer = '2';
@@ -580,7 +578,6 @@ t.test('start on the open map stores a run at Gate of the chosen wave', function
 
 t.test('start elsewhere alerts and stores nothing', function () {
     var s = runSetup(3);
-    s.S.core.adventures.zoneIdOf = function () { return 7; };
     s.S.core.zone.id = function () { return 1; };
     s.H.host.game.gi.isOnHomzone = function () { return false; };
     s.answer = '2';

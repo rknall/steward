@@ -98,8 +98,9 @@ function series(w, o) {
     for (k in (o.run || {})) if (Object.prototype.hasOwnProperty.call(o.run, k)) r[k] = o.run[k];
     w.st.begin({
         templateId: 't1', label: 'Black Knights', adventure: 'BlackKnights', count: o.count || 1, ended: false,
-        requested: w.t, finished: o.finished || 0, closedAt: o.closedAt === undefined ? null : o.closedAt
+        requested: w.t, finished: o.finished || 0
     }, r);
+    if (o.closedAt !== undefined) w.st.maps().closedAt = o.closedAt;
     return w.st.run();
 }
 
@@ -250,7 +251,8 @@ function reload(w) {
     W.patchCore(w);
 }
 
-// A client restart: a fresh boot on the same disk. The game keeps what it
+// A client restart: a fresh boot on the same disk (the map record comes from
+// the file or, when there is none, starts unknown). The game keeps what it
 // holds (generals, pools, adventures, menu stock, queues, quests); the run
 // comes back from its file, and the stored settings survive the fresh boot. The
 // record arrays are shared, so counts span the restart.
@@ -259,10 +261,10 @@ var SHARED = ['orders', 'raises', 'unloads', 'buffs', 'claims', 'zoneSends', 'bu
 var CARRIED = ['t', 'adventures', 'stock', 'queues', 'pop', 'popNoEffect', 'quests', 'camps', 'auto',
     'travelMs', 'resources', 'costs', 'blocked', 'pickups'];
 
-function restart(w) {
+function restart(w, o) {
     var viewed = w.gi.mCurrentViewedZoneID;
     var w2 = W.world({
-        home: true, fs: w.fs, generals: w.lists[HOME], away: w.lists[ZONE],
+        home: true, fs: w.fs, generals: w.lists[HOME], away: w.lists[ZONE], mapsUnknown: true,
         free: w.frees[HOME], awayFree: w.frees[ZONE],
         settings: w.S.kernel.settings.read('adventures') || {}
     });
@@ -277,7 +279,7 @@ function restart(w) {
     SHARED.forEach(function (k) { w2[k] = w[k]; });
     countVisits(w2);
     w2.mod.boot();
-    assert.ok(w2.st.run(), 'the run came back from the file');
+    if (!(o && o.settled)) assert.ok(w2.st.run(), 'the run came back from the file');
     return w2;
 }
 
@@ -292,7 +294,7 @@ t.test('series: x2 from home runs every step once, in order, with no pause; map 
     drive(w, { max: 1500, on: function (w2, name) {
         var r = w2.st.run();
         if (ids.indexOf(r.id) < 0) ids.push(r.id);
-        if (closed1 === null && w2.st.current().request.finished === 1) closed1 = w2.st.current().request.closedAt;
+        if (closed1 === null && w2.st.current().request.finished === 1) closed1 = w2.st.maps().closedAt;
     } });
     var r = w.st.run();
     assert.strictEqual(r.status, w.S.RunStatus.Done, 'status ' + r.status + ' at ' + stepName(w) +
@@ -691,6 +693,278 @@ t.test('StartMap: a send that failed but spent the map is never sent again', fun
     assertPaused(w, w.S.RunPause.MapFailed, /map started but not listed/);
     assert.strictEqual(mapStarts(w).length, 1, 'never a second map start');
     assert.ok(logged(w, /map stock dropped/), w.H.logs().map(function (l) { return l.args.join(' '); }).join('\n'));
+});
+
+// ---- 6b. StartMap gap and map history --------------------------------------------------
+
+function gapOf(w) {
+    return w.S.modules.adventures.home.GAP_MS;
+}
+
+function runPath(w) {
+    return Object.keys(w.fs.disk).filter(function (k) { return /run\.json$/.test(k); })[0];
+}
+
+function logCount(w, re) {
+    return w.H.logs().filter(function (l) {
+        return l.category === 'adventures' && re.test(l.args.join(' '));
+    }).length;
+}
+
+// The map start packet never leaves the client, so the stock stays as it was.
+function dropMapPacket(w) {
+    var send = w.gi.SendServerAction;
+    w.gi.SendServerAction = function (id) {
+        if (id === 61) return;
+        return send.apply(this, arguments);
+    };
+}
+
+// A map start of the series is sent and its verify is still queued, then the
+// kernel loses the queue, the way a pause does.
+function sendThenLose(w) {
+    tick(w);
+    play(w, function () { return logCount(w, /: map sent$/) === 1; });
+    w.kernelPause();
+}
+
+t.test('StartMap gap: Stop after a map close, new series at once: no start until GAP_MS after the close, then one', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap });
+    var closed = w.t;
+    w.st.maps().closedAt = closed;
+    assert.strictEqual(w.S.modules.adventures.run.stop(), true);
+    series(w, { step: w.S.RunStep.StartMap });
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+    assert.ok(mapStarts(w)[0].t >= closed + gapOf(w), 'start at ' + mapStarts(w)[0].t + ', closed at ' + closed);
+});
+
+t.test('StartMap gap: the close time survives a client restart', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap });
+    var closed = w.t;
+    w.st.maps().closedAt = closed;
+    w.S.modules.adventures.run.stop();
+    series(w, { step: w.S.RunStep.StartMap });
+    var w2 = restart(w);
+    assert.strictEqual(w2.st.maps().closedAt, closed, 'the record came back from the file');
+    drive(w2, { until: at('Depart') });
+    assertStep(w2, 'Depart');
+    assert.strictEqual(mapStarts(w2).length, 1);
+    assert.ok(mapStarts(w2)[0].t >= closed + gapOf(w2), 'start at ' + mapStarts(w2)[0].t);
+});
+
+t.test('StartMap gap: a settled series keeps the close time in the file', function () {
+    var w = homeWorld();
+    onIsland(w);
+    series(w, { step: w.S.RunStep.Close, zoneId: ZONE, run: { marks: plain(CLAIMED) } });
+    drive(w, { max: 400 });
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Done, 'status ' + w.st.run().status);
+    var file = JSON.parse(w.fs.disk[runPath(w)]);
+    assert.strictEqual(file.run, null);
+    assert.strictEqual(file.request, null);
+    assert.strictEqual(typeof file.maps.closedAt, 'number');
+    var closed = file.maps.closedAt;
+    var w2 = restart(w, { settled: true });
+    assert.strictEqual(w2.st.maps().closedAt, closed);
+    series(w2, { step: w2.S.RunStep.StartMap });
+    drive(w2, { until: at('Depart') });
+    assert.strictEqual(mapStarts(w2).length, 1);
+    assert.ok(mapStarts(w2)[0].t >= closed + gapOf(w2), 'start at ' + mapStarts(w2)[0].t + ', closed at ' + closed);
+});
+
+t.test('StartMap gap: a map seen open and missing after a restart is dated at the first read', function () {
+    var w = homeWorld({ mapOpen: true });
+    series(w, { step: w.S.RunStep.StartMap });
+    w.st.maps().open = [{ name: 'BlackKnights', zoneId: ZONE }];
+    w.st.save();
+    w.adventures = [];
+    var w2 = restart(w);
+    var first = w2.t;
+    drive(w2, { until: at('Depart') });
+    assertStep(w2, 'Depart');
+    assert.strictEqual(w2.st.maps().closedAt, first, 'dated at the first read that lacks the map');
+    assert.strictEqual(mapStarts(w2).length, 1);
+    assert.ok(mapStarts(w2)[0].t >= first + gapOf(w2), 'start at ' + mapStarts(w2)[0].t + ', first read at ' + first);
+});
+
+t.test('StartMap gap: a hand close seen by the menu read is dated', function () {
+    var w = homeWorld({ mapOpen: true });
+    var run = w.S.modules.adventures.run;
+    assert.strictEqual(run.available('BlackKnights'), 4);
+    assert.strictEqual(w.st.maps().closedAt, null);
+    w.adventures = [];
+    w.t += 7000;
+    assert.strictEqual(run.available('BlackKnights'), 3);
+    assert.strictEqual(w.st.maps().closedAt, w.t);
+});
+
+t.test('StartMap gap: no map history waits GAP_MS from the first look', function () {
+    var w = homeWorld({ mapsUnknown: true });
+    assert.strictEqual(w.st.maps().open, null);
+    series(w, { step: w.S.RunStep.StartMap });
+    var first = w.t;
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+    assert.ok(mapStarts(w)[0].t >= first + gapOf(w), 'start at ' + mapStarts(w)[0].t + ', first look at ' + first);
+});
+
+t.test('StartMap gap: an unreadable own list at StartMap never starts; one start once it reads', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap });
+    w.adventures = null;
+    drive(w, { max: 30 });
+    assertStep(w, 'StartMap');
+    assert.strictEqual(mapStarts(w).length, 0, 'nothing sent while unreadable');
+    w.adventures = [];
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+});
+
+t.test('StartMap stale: unchanged stock pauses NotObserved; Resume pauses again and never resends', function () {
+    var w = homeWorld();
+    dropMapPacket(w);
+    series(w, { step: w.S.RunStep.StartMap });
+    sendThenLose(w);
+    drive(w, { max: 200 });
+    assertPaused(w, w.S.RunPause.NotObserved, /Stop the run/);
+    assert.strictEqual(logCount(w, /: map sent$/), 1);
+    assert.strictEqual(w.S.modules.adventures.run.resume(), true);
+    drive(w, { max: 50 });
+    assertPaused(w, w.S.RunPause.NotObserved, /Stop the run/);
+    assert.strictEqual(logCount(w, /: map sent$/), 1, 'still one start after Resume');
+    assert.strictEqual(mapStarts(w).length, 0, 'the dropped packet reached no one');
+});
+
+t.test('StartMap stale: dropped stock pauses MapFailed; Resume waits for the list and never resends', function () {
+    var w = homeWorld();
+    w.auto.map = false;
+    series(w, { step: w.S.RunStep.StartMap });
+    sendThenLose(w);
+    drive(w, { max: 200 });
+    assertPaused(w, w.S.RunPause.MapFailed, /map started but not listed/);
+    assert.strictEqual(w.S.modules.adventures.run.resume(), true);
+    drive(w, { max: 5 });
+    assertStep(w, 'StartMap');
+    assert.strictEqual(mapStarts(w).length, 1, 'no second start while waiting');
+    w.adventures.push({ adventureName: 'BlackKnights', zoneID: ZONE });
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+});
+
+t.test('StartMap gap: Stop within ORDER_WAIT_MS of an unseen start, new series: no start until GAP_MS after that send', function () {
+    var w = homeWorld();
+    w.auto.map = false;
+    series(w, { step: w.S.RunStep.StartMap });
+    tick(w);
+    play(w, function () { return mapStarts(w).length === 1; });
+    inFlight(w);
+    var sentAt = w.st.run().marks.map.sentAt;
+    assert.strictEqual(typeof sentAt, 'number');
+    w.t += 5000;
+    assert.strictEqual(w.S.modules.adventures.run.stop(), true);
+    assert.strictEqual(w.st.maps().sentAt, sentAt);
+    w.auto.map = true;
+    series(w, { step: w.S.RunStep.StartMap });
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 2);
+    assert.ok(mapStarts(w)[1].t >= sentAt + gapOf(w), 'second start at ' + mapStarts(w)[1].t + ', first at ' + sentAt);
+});
+
+t.test('StartMap gap: start refuses while the own adventures cannot be read', function () {
+    var w = homeWorld();
+    w.H.ctx.prompt = function (text, def) { return def; };
+    w.H.ctx.confirm = function () { return true; };
+    var id = w.S.modules.adventures.templates.save({
+        label: 'Black Knights', adventure: 'BlackKnights', loadout: LOADOUT, waves: [WAVE],
+        speedBuff: 'SpeedBuffDefault'
+    }, 1000).id;
+    w.adventures = null;
+    assert.strictEqual(w.S.modules.adventures.run.start(id), false);
+    assert.ok(w.alerts.some(function (a) { return /open adventures cannot be read/.test(a); }), w.alerts.join(' | '));
+    assert.strictEqual(w.st.run(), null);
+    assert.strictEqual(w.st.current().request, null);
+    assert.strictEqual(mapStarts(w).length, 0);
+});
+
+t.test('StartMap gap: a SEND_FAILED resend also waits for the gap', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap, closedAt: w.t - gapOf(w) + 2000 });
+    w.buffSendThrows = true;
+    drive(w, { until: function () { return logCount(w, /: map sent$/) === 1; } });
+    w.buffSendThrows = false;
+    drive(w, { max: 2 });
+    assertStep(w, 'StartMap');
+    assert.strictEqual(mapStarts(w).length, 0, 'the first send failed');
+    var closed = w.t;
+    w.st.maps().closedAt = closed;
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+    assert.ok(mapStarts(w)[0].t >= closed + gapOf(w), 'resend at ' + mapStarts(w)[0].t + ', closed at ' + closed);
+});
+
+// A paused run whose file then cannot be read.
+function unreadableFile(w) {
+    series(w, { step: w.S.RunStep.StartMap });
+    w.auto.map = false;
+    sendThenLose(w);
+    drive(w, { max: 200 });
+    assertPaused(w, w.S.RunPause.MapFailed);
+    return runPath(w);
+}
+
+t.test('StartMap gap: a run file that cannot be read is not overwritten by the menu read', function () {
+    var w = homeWorld();
+    var path = unreadableFile(w);
+    var text0 = w.fs.disk[path];
+    w.fs.fail.read[path] = true;
+    var w2 = restart(w, { settled: true });
+    var run = w2.S.modules.adventures.run;
+    w2.adventures = [{ adventureName: 'BlackKnights', zoneID: ZONE }];
+    for (var i = 0; i < 4; i++) {
+        w2.t += 2000;
+        run.available('BlackKnights');
+    }
+    assert.strictEqual(w2.fs.disk[path], text0);
+    assert.strictEqual(logCount(w2, /not overwritten before Start or Stop/), 1);
+    assert.strictEqual(typeof w2.st.maps().closedAt, 'number', 'the record in memory still gates');
+
+    var w3 = homeWorld();
+    unreadableFile(w3);
+    w3.fs.disk[path] = '{';
+    var w4 = restart(w3, { settled: true });
+    for (var j = 0; j < 4; j++) {
+        w4.t += 2000;
+        w4.S.modules.adventures.run.available('BlackKnights');
+    }
+    assert.strictEqual(w4.fs.disk[path], '{');
+});
+
+t.test('StartMap gap: after an unreadable run file, Stop writes the file and the menu read saves again', function () {
+    var w = homeWorld();
+    var path = unreadableFile(w);
+    w.fs.fail.read[path] = true;
+    var w2 = restart(w, { settled: true });
+    w2.fs.fail.read[path] = false;
+    var run = w2.S.modules.adventures.run;
+    w2.t += 2000;
+    run.available('BlackKnights');
+    w2.st.clear();
+    var file = JSON.parse(w2.fs.disk[path]);
+    assert.strictEqual(file.run, null);
+    assert.ok(file.maps && typeof file.maps === 'object', 'the file holds maps');
+    w2.adventures = [{ adventureName: 'BlackKnights', zoneID: ZONE }];
+    w2.t += 2000;
+    run.available('BlackKnights');
+    var after = JSON.parse(w2.fs.disk[path]);
+    assert.deepStrictEqual(after.maps.open, [{ name: 'BlackKnights', zoneId: ZONE }]);
 });
 
 // ---- 7. Depart ------------------------------------------------------------------
@@ -1975,7 +2249,7 @@ t.test('Close: after the settle window the adventure is closed and verified gone
     assert.strictEqual(w.closes.length, 1);
     assert.strictEqual(w.closes[0].zoneId, ZONE);
     assert.ok(w.closes[0].t - since >= w.S.modules.adventures.loader.MARK_SETTLE_MS, 'closed after the settle window');
-    assert.strictEqual(typeof w.st.current().request.closedAt, 'number');
+    assert.strictEqual(typeof w.st.maps().closedAt, 'number');
     assert.deepStrictEqual(w.zoneSends, []);
     assert.ok(w.visits.some(function (v) { return v.id === HOME; }), 'the run jumped home');
     var names = transitions(w).map(function (x) { return x.from + '->' + x.to; });
@@ -2302,6 +2576,7 @@ t.test('Restart: the last run back home resumes nothing and the next start asks 
     var file = JSON.parse(w.fs.disk[Object.keys(w.fs.disk).filter(function (k) { return /run\.json$/.test(k); })[0]]);
     assert.strictEqual(file.run, null);
     assert.strictEqual(file.request, null);
+    assert.ok(file.maps && typeof file.maps === 'object', 'the settled file keeps the map record');
     assert.ok(w.st.run(), 'the run goes on in memory');
 });
 
@@ -2319,7 +2594,7 @@ t.test('Kernel pause: StartMap sends one map start and goes on once the map is l
     assert.strictEqual(mapStarts(w).length, 1);
 });
 
-t.test('Kernel pause: StartMap with the map withheld pauses NotObserved after ORDER_WAIT_MS', function () {
+t.test('Kernel pause: StartMap with the map withheld (stock spent) pauses MapFailed after ORDER_WAIT_MS', function () {
     var w = homeWorld();
     w.auto.map = false;
     series(w, { step: w.S.RunStep.StartMap });
@@ -2328,7 +2603,7 @@ t.test('Kernel pause: StartMap with the map withheld pauses NotObserved after OR
     inFlight(w);
     w.kernelPause();
     drive(w, { max: 200 });
-    assertPaused(w, w.S.RunPause.NotObserved, /map start sent/);
+    assertPaused(w, w.S.RunPause.MapFailed, /map started but not listed/);
     var r = w.st.run();
     assert.ok(r.pause.at - r.marks.map.sentAt >= loaderOf(w).ORDER_WAIT_MS);
     assert.strictEqual(mapStarts(w).length, 1);

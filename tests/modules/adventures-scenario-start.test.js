@@ -2,7 +2,7 @@
 
 // Starting a scenario run from the ~Steward~ > Adventures menu, and how the
 // native menu and the ~Adventures~ bar menu show scenarios. The host fakes
-// are local: production.isProduceable, zone.isHome and adventures.zoneIdOf
+// are local: production.isProduceable, zone.isHome and adventures.own
 // are replaced per test, and prompt/confirm are host globals the harness does
 // not provide. Nothing ticks the run past Muster.
 
@@ -51,7 +51,11 @@ function setup(maps, o) {
     };
     H.ctx.confirm = function (text) { s.confirms.push(text); return s.agree === true; };
     S.core.zone.isHome = function () { return s.home; };
-    S.core.adventures.zoneIdOf = function () { return s.zoneId; };
+    // s.own (a list, or null for an unreadable one) overrides the list derived from s.zoneId.
+    S.core.adventures.own = function () {
+        if (s.own !== undefined) return s.own;
+        return s.zoneId === null ? [] : [{ name: rec.adventure, zoneId: s.zoneId }];
+    };
     S.core.production.isProduceable = function (name) {
         s.asked.push(name);
         return typeof s.known === 'function' ? s.known(name) : s.known;
@@ -247,6 +251,17 @@ t.test('start notice and log name runs and trips apart (#42)', function () {
     assert.ok(text.indexOf('zone null') === -1, text);
 });
 
+t.test('startScenario refuses while the own adventures cannot be read and stores nothing', function () {
+    var s = setup(2);
+    s.own = null;
+    s.answers = ['1', '1'];
+    assert.strictEqual(s.run.startScenario('twins'), false);
+    assert.ok(/cannot be read/.test(lastAlert(s)), lastAlert(s));
+    assert.strictEqual(s.st.run(), null);
+    assert.strictEqual(s.st.current().request, null);
+    assert.ok(!s.H.logs().some(function (l) { return /no map open yet/.test(l.args.join(' ')); }));
+});
+
 t.test('an open map names its zone in the start log', function () {
     var s = setup(1, { zoneId: 77 });
     s.answers = ['1', '1'];
@@ -281,6 +296,7 @@ t.test('last run home on the home map: the file holds no run, memory keeps it go
     var f = savedFile(s);
     assert.strictEqual(f.run, null);
     assert.strictEqual(f.request, null);
+    assert.ok(f.maps && typeof f.maps === 'object', 'the settled file keeps the map record');
     assert.ok(s.st.run(), 'the run still finishes in memory');
     assert.strictEqual(s.st.run().step, s.S.RunStep.ArriveHome);
     assert.ok(s.H.logs().some(function (l) { return /run state file cleared/.test(String(l.args[0])); }));
@@ -333,6 +349,7 @@ t.test('a done series is settled; a stopped one keeps its reason in the file', f
     s.st.done();
     assert.strictEqual(s.st.settled(s.st.current()), true);
     assert.strictEqual(savedFile(s).run, null);
+    assert.ok(savedFile(s).maps, 'the settled file keeps the map record');
     var t2 = atStep(2, 0, 'RunMuster', 0);
     t2.st.stop('troops short');
     assert.strictEqual(t2.st.settled(t2.st.current()), false);
