@@ -36,10 +36,23 @@
  * with S.kernel.files.writeText (temp file, then move). The file replaces
  * the previous one, so a field that is dropped from the run never lingers;
  * the host settings store is a deep merge and would keep it. File format:
- * JSON.stringify of { version, request, run }, indented.
+ * JSON.stringify of { version, request, run, maps }, indented.
  * A settled series (settled(): done, or its last run back on the home map)
  * is written as no request and no run, so a client restart resumes nothing
- * and a new start does not ask to replace it.
+ * and a new start does not ask to replace it; it keeps maps.
+ *
+ * maps is the map record: { open, closedAt, sentAt }. open lists the own
+ * adventures ({ name, zoneId }) at the last good read (null: no history),
+ * closedAt is when an own map was last seen gone (the Close step, or the
+ * first read that lacked it, so a map closed by hand is dated too), and
+ * sentAt is the latest map start of a run that is gone, carried over when
+ * Stop or a new start replaces the run. The game locks out a map start
+ * within 180 s of the last map, and that holds across steward's runs, so
+ * the record belongs to no run: Stop, a new start and a settled series keep
+ * it, and the file carries it over a client restart. An unknown history (a
+ * fresh install, a file from before the record, a file that could not be
+ * read) counts from the first look, because the time of an earlier close is
+ * then unknown. seeOwn() is the one place that dates closes from a read.
  *
  * The working copy is S.modules.adventures.runState. The module namespace
  * survives a script reload, so load() reads the file only on a fresh client
@@ -66,6 +79,11 @@
  * and key of the star-menu probe lines already logged). They describe callbacks and reads of this client session, which do not
  * exist after a restart.
  * resetMemory() is the one place that resets them for a new or loaded run.
+ * fileUnread is memory-only too, but describes the file, not the run, so
+ * resetMemory() leaves it: the file could not be read this session, so the
+ * map record is not saved before a user-driven write (Start or Stop) takes
+ * over the file. A paused run the file may still hold is not overwritten by
+ * a status read.
  * The round alone is also dropped at bundle load and by dropRound(), because a reload or a
  * cancelled queue removes its queued attempts while the run stays as it was.
  *
@@ -85,7 +103,9 @@
  * after the user has looked at the game. A wave step restarts its wave at
  * Gate instead, which re-reads the wave file. Unseen send markers (wave
  * lines and series marks) are cleared, so an order that never showed in the
- * game may be sent again.
+ * game may be sent again, except the map start, which is never sent twice:
+ * a second start within 180 s of the first is punished with a lockout, and
+ * an unseen start may well have opened the map.
  *
  * A step on the island whose wait does not end may take a zone trip: home
  * and back, after which the step is entered again. run.resolve holds the
@@ -236,6 +256,9 @@
 
     var FILE_VERSION = 1;
     var SUBDIR = 'adventures';
+    // The send marker and round key of the map start. The map start is the
+    // one series order Resume never sends again (resume()).
+    var MAP_MARK = 'map';
     var FILE_NAME = 'run.json';
 
     // A busy general usually ends soon, so the first minute of a wait polls;
@@ -246,6 +269,9 @@
     // write would otherwise warn on every transition.
     var warnedNoDir = false;
     var warnedWrite = false;
+    // The map record kept in memory because the file could not be read is
+    // reported once per client session.
+    var warnedUnread = false;
     // Whether the last written file was a settled series (no run), so the
     // clearing is logged once.
     var savedSettled = false;
@@ -543,6 +569,7 @@
         if (!a.runState) a.runState = { request: null, run: null };
         if (a.runState.run === undefined) a.runState.run = null;
         if (a.runState.request === undefined) a.runState.request = null;
+        if (!isPlainObject(a.runState.maps)) a.runState.maps = emptyMaps();
         return a.runState;
     }
 
@@ -715,7 +742,9 @@
         return JSON.stringify({
             version: FILE_VERSION,
             request: gone ? null : rs.request,
-            run:     gone ? null : rs.run
+            run:     gone ? null : rs.run,
+            // Always written: the gap before the next map outlives the series.
+            maps:    rs.maps
         }, null, 2);
     }
 
@@ -728,7 +757,12 @@
         if (w.ok && gone && !savedSettled) {
             S.kernel.log('adventures', 'run state file cleared: ' + rs.run.label + ' is home after its last run');
         }
-        if (w.ok) savedSettled = gone;
+        if (w.ok) {
+            savedSettled = gone;
+            // The file now holds this session's state, so nothing on disk
+            // is left to protect.
+            rs.fileUnread = false;
+        }
         if (!w.ok) {
             if (!warnedWrite) {
                 warnedWrite = true;
@@ -884,6 +918,151 @@
         };
     }
 
+    // ---- Map record ---------------------------------------------------------
+
+    // The record of no history: open null, so the first read dates a close.
+    function emptyMaps() {
+        return { open: null, closedAt: null, sentAt: null };
+    }
+
+    // The open entries of a loaded record: plain objects with a string name;
+    // zoneId is a number or null.
+    function openOf(v) {
+        var out = [];
+        for (var i = 0; i < v.length; i++) {
+            var e = v[i];
+            if (!isPlainObject(e) || typeof e.name !== 'string') continue;
+            out.push({ name: e.name, zoneId: num(e.zoneId) });
+        }
+        return out;
+    }
+
+    // A record that is no plain object, or an open that is no list, is an
+    // unknown history and waits from the first look, which is never less safe.
+    function normMaps(v) {
+        if (!isPlainObject(v)) return emptyMaps();
+        return {
+            open:     isArray(v.open) ? openOf(v.open) : null,
+            closedAt: num(v.closedAt),
+            sentAt:   num(v.sentAt)
+        };
+    }
+
+    function maps() {
+        return current().maps;
+    }
+
+    // The later of two times; a missing one gives way to the other.
+    function later(a, b) {
+        if (num(a) === null) return num(b);
+        if (num(b) === null) return a;
+        return a > b ? a : b;
+    }
+
+    // The zone id identifies a map; the name stands in when no id was read.
+    function listHolds(list, e) {
+        for (var i = 0; i < list.length; i++) {
+            if (!list[i]) continue;
+            if (e.zoneId !== null) {
+                if (list[i].zoneId === e.zoneId) return true;
+            } else if (String(list[i].name) === e.name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The open set as one string, sorted, so a reorder is no change.
+    function openKeys(open) {
+        var out = [];
+        if (!open) return null;
+        for (var i = 0; i < open.length; i++) out.push(open[i].zoneId + '|' + open[i].name);
+        out.sort();
+        return out.join('\n');
+    }
+
+    // home.js loads before this file runs anything, but only the log text
+    // needs the gap, so a missing home module falls back to the game's 180 s.
+    function gapSeconds() {
+        var h = S.modules.adventures.home;
+        var ms = h && typeof h.GAP_MS === 'number' ? h.GAP_MS : 180000;
+        return Math.round(ms / 1000);
+    }
+
+    // Observes a successful read of the own adventures. A map the record had
+    // open that the list no longer holds was closed, by a step or by hand,
+    // and is dated now: the first read that lacks it is the earliest proof.
+    // A read that wrongly lacks a still-open map dates a close too early,
+    // which costs one more wait and never a send; the next read that lists
+    // it puts it back. With no history the time of an earlier close is
+    // unknown, so the first look counts as one. Saves only on a change, so a
+    // status read costs no write, and never over a file that could not be
+    // read, which may still hold a paused run.
+    function seeOwn(list) {
+        if (!isArray(list)) return false;
+        var rs = current();
+        var m = rs.maps;
+        var t = clock();
+        var before = m.closedAt;
+        var oldKeys = openKeys(m.open);
+        if (m.open === null) {
+            m.closedAt = later(m.closedAt, t);
+            S.kernel.log('adventures', 'no record of earlier maps; the next map start waits ' +
+                gapSeconds() + ' s from now');
+        } else {
+            for (var i = 0; i < m.open.length; i++) {
+                var e = m.open[i];
+                if (listHolds(list, e)) continue;
+                m.closedAt = t;
+                S.kernel.log('adventures', 'map ' + e.name + ' (zone ' + e.zoneId +
+                    ') no longer open; next map start waits ' + gapSeconds() + ' s');
+            }
+        }
+        var open = [];
+        for (var j = 0; j < list.length; j++) {
+            if (!list[j]) continue;
+            open.push({ name: String(list[j].name), zoneId: num(list[j].zoneId) });
+        }
+        m.open = open;
+        if (m.closedAt === before && openKeys(open) === oldKeys) return false;
+        if (rs.fileUnread === true) {
+            if (!warnedUnread) {
+                warnedUnread = true;
+                S.kernel.warn('adventures', 'map record kept in memory: the run state file could not be read, ' +
+                    'so it is not overwritten before Start or Stop');
+            }
+            return false;
+        }
+        save();
+        return true;
+    }
+
+    // The one read of the own adventures for the module: it also feeds the
+    // map record. null (unreadable) leaves the record as it is.
+    function ownRead() {
+        var list = S.core.adventures.own();
+        if (list) seeOwn(list);
+        return list;
+    }
+
+    // The Close step proved the run's map left the list, even when the
+    // record never saw it open.
+    function mapClosed() {
+        current().maps.closedAt = clock();
+        save();
+    }
+
+    // A map start that may not have settled is kept when its run goes: the
+    // mark is its record while the run lives, the map record after. Seen or
+    // not, the next start waits for the gap from it; for a seen and listed
+    // map the later close counts anyway.
+    function carryStart(rs) {
+        var r = rs.run;
+        var mk = r && isPlainObject(r.marks) ? r.marks[MAP_MARK] : null;
+        if (!isPlainObject(mk) || num(mk.sentAt) === null) return;
+        rs.maps.sentAt = later(rs.maps.sentAt, mk.sentAt);
+    }
+
     // ---- Normalising a loaded file ------------------------------------------
 
     function normRequest(q) {
@@ -896,8 +1075,7 @@
             count:      n !== null && n >= 1 ? Math.floor(n) : 1,
             ended:      q.ended === true,
             requested:  num(q.requested),
-            finished:   count(q.finished),
-            closedAt:   num(q.closedAt)
+            finished:   count(q.finished)
         };
     }
 
@@ -954,8 +1132,9 @@
     // Some marks carry one more field: a "part:" mark `taken`, what its grid has
     // taken of the item so far; an apply mark `notSent` and `notSentAt`, the sends
     // that made no host call and when the last one was; a "revisit:" mark `count`;
-    // a "short:" mark `text`. Each is kept only when of its type, so every other
-    // line keeps its shape.
+    // a "short:" mark `text`; the map mark `stock`, the map stock read before its
+    // send, which tells a started map from a lost packet after a restart. Each is
+    // kept only when of its type, so every other line keeps its shape.
     function normLines(v) {
         var out = {};
         if (!isPlainObject(v)) return out;
@@ -974,6 +1153,8 @@
             if (nsa !== null) out[k].notSentAt = nsa;
             var ct = num(v[k].count);
             if (ct !== null) out[k].count = ct;
+            var sk = num(v[k].stock);
+            if (sk !== null) out[k].stock = sk;
             if (typeof v[k].text === 'string') out[k].text = v[k].text;
         }
         return out;
@@ -1136,7 +1317,11 @@
     }
 
     // Reads the file once per client session. Missing file: nothing stored.
-    // Unreadable, unparsable or another version: warn and start empty.
+    // Unreadable, unparsable or another version: warn and start empty. Such a
+    // file is left as it is until Start or Stop writes it (fileUnread): it may
+    // hold a paused run that a transient read error, a hand edit or a newer
+    // build kept from this session, and an automatic write would destroy it.
+    // A file without maps (or with a bad one) loads as an unknown history.
     function load() {
         var rs = current();
         if (rs.loaded === true) return false;
@@ -1145,24 +1330,29 @@
         if (!path) return false;
         var r = S.kernel.files.readText(path);
         if (!r.ok) {
-            if (r.error !== S.FileError.Missing) S.kernel.warn('adventures', 'run state not read:', r.message);
+            rs.fileUnread = r.error !== S.FileError.Missing;
+            if (rs.fileUnread) S.kernel.warn('adventures', 'run state not read:', r.message);
             return false;
         }
         var data;
         try {
             data = JSON.parse(r.text);
         } catch (e) {
+            rs.fileUnread = true;
             S.kernel.warn('adventures', 'run state file is not valid JSON, starting empty:', e);
             return false;
         }
         if (!isPlainObject(data) || data.version !== FILE_VERSION) {
+            rs.fileUnread = true;
             S.kernel.warn('adventures', 'run state file has version', isPlainObject(data) ? data.version : '?',
                 ', expected', FILE_VERSION, '; starting empty');
             return false;
         }
+        rs.fileUnread = false;
         var n = normRun(data.run);
         rs.request = normRequest(data.request);
         rs.run = n.run;
+        rs.maps = normMaps(data.maps);
         resetMemory(rs);
         if (n.repaired.length) {
             S.kernel.warn('adventures', 'run state repaired on load:', n.repaired.join('; '));
@@ -1285,12 +1475,14 @@
     // Clears sentAt of every unseen record of a lines or marks map and
     // returns their names. sentOnce stays: it records that a packet went out
     // at some time, so a camp that is gone after the resume can be counted as
-    // beaten by that attack instead of unreachable.
-    function clearUnseen(recs) {
+    // beaten by that attack instead of unreachable. keep optionally names
+    // records that are never cleared.
+    function clearUnseen(recs, keep) {
         var cleared = [];
         if (!isPlainObject(recs)) return cleared;
         for (var k in recs) {
             if (!has(recs, k) || !isPlainObject(recs[k])) continue;
+            if (keep && keep.indexOf(k) >= 0) continue;
             if (!recs[k].seen && recs[k].sentAt !== null && recs[k].sentAt !== undefined) {
                 recs[k].sentAt = null;
                 cleared.push(k);
@@ -1320,7 +1512,14 @@
         var r = rs.run;
         if (!r || r.status !== S.RunStatus.Paused) return false;
         var lines = clearUnseen(r.lines);
-        var marks = clearUnseen(r.marks);
+        // A second map start within the game's gap is punished, and an unseen
+        // start may have opened the map, so its mark stays and the map step
+        // decides from the game alone.
+        var marks = clearUnseen(r.marks, [MAP_MARK]);
+        var mm = isPlainObject(r.marks) ? r.marks[MAP_MARK] : null;
+        if (isPlainObject(mm) && !mm.seen && num(mm.sentAt) !== null) {
+            S.kernel.log('adventures', 'resume: map start marker kept; a map start is never sent twice');
+        }
         if (lines.length) {
             S.kernel.log('adventures', 'resume: sent marker cleared for unseen lines', lines.join(', '));
         }
@@ -1338,6 +1537,7 @@
 
     function clear() {
         var rs = current();
+        carryStart(rs);
         rs.request = null;
         rs.run = null;
         resetMemory(rs);
@@ -1351,6 +1551,7 @@
     // persists both.
     function begin(request, r) {
         var rs = current();
+        carryStart(rs);
         rs.request = request;
         rs.run = r;
         resetMemory(rs);
@@ -1549,6 +1750,11 @@
     S.modules.adventures.state = {
         FILE_VERSION:  FILE_VERSION,
         BUSY_FAST_MS:  BUSY_FAST_MS,
+        MAP_MARK:      MAP_MARK,
+        maps:          maps,
+        seeOwn:        seeOwn,
+        ownRead:       ownRead,
+        mapClosed:     mapClosed,
         current:       current,
         run:           run,
         load:          load,

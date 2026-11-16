@@ -28,6 +28,15 @@
  * sending again. A failed read holds the step, with no limit: an unreadable
  * source is never taken for an empty one.
  *
+ * The map start is also gated by the persisted map record of the run state:
+ * the game locks out a map started within GAP_MS of the last map, so the
+ * gap after the last map seen closed (or the last start of a run that is
+ * gone) is checked at Muster and again right before every send, also before
+ * the one resend after a failed send. Resume never sends a map start again:
+ * a start that was sent but never seen is decided by the map stock read
+ * before the send and kept on its mark, which tells a started map from a
+ * lost packet.
+ *
  * The troops at home are counted before the load (free pool plus every
  * general plus what is still queued), so after the map the lost troops are
  * exactly that count minus the same count now. Free troops still on the way
@@ -226,10 +235,22 @@
 
     // ---- Before the map -----------------------------------------------------
 
+    // Time left before the game takes another map start: GAP_MS from the
+    // later of the last map seen closed and the last start of a run that is
+    // gone, both from the persisted map record, so Stop, a new start and a
+    // client restart keep it. 0 when the record holds neither.
+    function gapLeft() {
+        var m = st().maps();
+        var last = null;
+        if (m && typeof m.closedAt === 'number') last = m.closedAt;
+        if (m && typeof m.sentAt === 'number' && (last === null || m.sentAt > last)) last = m.sentAt;
+        if (last === null) return 0;
+        var left = last + GAP_MS - now();
+        return left > 0 ? left : 0;
+    }
+
     function muster(r, inv) {
-        var q = st().current().request;
-        var closedAt = q && typeof q.closedAt === 'number' ? q.closedAt : null;
-        if (closedAt !== null && now() < closedAt + GAP_MS) {
+        if (gapLeft() > 0) {
             noteOnce(r, 'waiting ' + Math.round(GAP_MS / 1000) + ' s after the last map');
             return;
         }
@@ -587,24 +608,28 @@
 
     // The map is open once it is listed among the player's adventures; its
     // zone id is then the run's island. An open map of that name is taken as
-    // it is, so a map started by hand is not started twice.
+    // it is, so a map started by hand is not started twice. The list is read
+    // through the run state, so every map that left it is dated for the gap.
     function startMap(r) {
         var RS = S.RunStep;
-        var id = S.core.adventures.zoneIdOf(r.adventure);
+        var MAP = st().MAP_MARK;
+        var list = st().ownRead();
+        if (list === null) {
+            ld().waitRead(r, 'adventure list');
+            return;
+        }
+        var e = S.core.adventures.entryOf(list, r.adventure);
+        var id = e && typeof e.zoneId === 'number' ? e.zoneId : null;
         if (typeof id === 'number') {
             r.zoneId = id;
-            if (ld().marked(r, 'map')) ld().markSeen(r, 'map');
+            if (ld().marked(r, MAP)) ld().markSeen(r, MAP);
             log('map open: zone ' + id);
             st().go(RS.Depart, 'map open');
             return;
         }
-        if (S.core.adventures.own() === null) {
-            ld().waitRead(r, 'adventure list');
-            return;
-        }
-        var m = ld().marked(r, 'map');
+        var m = ld().marked(r, MAP);
         var round = ld().currentRound(r, RS.StartMap);
-        if ((m && m.seen) || (round && ld().complete(round) && verifiedIn(round, 'map'))) {
+        if ((m && m.seen) || (round && ld().complete(round) && verifiedIn(round, MAP))) {
             // A start the game confirmed but whose map is not listed yet. The
             // wait runs from the send, or from a Resume, never sends again.
             var from = m && typeof m.sentAt === 'number' ? Math.max(m.sentAt, r.since) : r.since;
@@ -615,14 +640,13 @@
             ld().waitSent(r, 'map start');
             return;
         }
-        var s = ld().staleMark(r, 'map', 'map start');
+        var s = ld().staleMark(r, MAP, 'map start');
         if (s === 'wait') return;
         if (s === 'stale') {
-            st().pause(S.RunPause.NotObserved,
-                'map start sent but not seen; check the star menu, then Resume');
+            staleStart(r, ld().marked(r, MAP));
             return;
         }
-        var res = round && ld().complete(round) ? ld().resultOf(round, 'map') : null;
+        var res = round && ld().complete(round) ? ld().resultOf(round, MAP) : null;
         var unsent = res ? nothingSent(res) : null;
         if (unsent) {
             // Nothing went out: no failure, only a read to try again (#62).
@@ -643,18 +667,28 @@
             }, 'map start');
             if (next !== 'new') return;
         }
+        // Checked again right before the send: a map may have been seen
+        // closed since Muster, and the resend after a failed send passes
+        // here too.
+        if (gapLeft() > 0) {
+            noteOnce(r, 'waiting ' + Math.round(GAP_MS / 1000) + ' s after the last map');
+            return;
+        }
         var n = S.core.buffs.mapStock(r.adventure);
         if (n === null) {
             mapReadWait(r, 'map stock');
             return;
         }
         var nr = ld().startRound(r, RS.StartMap, []);
-        nr.mapStock = n;
-        if (again) {
-            ld().mark(r, 'map').resentAt = now();
-            st().save();
-        }
-        ld().attempt(nr, 'map', ld().wrapSend(r, 'map', S.core.buffs.map(r.adventure)), ld().seenOnVerified('map'));
+        // The stock before the send is kept on the persisted mark, so a start
+        // that is never seen can still be told from a lost packet after a
+        // Resume or a restart. Saved now, so it is on disk even when the send
+        // throws before the mark itself is written.
+        var mk = ld().mark(r, MAP);
+        mk.stock = n;
+        if (again) mk.resentAt = now();
+        st().save();
+        ld().attempt(nr, MAP, ld().wrapSend(r, MAP, S.core.buffs.map(r.adventure)), ld().seenOnVerified(MAP));
     }
 
     // Whether this step already sent a map start again after a failed send:
@@ -683,10 +717,12 @@
     // A send that failed (the host call was made, so the packet may still
     // have gone out) is sent once more, but only when the own adventures read
     // (checked by the caller: no map of that name is listed) and the map stock
-    // has not dropped below the round's own read once the round settled. A
-    // dropped stock means the map started: it is marked seen and waits to be
-    // listed, never sent again. Returns 'wait', 'send' or 'fail' (pause).
+    // has not dropped below the read kept on the mark before the send, once
+    // the round settled. A dropped stock means the map started: it is marked
+    // seen and waits to be listed, never sent again. Returns 'wait', 'send'
+    // or 'fail' (pause).
     function afterSendFailed(r, round) {
+        var MAP = st().MAP_MARK;
         if (ld().roundSettling(round)) {
             ld().waitSent(r, 'map start');
             return 'wait';
@@ -696,15 +732,41 @@
             mapReadWait(r, 'map stock');
             return 'wait';
         }
-        if (typeof round.mapStock !== 'number') return 'fail';
-        if (n < round.mapStock) {
-            ld().markSeen(r, 'map');
-            log('map start send failed but the map stock dropped (' + round.mapStock + ' -> ' + n +
+        var m = ld().marked(r, MAP);
+        if (!m || typeof m.stock !== 'number') return 'fail';
+        if (n < m.stock) {
+            ld().markSeen(r, MAP);
+            log('map start send failed but the map stock dropped (' + m.stock + ' -> ' + n +
                 '); waiting for the map to be listed');
             return 'wait';
         }
         log('map start send failed and no map started (stock ' + n + '); sending once more');
         return 'send';
+    }
+
+    // A map start that was sent, never seen, and is past the time its effect
+    // may take. It is never sent again: a second start inside the gap locks
+    // the game out. The stock read before the send tells a started map from
+    // a lost packet. A dropped stock means the map started: it is marked seen
+    // and pauses like a seen start that is not listed, so a Resume waits for
+    // the list. An unchanged stock (or a mark from before the stock was kept)
+    // pauses until the user looks and decides with Stop and a new start.
+    function staleStart(r, m) {
+        var MAP = st().MAP_MARK;
+        var n = S.core.buffs.mapStock(r.adventure);
+        if (n === null) {
+            mapReadWait(r, 'map stock');
+            return;
+        }
+        if (m && typeof m.stock === 'number' && n < m.stock) {
+            ld().markSeen(r, MAP);
+            log('map start not seen but the map stock dropped (' + m.stock + ' -> ' + n +
+                '); waiting for the map to be listed');
+            st().pause(S.RunPause.MapFailed, 'map started but not listed among your adventures');
+            return;
+        }
+        st().pause(S.RunPause.NotObserved, 'map start sent but not seen and the map stock did not drop; ' +
+            'check the star menu, then Stop the run and start it again');
     }
 
     // Sends every loadout general to the island once. A general counts as

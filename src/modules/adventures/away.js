@@ -181,7 +181,7 @@
     // a zone load, so it has to stay gone for the grace.
     function toIsland(r, name, onLoaded) {
         if (typeof r.zoneId === 'number' && !islandLoaded(r)) {
-            var own = S.core.adventures.own();
+            var own = st().ownRead();
             if (own && goneFrom(own, r.zoneId) && ld().missingLong(r, 'adventure')) {
                 st().pause(S.RunPause.JumpFailed, 'adventure no longer open');
                 return;
@@ -695,7 +695,7 @@
             st().pause(S.RunPause.NotObserved, 'the run has no adventure zone; Stop the run');
             return;
         }
-        var own = S.core.adventures.own();
+        var own = st().ownRead();
         if (own && goneFrom(own, r.zoneId)) {
             log('adventure left before the last quest was seen claimed');
             st().go(S.RunStep.Close, 'adventure gone');
@@ -751,21 +751,19 @@
     // itself after the last quest, so a close is sent only after a settle
     // window, only after a verified claim, and only when the adventure's name
     // still points at the run's zone (a second open copy would be closed
-    // otherwise).
+    // otherwise). The close time feeds the gap before the next map.
     function close(r) {
         if (typeof r.zoneId !== 'number') {
             st().pause(S.RunPause.NotObserved, 'the run has no adventure zone; Stop the run');
             return;
         }
-        var own = S.core.adventures.own();
+        var own = st().ownRead();
         if (own === null) {
             ld().waitRead(r, 'own adventures');
             return;
         }
         if (goneFrom(own, r.zoneId)) {
-            var q = st().current().request;
-            if (q) q.closedAt = now();
-            st().save();
+            st().mapClosed();
             log('adventure closed');
             st().go(S.RunStep.JumpHome, 'adventure closed');
             return;

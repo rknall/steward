@@ -306,6 +306,7 @@
         manager:      manager,
         own:          own,
         ownOpen:      ownOpen,
+        entryOf:      entryOf,
         zoneIdOf:     zoneIdOf,
         close:        close
     };

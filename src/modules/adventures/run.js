@@ -42,8 +42,12 @@
  * starting another asks before replacing them.
  *
  * Request shape: { templateId, label, adventure, count, ended, requested,
- * finished, closedAt }: finished counts the runs done in this series and
- * closedAt is when the last map was closed.
+ * finished }: finished counts the runs done in this series. The time of the
+ * last map lives in the run state's map record, not in the request, so it
+ * survives Stop, replace and restart.
+ *
+ * Start refuses while the own adventures cannot be read: an unreadable list
+ * is never taken for "no map open".
  */
 
 (function (S) {
@@ -98,6 +102,13 @@
         return { ok: true, wave: n };
     }
 
+    // Names of an own adventures list; an unreadable list (null) gives none.
+    function namesOf(list) {
+        var out = [];
+        for (var i = 0; list && i < list.length; i++) out.push(list[i].name);
+        return out;
+    }
+
     // Maps of `adventure` the player can run: star-menu stock plus one for an
     // own adventure already open. `pass` caches both reads, so a menu pass that
     // asks for every template reads the star menu and the open adventures once.
@@ -106,7 +117,7 @@
     function available(adventure, pass) {
         pass = pass || {};
         if (pass.maps === undefined) pass.maps = S.core.buffs.mapCounts();
-        if (!pass.open) pass.open = S.core.adventures.ownOpen();
+        if (!pass.open) pass.open = namesOf(store().ownRead());
         if (pass.maps === null) return null;
         return (pass.maps[adventure] || 0) + (pass.open.indexOf(adventure) !== -1 ? 1 : 0);
     }
@@ -161,6 +172,8 @@
         return 'Replace the requested run ' + what + '?';
     }
 
+    var UNREADABLE_OWN = 'Your open adventures cannot be read right now. Try again in a moment.';
+
     function makeRequest(rec, count) {
         return {
             templateId: rec.id,
@@ -169,8 +182,7 @@
             count:      count,
             ended:      false,
             requested:  store().now(),
-            finished:   0,
-            closedAt:   null
+            finished:   0
         };
     }
 
@@ -328,7 +340,13 @@
         if (!p) return false;
         var rec = p.rec;
 
-        var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
+        var list = store().ownRead();
+        if (list === null) {
+            notify(UNREADABLE_OWN);
+            return false;
+        }
+        var entry = S.core.adventures.entryOf(list, rec.adventure);
+        var zoneId = entry ? entry.zoneId : null;
         if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, p.count, zoneId);
         if (S.core.zone.isHome() === true) return startHome(rec, p.count, zoneId);
         notify('Go home or view the ' + p.advLabel + ' island, then choose the template again.');
@@ -398,8 +416,13 @@
             S.kernel.warn('adventures', 'start check "' + rec.label + '":', warnings[i]);
         }
 
-        var zoneId = S.core.adventures.zoneIdOf(rec.adventure);
-        if (typeof zoneId !== 'number') zoneId = null;
+        var list = store().ownRead();
+        if (list === null) {
+            notify(UNREADABLE_OWN);
+            return false;
+        }
+        var entry = S.core.adventures.entryOf(list, rec.adventure);
+        var zoneId = (entry && typeof entry.zoneId === 'number') ? entry.zoneId : null;
         var trip = startTrip(rec, zoneId);
         if (trip === null) return false;
 

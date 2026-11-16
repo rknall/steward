@@ -158,6 +158,10 @@ Scenario chain: Wait between maps, Produce items, Start map, Jump to the map,
 Apply items, Quests and pick-ups, then more trips (jump home, produce, back) or
 Clear, last quest, Close, Return home, Next map.
 
+"Wait between maps" waits 180 s after the last map seen closed, counted again
+right before the map start, and the time survives Stop, a new start and a client
+restart.
+
 Skipped for a scenario run: check and load generals, send generals, wait for
 generals, pick up items, send all to the star, horseshoe, waves, pack, retrain.
 The step list is the one run table; the run menu greys rows that do not apply.
@@ -220,3 +224,12 @@ first, then the burst line, then this one.
 - An item send that made no host call (its star-menu entry has no unique id)
   is tried again, 10 s apart, up to 3 times per grid, then BuffFailed pauses.
   A real packet failure still pauses at once.
+- A map opened and closed by hand with no steward read in between is not seen, so
+  it does not start the 180 s wait.
+- The first map start after an update, a fresh install or an unreadable run file
+  waits 180 s from the first look.
+- A map start that was sent but never seen is never sent again. Resume waits or
+  pauses, and Stop and a new start send after the 180 s gap.
+- Start refuses while the own adventures cannot be read.
+- A run file that cannot be read is left as it is until Start or Stop writes it.
+  The map times of that session are then kept in memory only.
