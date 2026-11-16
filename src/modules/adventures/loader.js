@@ -467,10 +467,10 @@
 
     // First Refused or Failed result: { key, status, reason } or null. A
     // refusal that sent nothing (unreadable, or the zone changed) is no
-    // failure: its round counts as one without effect, which settleRound and
-    // roundsExhausted bound. A marked order that
-    // was not observed in time is none either: nothing refused it, and the
-    // mark decides how long it may still show.
+    // failure: no packet left, so settleRound drops such a round without
+    // counting it and noteUnread bounds the retries per key. A marked order
+    // that was not observed in time is none either: nothing refused it, and
+    // the mark decides how long it may still show.
     function firstFailure(round) {
         for (var k in round.expected) {
             if (!has(round.expected, k) || !has(round.results, k)) continue;
@@ -527,8 +527,9 @@
     }
 
     // A round finished without any Refused/Failed result but the effect is
-    // still not seen: counts the round and pauses after MAX_ROUNDS. Returns
-    // true when it paused.
+    // still not seen: pauses after MAX_ROUNDS counted rounds. A round whose
+    // only shortfall was a refusal that sent nothing is not counted, since
+    // nothing went out that could have shown. Returns true when it paused.
     function roundsExhausted(r, what) {
         if (r.rounds < MAX_ROUNDS) return false;
         st().pause(S.RunPause.NotObserved, what + ' verified but not observed after ' + r.rounds + ' rounds');
@@ -545,6 +546,66 @@
         if (rs.round && rs.round.runId === r.id && !complete(rs.round)) st().dropRound('attempt no longer queued');
     }
 
+    // Whether a finished round without failure is a read round: at least one
+    // of its results is a refusal that sent nothing, and every other key has
+    // already shown, so it is no longer in open (the round keys the step still
+    // plans to send this pass). Without open the step cannot tell, so every
+    // result must be such a refusal. A shown key still in open has to count:
+    // for an unmarked order the round count is its only bound.
+    function onlyUnread(round, open) {
+        var any = false;
+        for (var k in round.expected) {
+            if (!has(round.expected, k)) continue;
+            if (unreadable(resultOf(round, k))) {
+                any = true;
+                continue;
+            }
+            if (!open) return false;
+            for (var i = 0; i < open.length; i++) {
+                if (open[i] === k) return false;
+            }
+        }
+        return any;
+    }
+
+    // Counts, once per consumed round, the refusals that sent nothing per round
+    // key in runState.unread. A key whose result was anything else went out or
+    // was decided, so its record goes. The slot belongs to one run and step
+    // (r.since), so a step change, Resume or a new run starts fresh; it is
+    // memory only, and a restart that forgets it errs to retrying, which the
+    // marks keep safe. Returns { key, status, reason } of the first key whose
+    // read stayed bad for both NOT_SENT_MAX tries and READ_MAX_MS, else null:
+    // the tries alone would pause on a few quick passes, the time alone on the
+    // long waits a list hold puts between two rounds. The trips bound is read
+    // at call time; without trips the time alone bounds the retries.
+    function noteUnread(r, round) {
+        var rs = st().current();
+        var t = now();
+        if (!rs.unread || rs.unread.runId !== r.id || rs.unread.since !== r.since) {
+            rs.unread = { runId: r.id, since: r.since, keys: {} };
+        }
+        var keys = rs.unread.keys;
+        var max = S.modules.adventures.trips ? S.modules.adventures.trips.NOT_SENT_MAX : 1;
+        var hit = null;
+        for (var k in round.expected) {
+            if (!has(round.expected, k)) continue;
+            var res = resultOf(round, k);
+            if (!res) continue;
+            if (!unreadable(res)) {
+                delete keys[k];
+                continue;
+            }
+            if (!has(keys, k)) keys[k] = { tries: 0, first: t };
+            var rec = keys[k];
+            rec.tries++;
+            if (!hit && rec.tries >= max && t - rec.first >= READ_MAX_MS) {
+                hit = { key: k, status: res.status, reason: res.reason + '; refused ' + rec.tries +
+                    ' times in ' + Math.round((t - rec.first) / 1000) + ' s' };
+            }
+        }
+        return hit;
+    }
+
     // Shared round handling of an acting step. Returns 'new' when the caller
     // should start a new round, 'paused' when it paused, 'wait' while a round
     // without failure may still show its effect late: counting it now could
@@ -552,17 +613,34 @@
     // would end the step waits ORDER_WAIT_MS in the same way. A failed round
     // has no effect to wait for and pauses at once. doneAt is memory, so a
     // restart forgets the wait together with the round and the step re-plans.
-    function settleRound(r, step, onFailure, what) {
+    // open (optional) lists the round keys the step still plans to send this
+    // pass, as given to dropShown. A read round (onlyUnread) sent no packet
+    // for its open keys, so it is dropped uncounted and with no settle wait,
+    // and the next pass sends them again: a bad read must not use up the
+    // rounds meant for orders that went out and did not show. noteUnread
+    // bounds those retries and pauses through onFailure, naming the read.
+    function settleRound(r, step, onFailure, what, open) {
         dropOrphan(r);
         var round = currentRound(r, step);
         if (!round || !complete(round)) return 'new';     // none yet, or dropped above
         var f = firstFailure(round);
+        if (!f && onlyUnread(round, open)) {
+            var bad = noteUnread(r, round);
+            if (bad) {
+                onFailure(bad);
+                return 'paused';
+            }
+            st().dropRound(what + ' order not readable');
+            waitRead(r, what + ' order');
+            return 'wait';
+        }
         if (!f && roundSettling(round)) return 'wait';
         if (!f && r.rounds + 1 >= MAX_ROUNDS && typeof round.doneAt === 'number' &&
                 now() - round.doneAt < ORDER_WAIT_MS) {
             waitSent(r, what);
             return 'wait';
         }
+        if (!f) noteUnread(r, round);       // keeps the per-key records current
         r.rounds++;
         st().save();
         if (f) {
@@ -839,7 +917,7 @@
         }
         var next = settleRound(r, steps.unload, function (f) {
             st().pause(S.RunPause.UnloadFailed, 'unload of ' + f.key + ' failed: ' + f.reason, { general: f.key });
-        }, 'unload');
+        }, 'unload', pending);
         if (next !== 'new') return;
         var round = startRound(r, steps.unload, []);
         for (i = 0; i < pending.length; i++) attempt(round, pending[i], S.core.army.unload(pending[i]));
@@ -1125,7 +1203,7 @@
         var names = [];
         for (i = 0; i < os.length; i++) names.push(os[i].mark || os[i].key);
         dropShown(r, step, names);
-        if (settleRound(r, step, pauseWith(def.fail, os, inv), def.fail.what) !== 'new') return;
+        if (settleRound(r, step, pauseWith(def.fail, os, inv), def.fail.what, names) !== 'new') return;
         var round = startRound(r, step, []);
         for (i = 0; i < os.length; i++) {
             var o = os[i];

@@ -52,9 +52,10 @@
  * time a failed claim may be retried), homeNote (the last wait the home
  * steps logged, so a repeated wait is logged once), quiet (the quiet clock of
  * this step: { since, last, ms }), missing (general key -> { since, last } of
- * the reads that lacked it), busy (the busy wait of this run and step: { runId,
- * step, key, text, since, noted, read }, read marking a wait kept alive by a bad
- * read), busySeen (whether this pass kept that wait going), stuckClock (the
+ * the reads that lacked it), unread (run id, step since and, per round key,
+ * the tries and first time of first-step refusals that sent nothing), busy
+ * (the busy wait of this run and step: { runId, step, key, text, since, noted,
+ * read }, read marking a wait kept alive by a bad read), busySeen (whether this pass kept that wait going), stuckClock (the
  * watched-wait clock of the zone trip, in the shape of quiet), pickupClock
  * (the clock of the wait for map objects, in the shape of quiet plus count,
  * the number of objects last seen, so a pick-up restarts it), zoneWait
@@ -788,6 +789,7 @@
         rs.homeNote = null;
         rs.quiet = null;
         rs.missing = {};
+        rs.unread = null;
         rs.busy = null;
         rs.busySeen = false;
         rs.stuckClock = null;

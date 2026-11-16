@@ -766,7 +766,7 @@
         var next = ld().settleRound(r, RS.Depart, function (f) {
             var key = f.key.indexOf(DEPART) === 0 ? f.key.substring(DEPART.length) : f.key;
             st().pause(S.RunPause.DepartFailed, 'send ' + key + ' failed: ' + f.reason, { general: key });
-        }, 'departure');
+        }, 'departure', open);
         if (next !== 'new') return;
         var round = ld().startRound(r, RS.Depart, []);
         for (i = 0; i < toSend.length; i++) sendOne(r, round, toSend[i]);
@@ -1028,8 +1028,10 @@
             st().go(RS.Next, 'retrain ordered');
             return;
         }
+        var open = [];
         for (i = 0; i < m.orders.length; i++) {
             var u = m.orders[i].unit;
+            open.push(ORDER + u);
             var s = ld().staleMark(r, ORDER + u, 'order of ' + u, { seen: true });
             if (s === 'wait') return;
             if (s === 'stale') {
@@ -1041,7 +1043,7 @@
         var next = ld().settleRound(r, RS.Retrain, function (f) {
             var unit = f.key.indexOf(ORDER) === 0 ? f.key.substring(ORDER.length) : f.key;
             st().pause(S.RunPause.RetrainFailed, 'order ' + unit + ' failed: ' + f.reason);
-        }, 'retrain');
+        }, 'retrain', open);
         if (next !== 'new') return;
         log('retrain: ' + S.core.army.text(want));
         var round = ld().startRound(r, RS.Retrain, []);
