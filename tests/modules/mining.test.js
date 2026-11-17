@@ -6,6 +6,7 @@ var jq = require('../stubs/jq');
 var A = require('../stubs/army');
 var AC = require('../stubs/actions');
 var Z = require('../stubs/zone');
+var airfs = require('../stubs/airfs');
 
 t.test('plan no-ops when module is disabled', function () {
     var H = harness.boot();
@@ -53,6 +54,10 @@ function onlyMiningEnabled(depositName, build) {
     return { enabled: true, actionDelay: 0, deposits: deposits };
 }
 
+// Build and upgrade read the zone view first, which needs a numeric viewed
+// zone id; the host stub starts it as null.
+function viewHome(H) { H.host.game.gi.mCurrentViewedZoneID = 1; }
+
 t.test('tryBuild enqueues nothing when no on-map deposits exist', function () {
     var H = harness.boot();
     var z = H.zone.zone()
@@ -60,6 +65,7 @@ t.test('tryBuild enqueues nothing when no on-map deposits exist', function () {
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
@@ -70,9 +76,11 @@ t.test('tryBuild enqueues one mining.buildMine per fresh deposit', function () {
     var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
     var z = H.zone.zone()
         .deposits('IronOre', [depo])
+        .building(H.zone.building({ name: 'Woodcutter', grid: 99 }))  // so the building list reads
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     var q = H.queued();
@@ -92,6 +100,7 @@ t.test('tryBuild skips deposit grids that already host a building', function () 
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
@@ -105,6 +114,7 @@ t.test('tryBuild skips when build queue has no remaining slots', function () {
         .buildQueue(4, 4)                                    // queue full
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
@@ -118,6 +128,7 @@ t.test('tryBuild skips when build flag is false for the deposit', function () {
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     H.settings.write('mining', onlyMiningEnabled('IronOre', false));   // build:false
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
@@ -132,7 +143,8 @@ function withMineOnDeposit(depoName, gridN, mineName, level, upgradable, setting
         name:       mineName,
         grid:       gridN,
         level:      typeof level === 'number' ? level : 0,
-        upgradable: typeof upgradable === 'undefined' ? true : !!upgradable
+        upgradable: typeof upgradable === 'undefined' ? true : !!upgradable,
+        upgrading:  false
     });
     var z = H.zone.zone()
         .deposits(depoName, [depo])
@@ -140,6 +152,7 @@ function withMineOnDeposit(depoName, gridN, mineName, level, upgradable, setting
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     var settings = onlyMiningEnabled(depoName, false);
     settings.deposits[depoName].upgrade     = true;
     settings.deposits[depoName].targetLevel = 3;
@@ -189,6 +202,7 @@ t.test('tryUpgrade skips when build queue has no remaining slots', function () {
         .buildQueue(4, 4)                             // queue full
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     var settings = onlyMiningEnabled('IronOre', false);
     settings.deposits.IronOre.upgrade     = true;
     settings.deposits.IronOre.targetLevel = 3;
@@ -338,12 +352,190 @@ t.test('tryBuild enqueues nothing when byType fails', function () {
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
     z.zone.mStreetDataMap.getDeposits_vectorByType = function () {
         throw new Error('[undefined] is not a function');
     };
     H.settings.write('mining', onlyMiningEnabled('IronOre', true));
     H.module('mining').plan({ zone: { isHome: true } });
     t.assert.strictEqual(H.queued().length, 0);
+});
+
+// --- build and upgrade read gates -----------------------------------------
+
+// IronOre with a fresh deposit on grid 12 and a level 1 mine on grid 13,
+// build and upgrade on, every read good: a plan queues one of each. Each
+// gate test breaks one read and expects nothing queued.
+function gateFixture(opts) {
+    opts = opts || {};
+    var H = harness.boot(opts.fs ? { host: { air: opts.fs.air } } : undefined);
+    var mine = H.zone.building({ name: 'IronMine', grid: 13, level: 1,
+                                 upgradable: true, upgrading: false });
+    var z = H.zone.zone()
+        .deposits('IronOre', [H.zone.deposit({ name: 'IronOre', grid: 12 }),
+                              H.zone.deposit({ name: 'IronOre', grid: 13 })])
+        .building(mine)
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
+    var settings = onlyMiningEnabled('IronOre', true);
+    settings.deposits.IronOre.upgrade = true;
+    H.settings.write('mining', settings);
+    return { H: H, z: z, mine: mine };
+}
+
+function planNames(H) {
+    H.clearQueued();
+    H.module('mining').plan({ zone: { isHome: true } });
+    return H.queued().map(function (e) { return e.name; }).sort();
+}
+
+t.test('the gate fixture queues one build and one upgrade', function () {
+    t.assert.deepStrictEqual(planNames(gateFixture().H),
+        ['mining.buildMine', 'mining.upgradeMine']);
+});
+
+t.test('tryBuild and tryUpgrade queue nothing while the zone loads or its id is unreadable', function () {
+    var f = gateFixture();
+    f.H.host.game.gi.mCurrentViewedZoneID = null;
+    t.assert.deepStrictEqual(planNames(f.H), [], 'viewed zone id not a number');
+
+    f = gateFixture();
+    f.H.host.game.gi.mCurrentPlayerZone = null;
+    t.assert.deepStrictEqual(planNames(f.H), [], 'zone loading');
+});
+
+t.test('tryBuild and tryUpgrade queue nothing away from home', function () {
+    var f = gateFixture();
+    f.H.host.game.gi.isOnHomzone = function () { return false; };
+    t.assert.deepStrictEqual(planNames(f.H), []);
+});
+
+t.test('tryBuild queues nothing on an empty or unreadable building list', function () {
+    var H = harness.boot();
+    var z = H.zone.zone()
+        .deposits('IronOre', [H.zone.deposit({ name: 'IronOre', grid: 12 })])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    t.assert.deepStrictEqual(planNames(H), [], 'empty list');
+
+    var f = gateFixture();
+    f.z.zone.mStreetDataMap.GetBuildings_vector = function () { throw new Error('gone'); };
+    t.assert.deepStrictEqual(planNames(f.H), [], 'unreadable list');
+});
+
+t.test('tryBuild and tryUpgrade queue nothing on an unreadable or non-number build queue', function () {
+    var f = gateFixture();
+    f.H.host.game.gi.mCurrentPlayer.mBuildQueue.GetTotalAvailableSlots = function () {
+        throw new Error('gone');
+    };
+    t.assert.deepStrictEqual(planNames(f.H), [], 'throwing queue read');
+
+    f = gateFixture();
+    f.H.host.game.gi.mCurrentPlayer.mBuildQueue.GetTotalAvailableSlots = function () { return 'x'; };
+    t.assert.deepStrictEqual(planNames(f.H), [], 'non-number slot count');
+});
+
+t.test('tryUpgrade skips a mine whose level, upgrade state or permission is unreadable', function () {
+    function upgradesWith(change) {
+        var f = gateFixture();
+        f.H.settings.write('mining', (function () {
+            var st = onlyMiningEnabled('IronOre', false);
+            st.deposits.IronOre.upgrade = true;
+            return st;
+        }()));
+        change(f.mine);
+        return planNames(f.H);
+    }
+    t.assert.deepStrictEqual(upgradesWith(function () {}), ['mining.upgradeMine'], 'control');
+    t.assert.deepStrictEqual(upgradesWith(function (m) {
+        m.GetUpgradeLevel = function () { throw new Error('gone'); };
+    }), [], 'level unreadable');
+    t.assert.deepStrictEqual(upgradesWith(function (m) {
+        delete m.IsUpgradeInProgress;
+    }), [], 'upgrade state unreadable');
+    t.assert.deepStrictEqual(upgradesWith(function (m) {
+        delete m.IsUpgradeAllowed;
+    }), [], 'permission missing');
+    t.assert.deepStrictEqual(upgradesWith(function (m) {
+        m.IsUpgradeAllowed = function () { throw new Error('gone'); };
+    }), [], 'permission throws');
+});
+
+t.test('a deposit read waits once per pass and warns once on expiry', function () {
+    var f = gateFixture();
+    f.z.zone.mStreetDataMap.getDeposits_vectorByType = function () {
+        throw new Error('gone');
+    };
+    var real = Date.now;
+    var now = 1700000000000;
+    Date.now = function () { return now; };
+    function warns() {
+        return f.H.logs().filter(function (l) {
+            return l.level === 'warn' && l.category === 'mining' &&
+                   /deposits still not readable/.test(l.args.join(' '));
+        }).length;
+    }
+    try {
+        var maxMs = f.H.Steward.kernel.TIMEOUTS.READ_MAX_MS;
+        t.assert.strictEqual(f.H.Steward.kernel.LIMITS.READ_WAIT_TRIES, 3);
+        t.assert.deepStrictEqual(planNames(f.H), []);
+        // Past the time limit on the second pass: with build and upgrade each
+        // counting a try, this would already be the third try and expire.
+        now += maxMs + 1000;
+        t.assert.deepStrictEqual(planNames(f.H), []);
+        t.assert.strictEqual(warns(), 0, 'two tries do not expire');
+        now += 1000;
+        planNames(f.H);
+        t.assert.strictEqual(warns(), 1, 'the third try expires once');
+        now += 1000;
+        planNames(f.H);
+        planNames(f.H);
+        t.assert.strictEqual(warns(), 1, 'a fresh window does not warn again');
+    } finally {
+        Date.now = real;
+    }
+});
+
+t.test('upgradeMine handler: an unreadable level or permission sends nothing', function () {
+    function run(change) {
+        var f = gateFixture({ fs: airfs.make() });
+        AC.wire(f.H);
+        var calls = 0;
+        f.H.host.game.zone.UpgradeBuildingOnGridPosition = function () { calls++; };
+        var q = f.H.Steward.kernel.queue;
+        var orig = q.action;
+        var fn = null;
+        q.action = function (name, h) {
+            if (name === 'mining.upgradeMine') fn = h;
+            return orig.apply(q, arguments);
+        };
+        f.H.module('mining').boot();
+        q.action = orig;
+        change(f.mine);
+        f.H.clearLogs();
+        fn([13, 'IronMine', 2]);
+        AC.drive(f.H);
+        var refused = f.H.logs().filter(function (l) {
+            return l.category === 'mining' && / refused: /.test(l.args.join(' '));
+        }).map(function (l) { return l.args.join(' '); });
+        return { calls: calls, refused: refused };
+    }
+    t.assert.strictEqual(run(function () {}).calls, 1, 'control: a readable mine is sent');
+
+    var lvl = run(function (m) { m.GetUpgradeLevel = function () { throw new Error('gone'); }; });
+    t.assert.strictEqual(lvl.calls, 0, 'unreadable level');
+    t.assert.strictEqual(lvl.refused.length, 1);
+    t.assert.ok(/upgrade level unreadable/.test(lvl.refused[0]), lvl.refused[0]);
+
+    var perm = run(function (m) { delete m.IsUpgradeAllowed; });
+    t.assert.strictEqual(perm.calls, 0, 'unreadable permission');
+    t.assert.strictEqual(perm.refused.length, 1);
+    t.assert.ok(/upgrade permission unreadable/.test(perm.refused[0]), perm.refused[0]);
 });
 
 // --- dashboard surface ----------------------------------------------------

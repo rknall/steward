@@ -17,6 +17,10 @@
  *            send, so a script reload keeps it. 5 unseen sends in a row
  *            open the build breaker (memory only), which pauses build and
  *            upgrade except one probe every 5 min. See builds.js.
+ *            Build and upgrade wait, without spending a slot or the
+ *            breaker probe, while the zone view, build queue, building
+ *            list, deposit list or a mine's level, upgrade state or
+ *            permission cannot be read.
  *   pause    stops producing mines whose deposit fell below the global
  *            pause threshold, verified through S.core.production.setActive
  *            so the pause counts only once the mine reads paused.
@@ -172,19 +176,19 @@
 
     function readPlanContext() {
         var s = readSettings();
+        var cap = S.core.construction.capacity();
         var slotsRemaining = 0;
         var licensesRemaining = 0;
-        try {
-            var p  = game.gi.mCurrentPlayer;
-            var bq = p.mBuildQueue;
-            slotsRemaining    = bq.GetTotalAvailableSlots() - bq.GetQueue_vector().length;
-            licensesRemaining = p.GetMaxBuildingCount() - p.mCurrentBuildingsCountAll;
-        } catch (e) {
-            S.kernel.warn('mining', 'readPlanContext threw:', e);
+        if (S.kernel.read.isOk(cap)) {
+            slotsRemaining    = cap.value.slotsTotal - cap.value.slotsUsed;
+            licensesRemaining = cap.value.licMax - cap.value.licUsed;
         }
         return {
             slotsRemaining:    slotsRemaining,
             licensesRemaining: licensesRemaining,
+            capacity:           cap,    // build queue Result, waited on by buildReady
+            ready:              null,   // buildReady answer, worked out once per pass
+            depos:              {},     // deposit type -> on-map list, null while unreadable
             queued:             0,
             assigned:           {},
             buffs:              0,      // buff applies queued this pass
@@ -207,21 +211,63 @@
         }
     }
 
+    // True only on a good read. A read that may still settle wakes mining
+    // after the retry delay, and one that stays bad warns once per window
+    // instead of on every pass.
+    function awaited(key, r, what) {
+        var w = S.kernel.read.wait('mining', key, r);
+        if (w === 'go') return true;
+        if (w === 'expired') {
+            S.kernel.warn('mining', what + ' still not readable:', r && r.why);
+        }
+        return false;
+    }
+
+    // The proof that a null byGrid means an empty grid: the zone view reads
+    // home, and the building list was read completely and holds anything
+    // (the rule S.core.buildings.readable() applies, turned into a Result so
+    // it can be waited on). It also needs the build queue read. Worked out
+    // once per pass, before any slot, licence or breaker probe is spent.
+    function buildReady(ctx) {
+        if (ctx.ready !== null) return ctx.ready;
+        ctx.ready = false;
+        var view = S.core.zone.view();
+        if (!awaited('zone', view, 'zone view')) return false;
+        if (view.value.home !== true) return false;                         // a real answer: away from home
+        if (!awaited('capacity', ctx.capacity, 'build queue')) return false;
+        var lr = S.core.buildings.listRead();
+        if (S.kernel.read.isOk(lr) && !lr.value.length) {
+            lr = S.kernel.read.unreadable('building list empty', lr.zoneId);
+        }
+        if (!awaited('buildings', lr, 'building list')) return false;
+        ctx.ready = true;
+        return true;
+    }
+
+    // Read once per type per pass, a failed read included, so build and
+    // upgrade do not count two tries of the same wait in one pass.
+    function depositsOf(info, ctx) {
+        if (Object.prototype.hasOwnProperty.call(ctx.depos, info.name)) {
+            return ctx.depos[info.name];
+        }
+        var r = S.core.deposits.byTypeRead(info.name);
+        var list = awaited('deposits.' + info.name, r, info.name + ' deposits') ? r.value : null;
+        ctx.depos[info.name] = list;
+        return list;
+    }
+
     // Phase functions; tryRefill is still a stub. Tests inject stubs via
     // S.modules.mining._phases — see tests/modules/mining.test.js.
     function tryBuild(info, cfg, ctx) {
         if (!cfg.build) return;
-        if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
         if (!info.mineId || !info.mineName) return;
         if (ctx.buildStop) return;
+        if (!buildReady(ctx)) return;
+        if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
         var builds = S.modules.mining.builds;
 
-        var onMapDepos;
-        try { onMapDepos = S.core.deposits.byType(info.name); }
-        catch (e) {
-            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
-            return;
-        }
+        var onMapDepos = depositsOf(info, ctx);
+        if (!onMapDepos) return;
 
         for (var i = 0; i < onMapDepos.length; i++) {
             var depo = onMapDepos[i];
@@ -232,7 +278,9 @@
             if (ctx.assigned[grid]) continue;
 
             // A building (any building, including a depleted shell) on
-            // this grid means the deposit is already covered. Depleted
+            // this grid means the deposit is already covered, and no
+            // building means an empty grid, because buildReady proved the
+            // building list readable on home. Depleted
             // shells resolve naturally on the next tick: a geo finds a
             // new deposit, the shell goes away, byGrid returns null,
             // and we queue the build then. Our own mine seen there clears
@@ -269,19 +317,16 @@
     }
     function tryUpgrade(info, cfg, ctx) {
         if (!cfg.upgrade) return;
-        if (ctx.slotsRemaining <= 0) return;
         if (!info.mineName) return;
         var target = (typeof cfg.targetLevel === 'number') ? cfg.targetLevel : 0;
         if (target <= 0) return;
         if (ctx.buildStop) return;
+        if (!buildReady(ctx)) return;
+        if (ctx.slotsRemaining <= 0) return;
         var builds = S.modules.mining.builds;
 
-        var onMapDepos;
-        try { onMapDepos = S.core.deposits.byType(info.name); }
-        catch (e) {
-            S.kernel.warn('mining', 'byType threw for', info.name, ':', e);
-            return;
-        }
+        var onMapDepos = depositsOf(info, ctx);
+        if (!onMapDepos) return;
 
         for (var i = 0; i < onMapDepos.length; i++) {
             var depo = onMapDepos[i];
@@ -294,24 +339,38 @@
             if (!bld) continue;                                              // no mine to upgrade
             if (S.core.buildings.name(bld) !== info.mineName) continue;      // wrong building (depleted shell, etc.)
 
+            // An unread level is never level 0: skip the grid, the next pass
+            // reads it again.
+            var lvl = S.core.buildings.levelOf(bld);
+            if (lvl === null) {
+                S.kernel.debug('mining', info.mineName, 'grid', grid, 'level unreadable — waiting');
+                continue;
+            }
             // The level read now proves any upgrade to it landed.
-            var lvl = S.core.buildings.level(bld);
             builds.seen(builds.upgradeKey(grid, lvl),
                 info.mineName + ' grid ' + grid + ' level ' + lvl);
             if (lvl >= target) continue;                                     // already at or above target
 
             var nextLevel = lvl + 1;
             var ukey = builds.upgradeKey(grid, nextLevel);
-            var busy = S.core.construction.upgrading(bld) === true;
+            var busy = S.core.buildings.upgrading(bld);
             if (builds.held(ukey)) {
-                if (busy) builds.seen(ukey, info.mineName + ' grid ' + grid + ' level ' + nextLevel);
+                if (busy === true) builds.seen(ukey, info.mineName + ' grid ' + grid + ' level ' + nextLevel);
+                continue;
+            }
+            if (busy === null) {
+                S.kernel.debug('mining', info.mineName, 'grid', grid, 'upgrade state unreadable — waiting');
                 continue;
             }
             // Already upgrading: a new attempt would only end satisfied
             // and hold a slot every pass.
-            if (busy) continue;
-            if (typeof bld.IsUpgradeAllowed === 'function' &&
-                !bld.IsUpgradeAllowed(true)) continue;                       // host says no
+            if (busy === true) continue;
+            var allowed = S.core.buildings.isUpgradable(bld);
+            if (allowed === null) {
+                S.kernel.debug('mining', info.mineName, 'grid', grid, 'upgrade permission unreadable — waiting');
+                continue;
+            }
+            if (allowed === false) continue;                                 // host says no
             if (!builds.admit()) {
                 ctx.buildStop = true;
                 return;
@@ -545,14 +604,16 @@
                              '— skipping upgrade');
                 return;
             }
-            if (S.core.buildings.level(bld) >= nextLvl) {
+            // A level or permission that cannot be read falls through to the
+            // upgrade def, whose precheck refuses it before anything is sent.
+            var lvl = S.core.buildings.levelOf(bld);
+            if (lvl !== null && lvl >= nextLvl) {
                 S.kernel.log('mining', mineName, 'on grid', grid,
-                             'already at level', S.core.buildings.level(bld),
+                             'already at level', lvl,
                              '— skipping upgrade');
                 return;
             }
-            if (typeof bld.IsUpgradeAllowed === 'function' &&
-                !bld.IsUpgradeAllowed(true)) {
+            if (S.core.buildings.isUpgradable(bld) === false) {
                 S.kernel.log('mining', mineName, 'on grid', grid,
                              'no longer upgradable — skipping');
                 return;

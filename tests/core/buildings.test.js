@@ -260,6 +260,33 @@ t.test('inDestruction: true, false, absent method, throwing method, no building'
     t.assert.strictEqual(B.inDestruction(null), null);
 });
 
+t.test('upgrading: true, false, absent method, throwing method, no building', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.upgrading(H.zone.building({ productionState: 0, upgrading: true })), true);
+    t.assert.strictEqual(B.upgrading(H.zone.building({ productionState: 0, upgrading: false })), false);
+    // A missing method cannot prove the building is idle.
+    t.assert.strictEqual(B.upgrading(H.zone.building({ productionState: 0 })), null);
+    var b = H.zone.building({ productionState: 0 });
+    b.IsUpgradeInProgress = function () { throw new Error('boom'); };
+    t.assert.strictEqual(B.upgrading(b), null);
+    t.assert.strictEqual(B.upgrading(null), null);
+});
+
+t.test('isUpgradable: true, false, absent method, throwing method, no building', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.isUpgradable(H.zone.building({ upgradable: true })), true);
+    t.assert.strictEqual(B.isUpgradable(H.zone.building({ upgradable: false })), false);
+    var gone = H.zone.building({ upgradable: true });
+    delete gone.IsUpgradeAllowed;
+    t.assert.strictEqual(B.isUpgradable(gone), null);
+    var b = H.zone.building({ upgradable: true });
+    b.IsUpgradeAllowed = function () { throw new Error('boom'); };
+    t.assert.strictEqual(B.isUpgradable(b), null);
+    t.assert.strictEqual(B.isUpgradable(null), null);
+});
+
 t.test('buffState reports presence and mBuffs_vector length', function () {
     var H = harness.boot();
     var B = H.Steward.core.buildings;

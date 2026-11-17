@@ -123,22 +123,15 @@
         return out;
     }
 
+    // Zeros while the build queue cannot be read.
     function readQueueCounts() {
-        var slotsTotal = 0, slotsUsed = 0;
-        var licMax = 0, licUsed = 0;
-        try {
-            var p = game.gi.mCurrentPlayer;
-            var bq = p.mBuildQueue;
-            slotsTotal = bq.GetTotalAvailableSlots();
-            slotsUsed  = bq.GetQueue_vector().length;
-            licMax     = p.GetMaxBuildingCount();
-            licUsed    = p.mCurrentBuildingsCountAll;
-        } catch (e) { /* leave 0 */ }
+        var cap = S.core.construction.capacity();
+        var v = S.kernel.read.isOk(cap) ? cap.value : null;
         return {
-            slotsTotal: slotsTotal,
-            slotsUsed:  slotsUsed,
-            licMax:     licMax,
-            licUsed:    licUsed
+            slotsTotal: v ? v.slotsTotal : 0,
+            slotsUsed:  v ? v.slotsUsed  : 0,
+            licMax:     v ? v.licMax     : 0,
+            licUsed:    v ? v.licUsed    : 0
         };
     }
 
@@ -226,7 +219,7 @@
     }
 
     // Any whole level from 1 up. The game decides the top level: tryUpgrade
-    // asks IsUpgradeAllowed before it queues an upgrade, so a target above a
+    // asks S.core.buildings.isUpgradable before it queues an upgrade, so a target above a
     // mine's real maximum just stops there.
     function parseLevel(text) {
         var n = S.kernel.ui.settingsParse.whole(text);

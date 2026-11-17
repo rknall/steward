@@ -51,6 +51,8 @@ function setup(opts) {
     var extra = opts.buildings || [];
     for (var j = 0; j < extra.length; j++) z.building(extra[j]);
     H.installZone(z);
+    // Build and upgrade read the zone view, which needs a numeric viewed zone id.
+    H.host.game.gi.mCurrentViewedZoneID = 1;
     H.settings.write('mining', settings(opts));
 
     var clock = { now: typeof opts.now === 'number' ? opts.now : T0 };
@@ -213,9 +215,10 @@ t.test('build: after 30 min an unreadable building list sends nothing', function
     s.clock.now += s.builds.HOLD_MS + 1000;
     var list = s.z.zone.mStreetDataMap.mBuildingContainer;
     list.splice(0, list.length);
-    buildOnce(s);
+    assert.strictEqual(named(plan(s), 'mining.buildMine').length, 0, 'the plan waits on the list');
     assert.strictEqual(builds50(s).length, 1, 'no send while the list is unreadable');
-    assert.ok(!s.builds.entries()['build|12'], 'no new hold');
+    var held = s.builds.entries()['build|12'];
+    assert.ok(!held || held.until <= s.clock.now, 'no unexpired hold');
 });
 
 t.test('build: after 30 min a mine on the grid drops the hold and queues nothing', function () {
@@ -305,7 +308,7 @@ t.test('upgrade: unseen keeps the hold; after 30 min one new call, or none when 
     s.clock.now += s.builds.HOLD_MS + 1000;
     var b = s.z.zone.GetBuildingFromGridPosition(12);
     delete b.IsUpgradeInProgress;
-    upgradeOnce(s);
+    assert.strictEqual(named(plan(s), 'mining.upgradeMine').length, 0, 'the plan skips an unread upgrade state');
     assert.strictEqual(s.calls.length, 2, 'unreadable upgrade state sends nothing');
 
     // The level arrives: the plan drops any hold for it and queues nothing.
@@ -372,6 +375,43 @@ t.test('breaker: 5 unseen builds open it; plan waits for the probe; buff breaker
     var buff = s.H.Steward.modules.mining.buffBreaker.snapshot();
     assert.strictEqual(buff.open, false);
     assert.strictEqual(buff.run, 0);
+});
+
+t.test('breaker: an unreadable zone, list or deposit read spends no probe', function () {
+    var s = setup({ build: true, grids: [12, 13, 14, 15, 16] });
+    var b = named(plan(s), 'mining.buildMine');
+    assert.strictEqual(b.length, 5);
+    for (var i = 0; i < b.length; i++) s.handlers['mining.buildMine'](b[i].params);
+    AC.drive(s.H, { max: 200 });
+    assert.strictEqual(s.builds.breaker.snapshot().open, true);
+
+    // Fresh deposits the probe could build on, past the probe cooldown.
+    var depos = [];
+    var grids = [12, 13, 14, 15, 16, 17, 18];
+    for (var j = 0; j < grids.length; j++) depos.push(Z.deposit({ name: 'IronOre', grid: grids[j] }));
+    s.z.deposits('IronOre', depos);
+    s.clock.now += 6 * 60000;
+
+    var gi = s.H.host.game.gi;
+    gi.mCurrentViewedZoneID = null;
+    assert.strictEqual(plan(s).length, 0, 'unreadable zone view');
+    gi.mCurrentViewedZoneID = 1;
+
+    var sdm = s.z.zone.mStreetDataMap;
+    var listFn = sdm.GetBuildings_vector;
+    sdm.GetBuildings_vector = function () { throw new Error('gone'); };
+    assert.strictEqual(plan(s).length, 0, 'unreadable building list');
+    sdm.GetBuildings_vector = listFn;
+
+    var byType = sdm.getDeposits_vectorByType;
+    sdm.getDeposits_vectorByType = function () { throw new Error('gone'); };
+    assert.strictEqual(plan(s).length, 0, 'unreadable deposits');
+    sdm.getDeposits_vectorByType = byType;
+
+    var probe = plan(s);
+    assert.strictEqual(probe.length, 1, 'the probe is still there');
+    assert.strictEqual(probe[0].name, 'mining.buildMine');
+    assert.strictEqual(plan(s).length, 0, 'and spent now');
 });
 
 t.test('no file API: plan still queues, the handler sends nothing', function () {

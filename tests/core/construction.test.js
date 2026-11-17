@@ -33,7 +33,7 @@ function setup(o) {
         if (o.throwUpgrade) throw new Error('host refused');
     };
     if (o.noUpgradeMethod) delete H.host.game.zone.UpgradeBuildingOnGridPosition;
-    return { H: H, S: H.Steward, sent: sent, z: z, host: host, mineOpts: mineOpts };
+    return { H: H, S: H.Steward, sent: sent, z: z, host: host, mineOpts: mineOpts, mine: mine, gi: gi };
 }
 
 function run(s, def, drive) {
@@ -162,7 +162,15 @@ t.test('upgrade: a building that cannot report an upgrade is refused', function 
     var r = run(s, s.S.core.construction.upgrade(12, 'IronMine', 2));
     assert.strictEqual(r.status, s.S.ActionResult.Refused);
     assert.strictEqual(r.reason, 'upgrade state unreadable');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(r.reason), true);
     assert.strictEqual(s.host.upgrades.length, 0);
+});
+
+t.test('upgrade: a running upgrade is refused as already upgrading', function () {
+    var s = setup({ mine: { name: 'IronMine', grid: 12, level: 1, upgradable: true, upgrading: true } });
+    var def = s.S.core.construction.upgrade(12, 'IronMine', 3);
+    assert.strictEqual(def.precheck(), 'already upgrading');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal('already upgrading'), false);
 });
 
 t.test('upgrade: a building that may not be upgraded is refused', function () {
@@ -205,11 +213,116 @@ t.test('upgrade: a throwing host call ends failed after one send and is not retr
     assert.strictEqual(s.host.upgrades.length, 1);
 });
 
-t.test('upgrading: true, false and null from IsUpgradeInProgress', function () {
+function upMine() {
+    return { name: 'IronMine', grid: 12, level: 1, upgradable: true, upgrading: false };
+}
+
+// A precheck that refuses with a read refusal and a def that never verifies.
+function assertReadRefused(s, def, reason) {
+    var got = def.precheck();
+    assert.strictEqual(got, reason);
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(got), true);
+    assert.strictEqual(def.satisfied(), false);
+    assert.strictEqual(def.check(), false);
+}
+
+t.test('place: a loading zone refuses as a read refusal and is never satisfied', function () {
+    var s = setup({ mine: { name: 'IronMine', grid: 12 } });
+    s.gi.mCurrentPlayerZone = null;
+    var def = s.S.core.construction.place(50, 12, 'IronMine');
+    assertReadRefused(s, def, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(def.observable(), false);
+    var r = run(s, s.S.core.construction.place(50, 12, 'IronMine'));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('place: an unreadable viewed zone id refuses as a read refusal', function () {
+    var s = setup({ mine: { name: 'IronMine', grid: 12 } });
+    s.gi.mCurrentViewedZoneID = null;
+    var def = s.S.core.construction.place(50, 12, 'IronMine');
+    assertReadRefused(s, def, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(def.observable(), false);
+});
+
+t.test('place: buildings unreadable is a read refusal', function () {
+    var s = setup({ empty: true });
+    var reason = s.S.core.construction.place(50, 12, 'IronMine').precheck();
+    assert.strictEqual(reason, 'buildings unreadable');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(reason), true);
+    assert.strictEqual(s.S.kernel.read.isReadRefusal('not on the home island'), false);
+});
+
+t.test('upgrade: a loading or unreadable zone refuses as a read refusal and never verifies', function () {
+    var s = setup({ mine: { name: 'IronMine', grid: 12, level: 2, upgradable: true, upgrading: true } });
+    s.gi.mCurrentPlayerZone = null;
+    var def = s.S.core.construction.upgrade(12, 'IronMine', 2);
+    assertReadRefused(s, def, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(def.observable(), false);
+
+    var s2 = setup({ mine: { name: 'IronMine', grid: 12, level: 2, upgradable: true, upgrading: true } });
+    s2.gi.mCurrentViewedZoneID = null;
+    var def2 = s2.S.core.construction.upgrade(12, 'IronMine', 2);
+    assertReadRefused(s2, def2, s2.S.core.zone.UNREADABLE);
+    assert.strictEqual(def2.observable(), false);
+});
+
+t.test('upgrade: an unreadable level refuses and never counts as reached', function () {
+    var s = setup({ mine: upMine() });
+    var b = s.S.core.buildings.byGrid(12);
+    b.GetUpgradeLevel = function () { throw new Error('no level'); };
+    var def = s.S.core.construction.upgrade(12, 'IronMine', 0);
+    assertReadRefused(s, def, 'upgrade level unreadable');
+    var r = run(s, s.S.core.construction.upgrade(12, 'IronMine', 0));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, 'upgrade level unreadable');
+    assert.strictEqual(s.host.upgrades.length, 0);
+});
+
+t.test('upgrade: a missing or throwing IsUpgradeAllowed refuses as a read refusal', function () {
+    var s = setup({ mine: upMine() });
+    delete s.S.core.buildings.byGrid(12).IsUpgradeAllowed;
+    var r = run(s, s.S.core.construction.upgrade(12, 'IronMine', 2));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, 'upgrade permission unreadable');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(r.reason), true);
+    assert.strictEqual(s.host.upgrades.length, 0);
+
+    var s2 = setup({ mine: upMine() });
+    s2.S.core.buildings.byGrid(12).IsUpgradeAllowed = function () { throw new Error('no answer'); };
+    var r2 = run(s2, s2.S.core.construction.upgrade(12, 'IronMine', 2));
+    assert.strictEqual(r2.status, s2.S.ActionResult.Refused);
+    assert.strictEqual(r2.reason, 'upgrade permission unreadable');
+    assert.strictEqual(s2.host.upgrades.length, 0);
+});
+
+t.test('capacity: ok with the four counts, notReady without a player, unreadable for a non-number or throwing member', function () {
     var s = setup();
-    var up = s.S.core.construction.upgrading;
-    assert.strictEqual(up(Z.building({ upgrading: true })), true);
-    assert.strictEqual(up(Z.building({ upgrading: false })), false);
-    assert.strictEqual(up(Z.building({})), null);
-    assert.strictEqual(up(null), null);
+    var R = s.S.kernel.read;
+    s.z.buildQueue(1, 3);
+    var c = s.S.core.construction.capacity();
+    assert.strictEqual(c.state, R.OK);
+    assert.deepStrictEqual(json(c.value), { slotsTotal: 3, slotsUsed: 1, licMax: 100, licUsed: 1 });
+    assert.strictEqual(c.zoneId, 1);
+
+    var player = s.gi.mCurrentPlayer;
+    player.mCurrentBuildingsCountAll = 'x';
+    assert.strictEqual(s.S.core.construction.capacity().state, R.UNREADABLE);
+    player.mCurrentBuildingsCountAll = 1;
+
+    var slots = player.mBuildQueue.GetTotalAvailableSlots;
+    player.mBuildQueue.GetTotalAvailableSlots = function () { return 'x'; };
+    assert.strictEqual(s.S.core.construction.capacity().state, R.UNREADABLE);
+    player.mBuildQueue.GetTotalAvailableSlots = function () { throw new Error('queue gone'); };
+    assert.strictEqual(s.S.core.construction.capacity().state, R.UNREADABLE);
+    player.mBuildQueue.GetTotalAvailableSlots = slots;
+
+    var queue = player.mBuildQueue;
+    player.mBuildQueue = null;
+    assert.strictEqual(s.S.core.construction.capacity().state, R.UNREADABLE);
+    player.mBuildQueue = queue;
+    assert.strictEqual(s.S.core.construction.capacity().state, R.OK);
+
+    s.gi.mCurrentPlayer = null;
+    assert.strictEqual(s.S.core.construction.capacity().state, R.NOT_READY);
 });

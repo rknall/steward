@@ -6,6 +6,8 @@
  *
  * Buff eligibility: buffState reads every raw fact, buffBlock turns it into
  * null (eligible) or the first reason a production buff must not be applied.
+ * The upgrade state (upgrading), level (levelOf) and permission (isUpgradable)
+ * answer null when the read failed, never a guessed false.
  *
  * Cache: there is no snapshot across ticks. list, byPredicate, listMines,
  * collectiblesByName, readable and the byName/byGrid fallbacks read the
@@ -37,8 +39,9 @@
     // Optional host methods that say a building cannot take a buff right now.
     // Feature-detected: buffState records whether each exists.
     var DESTRUCTION_METHOD = 'IsInDestruction';
+    var UPGRADE_METHOD = 'IsUpgradeInProgress';
     var BUFF_BLOCKERS = [
-        { method: 'IsUpgradeInProgress', reason: 'upgrading' },
+        { method: UPGRADE_METHOD, reason: 'upgrading' },
         { method: 'IsInConstructionMode', reason: 'under construction' },
         { method: DESTRUCTION_METHOD, reason: 'being destroyed' }
     ];
@@ -203,10 +206,14 @@
         } catch (e) { return false; }
     }
 
+    // True/false as the host answers, null when that cannot be read (no building,
+    // no such method, a throw). Callers test === true / === false, never truthiness.
     function isUpgradable(b) {
-        if (!b) return false;
-        try { return typeof b.IsUpgradeAllowed === 'function' && !!b.IsUpgradeAllowed(true); }
-        catch (e) { return false; }
+        if (!b) return null;
+        try {
+            if (typeof b.IsUpgradeAllowed !== 'function') return null;
+            return !!b.IsUpgradeAllowed(true);
+        } catch (e) { return null; }
     }
 
     function isCollectible(b) {
@@ -573,6 +580,14 @@
         return st;
     }
 
+    // The blockers entry of a buffState for one method, or null.
+    function blockerOf(st, method) {
+        for (var i = 0; i < st.blockers.length; i++) {
+            if (st.blockers[i].method === method) return st.blockers[i];
+        }
+        return null;
+    }
+
     // Null when the building may take a production buff, else the first reason
     // it may not.
     function buffBlock(b) {
@@ -603,14 +618,23 @@
     function inDestruction(b) {
         var st = buffState(b);
         if (!st) return null;
-        for (var i = 0; i < st.blockers.length; i++) {
-            var bl = st.blockers[i];
-            if (bl.method !== DESTRUCTION_METHOD) continue;
-            if (!bl.present) return false;
-            if (bl.value === null) return null;
-            return bl.value ? true : false;
-        }
-        return false;
+        var bl = blockerOf(st, DESTRUCTION_METHOD);
+        if (!bl || !bl.present) return false;
+        if (bl.value === null) return null;
+        return bl.value ? true : false;
+    }
+
+    // True when the building is upgrading, false when it is not, null when there
+    // is no building, the host has no such method or its call fails. Unlike
+    // inDestruction a missing method is null: a caller that sends an upgrade
+    // needs a positive "not upgrading", never a guess.
+    function upgrading(b) {
+        var st = buffState(b);
+        if (!st) return null;
+        var bl = blockerOf(st, UPGRADE_METHOD);
+        if (!bl || !bl.present) return null;
+        if (bl.value === null) return null;
+        return bl.value ? true : false;
     }
 
     // True/false when the building shows a running production buff, null when
@@ -668,6 +692,7 @@
         buffState:         buffState,
         buffBlock:         buffBlock,
         inDestruction:     inDestruction,
+        upgrading:         upgrading,
         hasProductionBuff: hasProductionBuff,
         productionBuffInfo: productionBuffInfo,
         BUFF_BLOCKERS:     BUFF_BLOCKERS,

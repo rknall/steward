@@ -154,7 +154,8 @@ t.test('masons are buffed for Stone/Marble/Granite via masonName', function () {
 t.test('skips productionBuff, state != 0, upgrading, grids claimed by build/upgrade, zero stock, off home, unmatched buff', function () {
     var env = setup({
         buildings: [mine(1, { productionBuff: {} }), mine(2, { productionState: 2 }),
-                    mine(3, { upgrading: true }), mine(4, { upgradable: true }), mine(5)],
+                    mine(3, { upgrading: true }), mine(4, { upgradable: true, upgrading: false }),
+                    mine(5)],
         deposits:  { IronOre: [Z.deposit({ name: 'IronOre', grid: 4, amount: 500 })] },
         on:        { IronOre: { buff: 'MineBuff', upgrade: true, targetLevel: 3 } }
     });
@@ -171,6 +172,20 @@ t.test('skips productionBuff, state != 0, upgrading, grids claimed by build/upgr
     var other = setup({ buildings: [mine(5)], on: { IronOre: { buff: 'BakeryBuff' } } });
     assert.strictEqual(grids(other.plan()).length, 0);
     assert.strictEqual(logsMatching(other, 'debug', 'does not target IronMine').length, 1);
+});
+
+t.test('an unreadable upgrade state queues no upgrade for that mine', function () {
+    function plan(b) {
+        return setup({
+            buildings: [b],
+            deposits:  { IronOre: [Z.deposit({ name: 'IronOre', grid: 4, amount: 500 })] },
+            on:        { IronOre: { buff: 'MineBuff', upgrade: true, targetLevel: 3 } }
+        }).plan();
+    }
+    // Control: a readable upgrade state lets the plan queue the upgrade.
+    assert.strictEqual(named(plan(mine(4, { upgradable: true, upgrading: false })), 'mining.upgradeMine').length, 1);
+    // Without IsUpgradeInProgress the state is unknown, so the grid waits.
+    assert.strictEqual(named(plan(mine(4, { upgradable: true })), 'mining.upgradeMine').length, 0);
 });
 
 t.test('stock counts down within one pass', function () {

@@ -23,7 +23,7 @@
 | `Steward.core.pickups`     | Clickable quest objects and collectibles of the viewed zone, and the click action. |
 | `Steward.core.production`  | Queue profiles and entries per production type, item info, generic order and complete actions, the on/off action, the planner and the demand ledger. |
 | `Steward.core.buffing`     | Shared building-buff engine: verified apply, per-grid hold after an unseen apply, one breaker per owner. |
-| `Steward.core.construction` | Place and upgrade action defs for one grid, verified by observation, never retried. |
+| `Steward.core.construction` | Place and upgrade action defs for one grid, verified by observation, never retried, and `capacity()`, the Result of build-queue slots and building licences. |
 | `Steward.core.resources`   | Resource amount and free population reads.            |
 
 Write actions are defs (plain objects with `precheck`, `send`, `check` and so on) built by the core that owns the action, for example `S.core.army.raise`, `S.core.quests.claim`, `S.core.pickups.click` and `S.core.production.order`. They run through `S.core.actions.attempt(def, onDone)`, which verifies by positive observation: a failed read or a missing object never counts as success. Which action to run and when stays with the module; the cores stay policy-free. Readers that defs rely on report a failed read as `null`, never as zero or an empty list. A def may add `observable()`: while it returns false no check runs and the wait does not use up the verify window, up to a fixed cap (`S.core.actions.HOLD_MAX_MS`).
@@ -156,7 +156,8 @@ var model = Steward.kernel.hostRead.pass(function () {
 - `num(r)` gives null and `show(r)` gives `?` for anything but `ok`.
 - Scopes: `zone` and `pass` answers are memoized per read pass (a `zone` one also per viewed zone id), `static` definitions stay for the session once read ok, `live` never. Definitions that a later decision depends on are read live, even inside a pass.
 - Never wrap an action def, a send or `actions.attempt` in a pass; their reads stay live.
-- A refusal that only means "a read failed" is registered with `readRefusal(reason)` (`Steward.core.zone.UNREADABLE`, the specialist and quest ones). Test `isReadRefusal(reason)`: it is not a real refusal, so wait and try again instead of counting a failure.
+- A refusal that only means "a read failed" is registered with `readRefusal(reason)` (`Steward.core.zone.UNREADABLE`, the specialist, quest and construction ones). Test `isReadRefusal(reason)`: it is not a real refusal, so wait and try again instead of counting a failure.
+- `buildings.upgrading(b)`, `buildings.isUpgradable(b)` and `buildings.levelOf(b)` answer null for a failed read; test `=== true` / `=== false` or `!== null`, never truthiness.
 - `wait(owner, key, r, opts)` returns `'go'`, `'wait'` (the module is woken after `TIMEOUTS.READ_RETRY_MS`) or `'expired'` once per window, after `LIMITS.READ_WAIT_TRIES` tries and `TIMEOUTS.READ_MAX_MS`. Skip your work on `'wait'`, warn on `'expired'`, and `clearWait` when you stop caring.
 - A specialist status that could not be read is `S.SpecialistStatus.Unknown`. Views show it as `reading...` (`h.unknown`), never as busy or idle, and redraw once the pass settles.
 - The legacy readers (`buildings.list`, `zone.isHome`, ...) are kept for callers that can live with an empty answer; a caller that acts on the answer uses the Result reader.

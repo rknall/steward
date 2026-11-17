@@ -179,8 +179,21 @@ b.getPlayerID();              // -1 = neutral/enemy, 0 = home
 b.GetArmy();                  // null or army; .HasUnits()
 b.mIsSelectable;              // true while the object can still be clicked
 b.IsUpgradeAllowed(true);
+b.IsUpgradeInProgress();
 b.productionQueue;            // .mTimedProductions_vector, .mProductionType
 ```
+
+### Build queue and licences
+
+```js
+p = game.gi.mCurrentPlayer;
+p.mBuildQueue.GetTotalAvailableSlots();
+p.mBuildQueue.GetQueue_vector();     // .length = used slots
+p.GetMaxBuildingCount();
+p.mCurrentBuildingsCountAll;
+```
+
+Steward reads them only through `Steward.core.construction.capacity()`.
 
 ### Quest accessors
 
