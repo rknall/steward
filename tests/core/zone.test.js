@@ -86,6 +86,25 @@ t.test('UNREADABLE is a read refusal', function () {
     assert.strictEqual(s.S.kernel.read.isReadRefusal(s.S.core.zone.UNREADABLE), true);
 });
 
+t.test('homeRefusal is the unreadable refusal while the view is not ok', function () {
+    var s = setup();
+    var r = s.S.core.zone.homeRefusal();
+    assert.strictEqual(r, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(r), true);
+    readable(s, 'x');
+    assert.strictEqual(s.S.core.zone.homeRefusal({ live: true }), s.S.core.zone.UNREADABLE);
+});
+
+t.test('homeRefusal says not home on a known foreign zone and is null at home', function () {
+    var s = setup();
+    readable(s, 7);
+    s.game.gi.isOnHomzone = function () { return false; };
+    assert.strictEqual(s.S.core.zone.homeRefusal(), 'not on the home island');
+    s.game.gi.isOnHomzone = function () { return true; };
+    s.S.kernel.hostRead.pass(function () {});
+    assert.strictEqual(s.S.core.zone.homeRefusal(), null);
+});
+
 t.test('homeId reads game.player first', function () {
     var s = setup();
     s.game.player = { GetHomeZoneId: function () { return 11; } };

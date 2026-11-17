@@ -86,6 +86,17 @@
         return R.get('zone.view', undefined, opts);
     }
 
+    // Precheck of a def that only acts on the home island: the zone's own
+    // read refusal while the zone view is not ok (loading or unreadable), so a
+    // failed read is retried rather than taken for "not home"; the plain
+    // refusal when the zone is known and is not home; null when home.
+    function homeRefusal() {
+        var v = S.core.zone.view();
+        if (!R.isOk(v)) return UNREADABLE;
+        if (!v.value || v.value.home !== true) return 'not on the home island';
+        return null;
+    }
+
     function homePlayer() {
         var g = gi();
         if (!g) return null;
@@ -205,6 +216,7 @@
         scrollTo:     scrollTo,
         landingGrids: landingGrids,
         view:         view,
+        homeRefusal:  homeRefusal,
         UNREADABLE:   UNREADABLE
     };
 
