@@ -1172,6 +1172,12 @@
             ld().seenOnVerified(name));
     }
 
+    // The read a null run().available() waited on: the star menu, or else
+    // the own adventures; a failed read is never taken for "no map".
+    function unreadMaps(pass) {
+        return pass.maps === null ? 'star menu' : 'own adventures';
+    }
+
     // Counts the run and starts the next one at Muster, or ends the series.
     // The counter is saved together with the new run (begin) or the done
     // state, so a reload in between repeats this step instead of counting a
@@ -1206,7 +1212,7 @@
         if (skipMaps && !seriesEnd) {
             n = run().available(req.adventure, pass);
             if (n === null) {
-                ld().waitRead(r, pass.maps === null ? 'star menu' : 'own adventures');
+                ld().waitRead(r, unreadMaps(pass));
                 return;
             }
             if (n === 0) {
@@ -1226,7 +1232,7 @@
                 var entry = q.entries[at.index];
                 n = run().available(entry.adventure, pass);
                 if (n === null) {
-                    ld().waitRead(r, pass.maps === null ? 'star menu' : 'own adventures');
+                    ld().waitRead(r, unreadMaps(pass));
                     return;
                 }
                 if (n > 0) break;

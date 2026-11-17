@@ -3254,6 +3254,22 @@ var QPATH = require('path');
 var TWINS_ADV = 'BuffAdventures_twins_easy';
 var QMAPS = { BlackKnights: 3, Bandits: 2 };
 
+// The host adventure manager the own list is read from, through the read
+// API: list() gives the open adventures as host entries; null, or q.own =
+// null, makes the list unreadable.
+function ownManager(H, q, list) {
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return q.own === null ? null : list(); },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
+}
+
 function queueSetup(o) {
     o = o || {};
     var fs = airfs.make();
@@ -3284,10 +3300,9 @@ function queueSetup(o) {
         return Object.prototype.hasOwnProperty.call(q.open, adv) ? q.open[adv] : null;
     };
     // The own adventures from q.open; q.own = null reads as unreadable.
-    S.core.adventures.own = function () {
-        if (q.own === null) return null;
-        return Object.keys(q.open).map(function (adv) { return { name: adv, zoneId: q.open[adv] }; });
-    };
+    ownManager(H, q, function () {
+        return Object.keys(q.open).map(function (adv) { return { adventureName: adv, zoneID: q.open[adv] }; });
+    });
     // No map for long: the gap before a map start is not in the way.
     S.modules.adventures.runState.maps = { open: [], closedAt: null, sentAt: null };
     S.core.production.isProduceable = function () { return q.known; };
@@ -3453,6 +3468,19 @@ t.test('a queue start names the read that failed: star menu or open adventures',
         'Steward: The star menu cannot be read right now. Try again in a moment.');
 });
 
+t.test('a queue start never takes an unreadable own list for 0 maps and starts once readable', function () {
+    var o = queueSetup({ maps: { BlackKnights: 0 } });
+    o.own = null;
+    var oid = mixedQueue(o, { noMap: 'skip' });
+    assert.strictEqual(o.run.startQueue(oid), false);
+    assert.strictEqual(o.st.current().request, null, 'nothing stored');
+    assert.ok(/open adventures cannot be read/.test(lastNotice(o)), lastNotice(o));
+    assert.ok(!/No map for any entry/.test(lastNotice(o)), 'an unreadable list is no missing map');
+    delete o.own;
+    assert.strictEqual(o.run.startQueue(oid), true);
+    assert.strictEqual(o.st.current().request.queue.index, 1);
+});
+
 t.test('entryRun builds the first run of each kind and says when a read must wait', function () {
     var q = queueSetup({ open: { Bandits: 55 } });
     var copy = q.qs.toRun(q.qs.get(mixedQueue(q)));
@@ -3546,6 +3574,21 @@ t.test('can().skipEntry: the cases before the map is out and at Next', function 
     assert.strictEqual(single.run.start(single.long), true);
     single.st.pause(S.RunPause.User, 'test');
     assert.strictEqual(single.run.can().skipEntry, false, 'no queue');
+});
+
+t.test('skipEntry with an unreadable own list keeps the entry and names the read', function () {
+    var q = queueSetup();
+    var S = q.S;
+    pausedAt(q, S.RunStep.Muster, S.RunPause.User, mixedQueue(q));
+    q.own = null;
+    assert.strictEqual(q.run.can().skipEntry, false, 'greyed while the list is read');
+    assert.strictEqual(q.run.skipEntry(), false);
+    assert.ok(/open adventures cannot be read/.test(lastNotice(q)), lastNotice(q));
+    assert.strictEqual(q.st.current().request.queue.index, 0, 'the entry stays');
+    assert.strictEqual(q.st.run().status, S.RunStatus.Paused);
+    delete q.own;
+    assert.strictEqual(q.run.skipEntry(), true);
+    assert.strictEqual(q.st.current().request.queue.index, 1);
 });
 
 t.test('skipEntry before the map: the next entry begins, the transit stays', function () {

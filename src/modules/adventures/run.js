@@ -200,6 +200,13 @@
 
     var UNREADABLE_OWN = 'Your open adventures cannot be read right now. Try again in a moment.';
 
+    // The notice for an available() that gave null, naming the read of
+    // `pass` that failed: the star menu, or else the open list.
+    function unreadableMaps(pass) {
+        return pass.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
+            : UNREADABLE_OWN;
+    }
+
     // queue: the running copy of a queue, or none for a single series.
     function makeRequest(rec, count, queue) {
         return {
@@ -341,9 +348,7 @@
         var reads = {};
         var maps = available(rec.adventure, reads);
         if (maps === null) {
-            // Name the read that failed: the star menu, or else the open list.
-            S.kernel.ui.notify(reads.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
-                : UNREADABLE_OWN);
+            S.kernel.ui.notify(unreadableMaps(reads));
             return null;
         }
         var advLabel = S.core.adventures.label(rec.adventure) || rec.adventure;
@@ -577,10 +582,10 @@
         var r = queues().startIndex(copy.noMap, copy.entries.length, function (i) {
             return available(copy.entries[i].adventure, pass);
         });
+        // A failed read is never taken for "no map": it may hide the very
+        // entry that has one.
         if (!r) {
-            // Name the read that failed: the star menu, or else the open list.
-            S.kernel.ui.notify(pass.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
-                : UNREADABLE_OWN);
+            S.kernel.ui.notify(unreadableMaps(pass));
             return null;
         }
         if (r.index < 0) {
@@ -636,11 +641,12 @@
 
     // Which Skip entry applies now: 'drop' (the entry's map is not out yet,
     // so its remaining runs go uncounted and the next entry begins), 'over'
-    // (the hand-over paused on an entry that cannot begin) or null. Only in
-    // a paused queue at home: the next entry begins at home. A map start that
-    // was sent at all, seen or not, keeps the entry, as does an own list that
-    // cannot be read: the map may be out, and a map start is never sent while
-    // the last one may be open.
+    // (the hand-over paused on an entry that cannot begin), 'unread' (a drop
+    // that waits for the own list) or null. Only in a paused queue at home:
+    // the next entry begins at home. A map start that was sent at all, seen
+    // or not, keeps the entry. An own list that is not completely read keeps
+    // it too, as 'unread': the map may be out, and a map start is never sent
+    // while the last one may be open.
     function skipCase(rs) {
         var req = rs.request;
         var r = rs.run;
@@ -650,7 +656,8 @@
         if (store().position(r.step) > store().position(S.RunStep.StartMap)) return null;
         if (!store().queueNext(req)) return null;
         var list = store().ownRead();
-        if (list === null || S.core.adventures.entryOf(list, r.adventure)) return null;
+        if (list === null) return 'unread';
+        if (S.core.adventures.entryOf(list, r.adventure)) return null;
         if (r.step === S.RunStep.StartMap && r.pause && r.pause.reason === S.RunPause.NotObserved) return null;
         var m = loader() && loader().marked ? loader().marked(r, store().MAP_MARK) : null;
         if (m && (m.seen || typeof m.sentAt === 'number')) return null;
@@ -662,6 +669,10 @@
         var c = skipCase(rs);
         if (!c) {
             S.kernel.ui.notify('No queue entry to skip now.');
+            return false;
+        }
+        if (c === 'unread') {
+            S.kernel.ui.notify(UNREADABLE_OWN);
             return false;
         }
         var req = rs.request;
@@ -706,6 +717,12 @@
         return true;
     }
 
+    // Only a case that skips now enables Skip entry; one waiting for a read
+    // stays greyed until the read settles.
+    function canSkip(c) {
+        return c === 'drop' || c === 'over';
+    }
+
     // Which commands apply now; each key is the name of its command. The
     // conditions mirror the ones the commands guard themselves with, so a
     // control this table enables is accepted by its command. The one exception
@@ -719,7 +736,7 @@
             resume:        status === S.RunStatus.Paused,
             endRepetition: !!rs.run && status !== S.RunStatus.Done && !!rs.request && repetitionLeft(),
             stop:          !!rs.request || !!rs.run,
-            skipEntry:     skipCase(rs) !== null
+            skipEntry:     canSkip(skipCase(rs))
         };
     }
 

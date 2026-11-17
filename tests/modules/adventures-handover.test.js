@@ -25,6 +25,22 @@ var LONG_MS = 3600000;
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
+// The host adventure manager the own list is read from, through the read
+// API: list() gives the open adventures as host entries; null, or q.own =
+// null, makes the list unreadable.
+function ownManager(H, q, list) {
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return q.own === null ? null : list(); },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
+}
+
 function setup(o) {
     o = o || {};
     var fs = airfs.make();
@@ -51,7 +67,7 @@ function setup(o) {
     S.core.zone.id = function () { return null; };
     S.core.adventures.zoneIdOf = function () { return null; };
     S.core.adventures.ownOpen = function () { return []; };
-    S.core.adventures.own = function () { return q.own === null ? null : []; };
+    ownManager(H, q, function () { return []; });
     // No map for long: the gap before a map start is not in the way.
     S.modules.adventures.runState.maps = { open: [], closedAt: null, sentAt: null };
     S.core.buffs.mapCounts = function () { return q.maps; };
@@ -286,7 +302,7 @@ t.test('noMap skip waits on an unreadable star menu without counting', function 
     assert.strictEqual(busyText(q), 'star menu not readable');
 });
 
-t.test('noMap skip waits on an unreadable own adventures list without counting', function () {
+t.test('noMap skip waits on an unreadable own list without counting or skipping', function () {
     var q = setup();
     startQueue(q, [['template', q.long, 2], ['template', q.short, 1]], { noMap: 'skip' });
     q.own = null;
@@ -294,11 +310,12 @@ t.test('noMap skip waits on an unreadable own adventures list without counting',
     assert.strictEqual(r.status, q.S.RunStatus.Running);
     assert.strictEqual(r.step, q.S.RunStep.Next);
     assert.strictEqual(req(q).finished, 0);
+    assert.strictEqual(req(q).queue.index, 0, 'no entry dropped as having no map');
     assert.strictEqual(busyText(q), 'own adventures not readable');
-    // Once the list reads again, the waiting Next counts the finished run.
     delete q.own;
-    next(q);
+    r = next(q);
     assert.strictEqual(req(q).finished, 1);
+    assert.strictEqual(r.step, q.S.RunStep.Muster);
 });
 
 t.test('noMap skip pauses an endless queue with no map anywhere', function () {

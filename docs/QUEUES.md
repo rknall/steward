@@ -57,6 +57,8 @@ Queues are started from the **Queues** folder at the end of
 `~Steward~ > Adventures`, after the Scenarios folder. A row reads
 `<label> (<K> entries)` with the map count of the entry Start would begin with;
 it is greyed when that count is 0, and broken files are disabled rows last.
+While the star menu or the own adventures cannot be read the row reads
+`(reading...)` instead of a count and keeps its last enabled state.
 While adventure definitions load the folder is one greyed `Queues (loading...)`
 row.
 
@@ -90,7 +92,9 @@ When an entry's last run is done the run state machine hands over at Next:
   If every entry has no map while looping, the queue pauses with "no map for
   any queue entry". At Start, `skip` begins at the first entry with a map and
   names the entries stepped over; with `pause`, Start refuses as for a single
-  run.
+  run. A star menu or own adventures list that cannot be read is never taken
+  for 0 maps: the hand-over waits for it, and Start refuses with a notice that
+  names the read.
 - **Broken entry.** An entry that cannot start at hand-over (record missing,
   unknown kind, start check failed) pauses the queue at Next. Resume repeats
   the hand-over; Skip entry steps over it. Definitions, the specialist list
@@ -104,14 +108,15 @@ the queue. End repetition ends the queue after the current run.
 Command Skip entry in `~Steward~ > Adventures`, enabled only in a queue, paused
 and at home:
 
-- Before the entry's map is out (up to StartMap, the own adventures readable
-  and the map not among them, no map start sent, seen or not, and no
+- Before the entry's map is out (up to StartMap, the own adventures read
+  completely and the map not among them, no map start sent, seen or not, and no
   not-observed pause): the entry's remaining runs are dropped uncounted and
   the next entry begins. A scenario run paused at Produce qualifies.
 - At Next with a broken-entry pause: that entry is stepped over and the run
   resumes by itself, so no separate Resume is needed.
 
-In the first case the next entry must be able to begin. If it cannot (record
+While the own adventures cannot be read, Skip entry is greyed and a click
+says so; the entry stays. In the first case the next entry must be able to begin. If it cannot (record
 not readable, start check failed), a notice says why and the run stays paused.
 
 ## Status

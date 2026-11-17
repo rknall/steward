@@ -372,6 +372,37 @@ t.test('a queue with no-map skip shows the maps of the first entry that has one'
     assert.strictEqual(enabledOf(q.item.items[0], {}), true);
 });
 
+// An adventure manager whose list cannot be read: the own list is unreadable.
+function unreadableOwn(H) {
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return null; },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
+}
+
+t.test('a queue row says reading while the star menu or the own list cannot be read', function () {
+    var s = setup({ maps: { AdvA: 2 }, defs: [def('AdvA', 'Mission')] });
+    var a = saveTpl(s, 'Alpha', 'AdvA');
+    saveQueue(s, 'Solo', [a]);
+    var row = queuesFolder(s.menu.items()).item.items[0];
+    assert.strictEqual(enabledOf(row, {}), true);
+    s.S.core.buffs.mapCounts = function () { return null; };
+    assert.strictEqual(labelOf(row, {}), 'Solo (1 entry) (reading...)', 'never a count or ?');
+    assert.strictEqual(enabledOf(row, {}), true, 'the last readable state stays');
+    s.S.core.buffs.mapCounts = s.counts;
+    unreadableOwn(s.H);
+    assert.strictEqual(labelOf(row, {}), 'Solo (1 entry) (reading...)', 'an unreadable own list is no 0 maps');
+    assert.strictEqual(enabledOf(row, {}), true);
+    emptyOwn(s.H);
+    assert.strictEqual(labelOf(row, {}), 'Solo (1 entry) ×2');
+});
+
 t.test('a queue row starts the queue and a broken file is a disabled row last', function () {
     var s = setup({ maps: { AdvA: 1 }, defs: [def('AdvA', 'Mission')] });
     var a = saveTpl(s, 'Alpha', 'AdvA');
