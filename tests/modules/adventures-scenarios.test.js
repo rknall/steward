@@ -189,3 +189,18 @@ t.test('tripNeeds sums per buff over open grids', function () {
     var twice = { items: [{ buff: 'X', grids: [1, 2], amount: null }, { buff: 'X', grids: [3], amount: null }] };
     assert.deepStrictEqual(plain(s.sc.tripNeeds(twice, all)), { X: 3 });
 });
+
+t.test('a trip may list the same buff twice; tripNeeds sums them', function () {
+    var s = setup();
+    var o = twins();
+    o.trips[2] = { items: [{ buff: 'X', grids: [7], amount: 1 }, { buff: 'Y', grids: [7] },
+        { buff: 'X', grids: [7], amount: 9 }] };
+    var rec = s.sc.fromText('twice', 'built-in', text(o), 'builtin');
+    assert.ok(!rec.error, rec.error);
+    var items = rec.trips[2].items;
+    assert.deepStrictEqual(plain(items.map(function (it) { return it.buff; })), ['X', 'Y', 'X']);
+    assert.deepStrictEqual(plain(items.map(function (it) { return it.amount === undefined ? null : it.amount; })), [1, null, 9]);
+    assert.deepStrictEqual(plain(s.sc.tripNeeds(rec.trips[2], function () { return true; })), { X: 10, Y: 1 });
+    var firstDone = function (item) { return item !== items[0]; };
+    assert.deepStrictEqual(plain(s.sc.tripNeeds(rec.trips[2], firstDone)), { X: 9, Y: 1 });
+});

@@ -27,6 +27,10 @@
  * per grid. Each grid is a group that takes only what it needs, so a send
  * offers at most `amount` and what the grid does not take stays in stock.
  *
+ * A trip may list the same buff more than once. Each entry is its own item with
+ * its own amount and progress, sent in file order on a shared grid, and
+ * production sums the entries per buff.
+ *
  * Quest: `quest` is the full quest name. When it is set, only that quest can
  * make the item wanted for Apply; production ignores it.
  *

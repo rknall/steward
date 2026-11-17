@@ -57,6 +57,12 @@ then repeats maps like a template series.
   remaining trip total, takes only what it needs, and the item is done after one burst;
   without an amount each grid is offered 1. What a grid does not take stays in stock.
   A return trip when stock runs out is only a fallback.
+- A buff may appear more than once in a trip. Each entry has its own amount,
+  grids and progress, and the entries go in file order: a later entry of a buff
+  waits on a grid while an earlier one still has it open. Production makes their
+  sum in one order. Riches of the Mountain trip 4 lists WaterSplash twice: 1 after
+  Glue, and 9 after Explosive and Specialist, because the sabotage building takes
+  only 1 before those.
 - `quest` is an optional full quest name. When it is set, only that quest can
   make the item wanted for Apply: the quest must be running, and where the
   client has `IsRunning()` it must also report true. Production ignores it.
@@ -198,7 +204,10 @@ first, then the burst line, then this one.
 - A burst that took less than it offered closes all its grids, with a warn line and
   no top-up send. The takes of the single grids are not known, only their sum, which
   is booked on the burst's first grid. The item's quest then stays open until Clear
-  pauses if the grids still owe something.
+  pauses if the grids still owe something. When the game takes an item in parts
+  between other items, the file lists it as separate entries (see Format).
+- A run started before this version keeps its saved trips, so start the scenario
+  anew to use a changed file.
 - A burst that fails part-way (a packet that cannot be sent) pauses BuffFailed and names
   the grids that went out. Resume sends every grid without a seen mark again, also the
   ones that already went out, so check the star menu stock first.

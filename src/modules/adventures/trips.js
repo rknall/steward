@@ -60,7 +60,10 @@
  * 'burst' line. Out of stock, Apply
  * first sends the other items a running quest wants that are in stock; a
  * grid the out-of-stock item still owes is held back from every later item,
- * so the file order on a shared grid holds. Once nothing else can go the run
+ * so the file order on a shared grid holds. A trip may list a buff more
+ * than once: each entry has its own amount and progress, and the entries go
+ * in file order on a shared grid, a later one waiting there while an earlier
+ * one is still open. Once nothing else can go the run
  * goes home for more and comes back to the same trip, rather than wait on
  * items no running quest wants yet. A burst that made no host call (nothing
  * went out) keeps its grids open and is tried again after NOT_SENT_RETRY_MS,
@@ -117,11 +120,13 @@
     // queued fields: the items its orders owe beyond what was queued, and the
     // star-menu stock and queued items read for the plan before its send; at,
     // memory only, the last time the order could still be in production), one
-    // per grid sent to,
-    // and one per grid that took something (written seen, never sent; its
-    // taken field is what the grid has taken so far, and a burst's whole take
-    // goes on its first grid, so the item's part marks together hold what the
-    // trip has taken of it). One
+    // per trip, entry and grid sent to,
+    // and one per trip, entry and grid that took something (written seen,
+    // never sent; its taken field is what the grid has taken so far, and a
+    // burst's whole take goes on its first grid, so the entry's part marks
+    // together hold what the trip has taken of it). An entry is named by the
+    // buff for its first listing in the trip and by <buff>#<n> for the n-th
+    // (entryKey). One
     // per trip holds Produce's verdict that the next trip waits for
     // resources (seen, its text the shortfall), since the island cannot read
     // the home queues; one per trip counts the re-visits taken (seen, count).
@@ -194,32 +199,54 @@
 
     // ---- Marks --------------------------------------------------------------
 
-    function gridName(prefix, tripIndex, buff, grid) {
-        return prefix + tripIndex + ':' + buff + ':' + grid;
+    function gridName(prefix, tripIndex, key, grid) {
+        return prefix + tripIndex + ':' + key + ':' + grid;
     }
 
-    function applyMark(r, buff, grid) {
-        return gridName(APPLY, r.trip, buff, grid);
+    // With a buff as key it names that buff's first entry in the trip.
+    function applyMark(r, key, grid) {
+        return gridName(APPLY, r.trip, key, grid);
     }
 
-    function partMark(r, buff, grid) {
-        return gridName(PART, r.trip, buff, grid);
+    function partMark(r, key, grid) {
+        return gridName(PART, r.trip, key, grid);
     }
 
-    // { buff, grid } of an apply mark name. The grid follows the last ':',
-    // the buff the trip index.
+    // The entry key of items[i] in its trip's marks. The first entry of a
+    // buff keeps the plain buff, so the marks of a trip that lists each buff
+    // once (and of runs saved before a buff could repeat) keep their names;
+    // a later entry of the same buff is <buff>#<n>, n its count in file
+    // order, which is stable across reloads. A buff name holds no '#' or ':'.
+    function entryKey(items, i) {
+        var count = 0;
+        for (var j = 0; j < i; j++) {
+            if (items[j].buff === items[i].buff) count++;
+        }
+        return count ? items[i].buff + '#' + (count + 1) : items[i].buff;
+    }
+
+    // The entry key of item, one of items; an item not among them counts as
+    // its buff's first entry.
+    function keyOf(items, item) {
+        var i = items.indexOf(item);
+        return i < 0 ? item.buff : entryKey(items, i);
+    }
+
+    // { key, grid } of an apply mark name. The grid follows the last ':',
+    // the entry key the trip index.
     function parseApply(name) {
         var rest = name.slice(APPLY.length);
         var a = rest.indexOf(':');
         var b = rest.lastIndexOf(':');
-        return { buff: rest.slice(a + 1, b), grid: rest.slice(b + 1) };
+        return { key: rest.slice(a + 1, b), grid: rest.slice(b + 1) };
     }
 
     // isOpen(item, grid) for scenarios.tripNeeds: a grid waits while the
-    // apply mark of that trip, buff and grid is not seen.
+    // apply mark of that trip, entry and grid is not seen.
     function isOpen(r, tripIndex) {
+        var items = ((r.trips || [])[tripIndex] || {}).items || [];
         return function (item, grid) {
-            var m = ld().marked(r, gridName(APPLY, tripIndex, item.buff, grid));
+            var m = ld().marked(r, gridName(APPLY, tripIndex, keyOf(items, item), grid));
             return !(m && m.seen);
         };
     }
@@ -658,25 +685,28 @@
         }
     }
 
-    // What grid has taken of buff on this trip so far (its part mark).
-    function gridTaken(r, buff, grid) {
-        var pm = ld().marked(r, partMark(r, buff, grid));
+    // What grid has taken for the entry key on this trip so far (its part
+    // mark).
+    function gridTaken(r, key, grid) {
+        var pm = ld().marked(r, partMark(r, key, grid));
         return pm && typeof pm.taken === 'number' ? pm.taken : 0;
     }
 
-    // What the item's grids together have taken on this trip so far.
-    function tripTaken(r, item) {
+    // What the grids of the entry (item, its key) together have taken on
+    // this trip so far.
+    function tripTaken(r, item, key) {
         var sum = 0;
-        for (var i = 0; i < item.grids.length; i++) sum += gridTaken(r, item.buff, item.grids[i]);
+        for (var i = 0; i < item.grids.length; i++) sum += gridTaken(r, key, item.grids[i]);
         return sum;
     }
 
-    // What a send of the item to grid may still offer: the rest of the
-    // item's trip total when it has an amount, else the rest of the grid's 1.
-    function stillNeeded(r, item, grid) {
+    // What a send of the entry (item, its key) to grid may still offer: the
+    // rest of the entry's trip total when it has an amount, else the rest of
+    // the grid's 1.
+    function stillNeeded(r, item, key, grid) {
         var bound = sc().sendAmount(item);
-        if (item.amount !== null) return bound - tripTaken(r, item);
-        return bound - gridTaken(r, item.buff, grid);
+        if (item.amount !== null) return bound - tripTaken(r, item, key);
+        return bound - gridTaken(r, key, grid);
     }
 
     // itemWant under the strict gate, for a send of the item to grid; the one
@@ -694,12 +724,15 @@
         return res;
     }
 
-    // The trip item of buff, for a pending mark that holds only the buff: the
-    // first match (a trip lists each buff once), else an unbound stand-in.
-    function itemOf(items, buff) {
+    // The trip item of an entry key, for a pending mark that holds only the
+    // key, else an unbound stand-in for the key's buff (the key without a
+    // trailing '#<n>').
+    function itemOf(items, key) {
         for (var i = 0; i < items.length; i++) {
-            if (items[i].buff === buff) return items[i];
+            if (entryKey(items, i) === key) return items[i];
         }
+        var h = key.lastIndexOf('#');
+        var buff = h > 0 && /^[0-9]+$/.test(key.slice(h + 1)) ? key.slice(0, h) : key;
         return { buff: buff, quest: null };
     }
 
@@ -796,17 +829,17 @@
         return !!objs && !objs.length;
     }
 
-    // The grids of the burst that buff's failed Apply round expected, from
-    // its apply mark keys, so a pause names every grid the burst was for.
-    // fallback is the failed key's grid.
-    function burstGrids(r, buff, fallback) {
+    // The grids of the burst that the entry key's failed Apply round
+    // expected, from its apply mark names, so a pause names every grid the
+    // burst was for. fallback is the failed mark's grid.
+    function burstGrids(r, key, fallback) {
         var round = ld().currentRound(r, S.RunStep.Apply);
         var out = [];
         if (round) {
             for (var k in round.expected) {
                 if (!has(round.expected, k) || k.indexOf(APPLY) !== 0) continue;
                 var p = parseApply(k);
-                if (p.buff === buff) out.push(p.grid);
+                if (p.key === key) out.push(p.grid);
             }
         }
         return out.length ? out.join(',') : fallback;
@@ -825,17 +858,19 @@
         }
 
         var open = isOpen(r, r.trip);
+        var keys = [];
         var openOf = [];
         var pending = [];
         var any = false;
         var i, g;
         for (i = 0; i < items.length; i++) {
+            keys.push(entryKey(items, i));
             var grids = [];
             for (g = 0; g < items[i].grids.length; g++) {
                 var grid = items[i].grids[g];
                 if (!open(items[i], grid)) continue;
                 grids.push(grid);
-                var name = applyMark(r, items[i].buff, grid);
+                var name = applyMark(r, keys[i], grid);
                 var m = ld().marked(r, name);
                 if (m && typeof m.sentAt === 'number') pending.push(name);
             }
@@ -850,29 +885,30 @@
         ld().dropShown(r, RS.Apply, pending);
         for (i = 0; i < pending.length; i++) {
             var pp = parseApply(pending[i]);
-            var s = ld().staleMark(r, pending[i], 'item ' + pp.buff + ' -> ' + pp.grid);
+            var it = itemOf(items, pp.key);
+            var s = ld().staleMark(r, pending[i], 'item ' + it.buff + ' -> ' + pp.grid);
             if (s === 'wait') return;
             if (s === 'stale') {
-                var w = want(r, itemOf(items, pp.buff), Number(pp.grid), null);
+                var w = want(r, it, Number(pp.grid), null);
                 if (w === null) {
                     ld().waitRead(r, 'quests');
                     return;
                 }
                 if (w === 'done') {
                     ld().markSeen(r, pending[i]);
-                    log('quest no longer wants ' + pp.buff + '; send to ' + pp.grid + ' counted');
+                    log('quest no longer wants ' + it.buff + '; send to ' + pp.grid + ' counted');
                     return;
                 }
-                st().pause(S.RunPause.NotObserved, 'item ' + pp.buff + ' sent to ' + pp.grid +
+                st().pause(S.RunPause.NotObserved, 'item ' + it.buff + ' sent to ' + pp.grid +
                     ' but not seen; check the star menu, then Resume');
                 return;
             }
         }
 
         var next = ld().settleRound(r, RS.Apply, function (f) {
-            var fp = f.key.indexOf(APPLY) === 0 ? parseApply(f.key) : { buff: f.key, grid: '?' };
-            st().pause(S.RunPause.BuffFailed, 'apply ' + fp.buff + ' to ' + burstGrids(r, fp.buff, fp.grid) +
-                ' failed: ' + f.reason);
+            var fp = f.key.indexOf(APPLY) === 0 ? parseApply(f.key) : null;
+            var ft = fp ? itemOf(items, fp.key).buff + ' to ' + burstGrids(r, fp.key, fp.grid) : f.key + ' to ?';
+            st().pause(S.RunPause.BuffFailed, 'apply ' + ft + ' failed: ' + f.reason);
         }, 'item apply');
         if (next !== 'new') return;
 
@@ -903,9 +939,14 @@
         // same grid waits until that item is done there, so the file order on
         // a shared grid holds while other grids go on.
         var blocked = {};
+        // Grids, as buff:grid, an earlier entry of a buff still has open: a
+        // later entry of that buff waits there, so the file order holds even
+        // when the two entries are bound to different quests.
+        var owed = {};
         for (i = 0; i < items.length; i++) {
             if (!openOf[i].length) continue;
             var buff = items[i].buff;
+            var key = keys[i];
             // Asked per grid: a quest matched by the building at the grid
             // can be done for one boulder kind while the item's grids of
             // another kind are still wanted, so a done grid skips only itself,
@@ -918,7 +959,7 @@
             for (g = 0; g < openOf[i].length; g++) {
                 var w2 = want(r, items[i], openOf[i][g], held);
                 if (w2 === 'done') {
-                    ld().markSeen(r, applyMark(r, buff, openOf[i][g]));
+                    ld().markSeen(r, applyMark(r, key, openOf[i][g]));
                     doneHere[openOf[i][g]] = true;
                     skipped++;
                     continue;
@@ -928,8 +969,12 @@
                     return;
                 }
                 if (has(blocked, openOf[i][g])) continue;
+                if (has(owed, buff + ':' + openOf[i][g])) continue;
                 if (w2 === 'open') burst.push(openOf[i][g]);
                 else later.push(openOf[i][g]);
+            }
+            for (g = 0; g < openOf[i].length; g++) {
+                if (!has(doneHere, openOf[i][g])) owed[buff + ':' + openOf[i][g]] = true;
             }
             if (skipped) log('quest no longer wants ' + buff + '; ' + skipped + ' grid(s) skipped');
             if (!burst.length) {
@@ -947,9 +992,9 @@
             if (items[i].amount !== null) {
                 // Every packet of the burst offers what the trip still needs
                 // and draws on the same entry, so one stack must hold it.
-                var remaining = stillNeeded(r, items[i], burst[0]);
+                var remaining = stillNeeded(r, items[i], key, burst[0]);
                 if (remaining <= 0) {
-                    for (g = 0; g < burst.length; g++) ld().markSeen(r, applyMark(r, buff, burst[g]));
+                    for (g = 0; g < burst.length; g++) ld().markSeen(r, applyMark(r, key, burst[g]));
                     log(buff + ': amount already taken; ' + burst.length + ' grid(s) done');
                     return;
                 }
@@ -969,11 +1014,11 @@
                 var still = [];
                 var full = 0;
                 for (g = 0; g < burst.length; g++) {
-                    if (stillNeeded(r, items[i], burst[g]) > 0) {
+                    if (stillNeeded(r, items[i], key, burst[g]) > 0) {
                         still.push(burst[g]);
                         continue;
                     }
-                    ld().markSeen(r, applyMark(r, buff, burst[g]));
+                    ld().markSeen(r, applyMark(r, key, burst[g]));
                     full++;
                 }
                 if (full) {
@@ -995,6 +1040,7 @@
                 }
                 continue;
             }
+            t.key = key;
             t.stock = sk.total;
             t.largest = largest;
             t.later = later;
@@ -1046,9 +1092,10 @@
         }
 
         var b = target.item.buff;
+        var k = target.key;
         var tg = target.grids;
         var names = [];
-        for (g = 0; g < tg.length; g++) names.push(applyMark(r, b, tg[g]));
+        for (g = 0; g < tg.length; g++) names.push(applyMark(r, k, tg[g]));
         // A burst that made no host call left its grids open. The count
         // resets before the pause, so a Resume gets fresh tries; the gap gives
         // a passing bridge glitch time to clear before the next try.
@@ -1095,8 +1142,8 @@
             { need: target.need, buildings: cur, quietMs: BURST_GAP_MS });
         var round = ld().startRound(r, RS.Apply, []);
         ld().attempt(round, names, ld().wrapSend(r, names, def),
-            burstApplied(names, b, tg, target.offer, target.need, partMark(r, b, tg[0]),
-                gridTaken(r, b, tg[0]), q0, def));
+            burstApplied(names, b, tg, target.offer, target.need, partMark(r, k, tg[0]),
+                gridTaken(r, k, tg[0]), q0, def));
     }
 
     // Closes the open grids nothing is left to send to, before a target is
@@ -1108,23 +1155,24 @@
     function closeFinished(r, items, openOf, pending) {
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
+            var key = entryKey(items, i);
             var grids = openOf[i];
             if (!grids.length) continue;
             var busy = false;
             var g;
             for (g = 0; g < grids.length; g++) {
-                if (pending.indexOf(applyMark(r, item.buff, grids[g])) !== -1) busy = true;
+                if (pending.indexOf(applyMark(r, key, grids[g])) !== -1) busy = true;
             }
-            if (item.amount !== null && !busy && tripTaken(r, item) >= item.amount) {
-                for (g = 0; g < grids.length; g++) ld().markSeen(r, applyMark(r, item.buff, grids[g]));
+            if (item.amount !== null && !busy && tripTaken(r, item, key) >= item.amount) {
+                for (g = 0; g < grids.length; g++) ld().markSeen(r, applyMark(r, key, grids[g]));
                 log(item.buff + ': trip total ' + item.amount + ' taken; ' + grids.length + ' grid(s) done');
                 openOf[i] = [];
                 continue;
             }
             var keep = [];
             for (g = 0; g < grids.length; g++) {
-                var an = applyMark(r, item.buff, grids[g]);
-                var taken = gridTaken(r, item.buff, grids[g]);
+                var an = applyMark(r, key, grids[g]);
+                var taken = gridTaken(r, key, grids[g]);
                 if (pending.indexOf(an) === -1 && taken > 0 && buildingGone(r, grids[g])) {
                     ld().markSeen(r, an);
                     log(item.buff + ' -> ' + grids[g] + ': building gone after ' + taken + '; grid done');

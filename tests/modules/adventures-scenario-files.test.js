@@ -68,9 +68,9 @@ t.test('every checked-in scenario parses with a valid id and full buff names', f
     });
 });
 
-// Steward keeps one apply mark per trip/buff/grid, so a repeat never sends but
-// still adds to the produced amount; the same buff on different grids is fine.
-t.test('no checked-in scenario repeats a buff on the same grid within one trip', function () {
+// A buff may repeat on one grid within a trip only as a split: every such
+// entry carries its own amount, so the entries sum to what production orders.
+t.test('a buff repeated on one grid within a trip is allowed only when every such entry has an amount', function () {
     var S = boot();
     var sc = S.modules.adventures.scenarios;
     var problems = [];
@@ -83,19 +83,21 @@ t.test('no checked-in scenario repeats a buff on the same grid within one trip',
             trip.items.forEach(function (item) {
                 item.grids.forEach(function (g) {
                     var key = item.buff + '@' + g;
-                    if (seen[key]) {
-                        problems.push(name + ': trip ' + (ti + 1) + ' repeats ' + item.buff + ' on grid ' + g);
-                    } else {
-                        seen[key] = true;
-                    }
+                    if (!seen[key]) seen[key] = [];
+                    seen[key].push(item);
                 });
+            });
+            Object.keys(seen).forEach(function (key) {
+                if (seen[key].length < 2) return;
+                var bare = seen[key].some(function (it) { return typeof it.amount !== 'number'; });
+                if (bare) problems.push(name + ': trip ' + (ti + 1) + ' repeats ' + key + ' without an amount on every entry');
             });
         });
     });
     assert.deepStrictEqual(problems, []);
 });
 
-t.test('riches of the mountain needs 10 water splash on the last trip', function () {
+t.test('riches of the mountain splits water splash on the last trip', function () {
     var S = boot();
     var sc = S.modules.adventures.scenarios;
     var text = fsys.readFileSync(path.join(DIR, 'riches_of_the_mountain.json'), 'utf8');
@@ -103,8 +105,10 @@ t.test('riches of the mountain needs 10 water splash on the last trip', function
     var trip = rec.trips[rec.trips.length - 1];
     assert.deepStrictEqual(plain(trip.items.map(function (it) { return it.buff; })), [
         'BattleBuffHurt_BuffAd_Glue', 'BattleBuffHurt_BuffAd_WaterSplash',
-        'BattleBuffHurt_BuffAd_Explosive', 'BattleBuffHurt_BuffAd_Specialist'
+        'BattleBuffHurt_BuffAd_Explosive', 'BattleBuffHurt_BuffAd_Specialist', 'BattleBuffHurt_BuffAd_WaterSplash'
     ]);
+    assert.deepStrictEqual(plain(trip.items.map(function (it) { return it.amount === undefined ? null : it.amount; })),
+        [null, 1, null, null, 9]);
     assert.deepStrictEqual(plain(sc.tripNeeds(trip, function () { return true; })), {
         BattleBuffHurt_BuffAd_Glue: 1,
         BattleBuffHurt_BuffAd_WaterSplash: 10,

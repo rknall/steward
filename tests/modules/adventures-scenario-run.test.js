@@ -949,6 +949,109 @@ t.test('Apply: a client restart after a short burst take sends nothing more to t
     assert.strictEqual(sendsTo(w2, EXPERT).length, 1);
 });
 
+// The same building taking WaterSplash in parts: 1 before Explosive and
+// Specialist, the other 9 after them, as the Riches of the Mountain file lists it.
+var SPLIT = {
+    id: 'split_sabotage_test', label: 'Split sabotage (test)',
+    trips: [{ items: [{ buff: GLUE, grids: [SABOTAGE_GRID] }, { buff: SPLASH, grids: [SABOTAGE_GRID], amount: 1 },
+        { buff: BLAST, grids: [SABOTAGE_GRID] }, { buff: EXPERT, grids: [SABOTAGE_GRID] },
+        { buff: SPLASH, grids: [SABOTAGE_GRID], amount: 9 }] }, {}]
+};
+
+function splitSabotage(o) {
+    o = o || {};
+    var need = {};
+    need[GLUE + ':' + SABOTAGE_GRID] = 1;
+    need[SPLASH + ':' + SABOTAGE_GRID] = 10;
+    need[BLAST + ':' + SABOTAGE_GRID] = 1;
+    need[EXPERT + ':' + SABOTAGE_GRID] = 1;
+    var w = scenWorld({
+        quests: [{ key: 'q6', name: 'BuffAd4_Sabotage_Sub6', building: 'buffad_sabotage',
+            items: [GLUE, SPLASH, BLAST, EXPERT], grids: [SABOTAGE_GRID] }, { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need, world: { gridBuildings: (function () { var b = {}; b[SABOTAGE_GRID] = 'buffad_sabotage'; return b; }()) }
+    });
+    [GLUE, BLAST, EXPERT].forEach(function (b) { w.setStock(b, 2); });
+    w.setStock(SPLASH, typeof o.splash === 'number' ? o.splash : 20);
+    onIsland(w, record(w, SPLIT), 0);
+    return w;
+}
+
+var SPLIT_SENDS = [[GLUE, 1, 1], [SPLASH, 1, 1], [BLAST, 1, 1], [EXPERT, 1, 1], [SPLASH, 9, 9]];
+
+t.test('Apply: a buff listed twice on one grid goes in file order, each entry with its own amount', function () {
+    var w = splitSabotage();
+    var seen = {};
+    drive(w, { until: at('Trip'), on: function (w2) {
+        var marks = w2.st.run().marks;
+        Object.keys(marks).forEach(function (k) { if (marks[k].seen) seen[k] = true; });
+    } });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(itemSends(w), SPLIT_SENDS, JSON.stringify(itemSends(w)));
+    assert.ok(!logged(w, /took \d+ of \d+ \(|took 1 of 10/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /run paused/), 'no pause');
+    var first = 'apply:0:' + SPLASH + ':' + SABOTAGE_GRID;
+    var second = 'apply:0:' + SPLASH + '#2:' + SABOTAGE_GRID;
+    assert.ok(seen[first], 'first entry mark ' + Object.keys(seen).join(' '));
+    assert.ok(seen[second], 'second entry mark ' + Object.keys(seen).join(' '));
+    var marks = w.st.run().marks;
+    assert.strictEqual(marks['part:0:' + SPLASH + ':' + SABOTAGE_GRID].taken, 1);
+    assert.strictEqual(marks['part:0:' + SPLASH + '#2:' + SABOTAGE_GRID].taken, 9);
+    assert.strictEqual(w.S.modules.adventures.trips.applyMark(w.st.run(), SPLASH, SABOTAGE_GRID), first,
+        'a buff names its first entry');
+});
+
+t.test('Apply: a restart between the two entries of one buff sends only the second', function () {
+    var firstPart = 'part:0:' + SPLASH + ':' + SABOTAGE_GRID;
+    var stops = [
+        function (w2) { var m = w2.st.run().marks[firstPart]; return !!(m && m.taken === 1); },
+        function (w2) { return sendsTo(w2, GLUE).length === 1 && w2.itemSends.length === 1; }
+    ];
+    stops.forEach(function (stop, n) {
+        var w = splitSabotage();
+        drive(w, { until: stop });
+        var w2 = restart(w);
+        w2.gridBuildings = w.gridBuildings;
+        if (n === 0) {
+            var part = w2.st.run().marks[firstPart];
+            assert.ok(part && part.seen && part.taken === 1, 'the first part mark came back');
+        }
+        // The send records are shared with w, so w2 lists the sends of both worlds.
+        drive(w2, { until: at('Trip') });
+        assertStep(w2, 'Trip');
+        assert.deepStrictEqual(plain(sendsTo(w2, SPLASH).map(function (s) { return [s.amount, s.took]; })),
+            [[1, 1], [9, 9]], 'case ' + n + ' ' + JSON.stringify(itemSends(w)) + JSON.stringify(itemSends(w2)));
+        [GLUE, BLAST, EXPERT].forEach(function (b) {
+            assert.strictEqual(sendsTo(w2, b).length, 1, 'case ' + n + ' ' + b + ' once');
+        });
+    });
+});
+
+t.test('Apply: a later entry of a buff waits while an earlier one is held on the grid', function () {
+    var rec = { id: 'held_twice', label: 'Held twice (test)', trips: [{ items: [
+        { buff: SPLASH, grids: [SABOTAGE_GRID], amount: 1, quest: 'QA' },
+        { buff: SPLASH, grids: [SABOTAGE_GRID], amount: 9, quest: 'QB' }] }, {}] };
+    var a = {}, b = {};
+    a[SPLASH] = 1;
+    b[SPLASH] = 9;
+    var need = {};
+    need[SPLASH + ':' + SABOTAGE_GRID] = 10;
+    var w = scenWorld({
+        quests: [{ key: 'qa', name: 'QA', applied: a, running: false }, { key: 'qb', name: 'QB', applied: b },
+            { key: 'q9', name: 'Final', last: true }],
+        gridNeed: need
+    });
+    w.setStock(SPLASH, 20);
+    onIsland(w, record(w, rec), 0);
+    passesFor(w, 120000);
+    assertStep(w, 'Apply');
+    assert.strictEqual(sendsTo(w, SPLASH).length, 0, 'nothing sent while the first entry is held: ' + logLines(w).join('\n'));
+    w.quests[0].running = true;
+    drive(w, { until: at('Trip') });
+    assertStep(w, 'Trip');
+    assert.deepStrictEqual(plain(sendsTo(w, SPLASH).map(function (s) { return [s.amount, s.took]; })), [[1, 1], [9, 9]],
+        logLines(w).join('\n'));
+});
+
 // ---- items asked for by the object they clear -------------------------------------
 
 // Storm Recovery-like: three dynamites whose quest names the boulders they
@@ -1595,6 +1698,22 @@ t.test('Produce: stock below the amount needed keeps the run home and orders the
     assertStep(w, 'Produce');
     assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
     assert.ok(/SmallDynamite 3\/5/.test(busyText(w)), busyText(w));
+});
+
+t.test('Produce: a buff listed twice orders its sum once, and only what open entries still need', function () {
+    var w = scenWorld();
+    var rec = record(w, SPLIT);
+    w.setStock(SPLASH, 0);
+    W.startScenario(w, rec, { step: w.S.RunStep.Produce, trip: 0 });
+    passesFor(w, 60000);
+    assert.strictEqual(made(w)[SPLASH], 10, JSON.stringify(made(w)));
+    var w2 = scenWorld();
+    var rec2 = record(w2, SPLIT);
+    w2.setStock(SPLASH, 0);
+    W.startScenario(w2, rec2, { step: w2.S.RunStep.Produce, trip: 0 });
+    w2.st.run().marks['apply:0:' + SPLASH + ':' + SABOTAGE_GRID] = { seen: true };
+    passesFor(w2, 60000);
+    assert.strictEqual(made(w2)[SPLASH], 9, JSON.stringify(made(w2)));
 });
 
 t.test('Produce: accepted -> finished -> re-checked -> only then leaves', function () {
