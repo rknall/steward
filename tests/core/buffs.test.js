@@ -1491,3 +1491,11 @@ t.test('building precheck refuses with zone unreadable', function () {
     assert.strictEqual(res.reason, s.S.core.zone.UNREADABLE);
     assert.strictEqual(s.sent.actions.length, 0);
 });
+
+t.test('startBuffs: label is the host text when translated and the built-in label when the text equals the name', function () {
+    var NAME = 'PropagationBuff_AdventureZoneTravelBoost_BlackTree';
+    var s = setup({}, function (cat, key) { return key === NAME ? 'Translated Vortex' : key; });
+    assert.strictEqual(s.buffs.startBuffs()[0].label, 'Translated Vortex');
+    s.H.host.loca.GetText = function (cat, key) { return key; };
+    assert.strictEqual(s.buffs.startBuffs()[0].label, 'Black Vortex');
+});

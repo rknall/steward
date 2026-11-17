@@ -169,3 +169,19 @@ t.test('name still falls back to the description label', function () {
     t.assert.strictEqual(c.name(locFallbackSpec(H, 'Geo')), 'Geo!');
     t.assert.strictEqual(c.name(locFallbackSpec(H, '')), '');
 });
+
+// taskLabel reads the LAB text of an explorer task. The host text wins when it
+// is there; the loca key is the fallback, and an unmapped enum is shown as-is.
+t.test('taskLabel: LAB text when translated, the loca key when not, String(enum) for an unmapped enum, empty for none', function () {
+    var H = boot();
+    var c = H.Steward.core.specialists;
+    var prolonged = H.Steward.ExplorerTask.Prolonged;
+    H.host.loca.GetText = function () { return 'Long search'; };
+    t.assert.strictEqual(c.taskLabel(prolonged), 'Long search');
+    H.host.loca.GetText = function () { return ''; };
+    t.assert.strictEqual(c.taskLabel(prolonged), 'FindTreasureLongest');
+    H.host.loca.GetText = function () { throw new Error('boom'); };
+    t.assert.strictEqual(c.taskLabel(prolonged), 'FindTreasureLongest');
+    t.assert.strictEqual(c.taskLabel('NoSuchTask'), 'NoSuchTask');
+    t.assert.strictEqual(c.taskLabel(null), '');
+});

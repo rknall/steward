@@ -68,10 +68,6 @@
     function St() { return S.modules.adventures.steps || null; }
     function H() { return S.kernel.ui.helpers; }
 
-    function notify(text) {
-        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
-    }
-
     // The native menu lists the templates; it rebuilds only when the set changed.
     function syncMenu() {
         var m = S.modules.adventures.menu;
@@ -276,7 +272,7 @@
     // Leaves the edit view; a changed draft is dropped with a notice, so a
     // click never loses work silently.
     function leaveEdit() {
-        if (isDirty()) notify('Template changes discarded');
+        if (isDirty()) S.kernel.ui.notify('Template changes discarded');
         state.draft = null;
         state.orig = null;
         state.recs = null;
@@ -343,7 +339,7 @@
     // Hides only a dialog that is really shown: a second hide during the fade
     // would unbalance the host's stage swap and leave the game layer on top.
     function closeWindow() {
-        if (isDirty()) notify('Template changes discarded');
+        if (isDirty()) S.kernel.ui.notify('Template changes discarded');
         var ui = S.kernel.ui;
         if (ui && typeof ui.hideModal === 'function') ui.hideModal(modal);
     }
@@ -405,14 +401,14 @@
     function open() {
         if (typeof Modal === 'undefined') {
             S.kernel.error('adventures', 'host Modal class unavailable — cannot open the template dialog');
-            notify('The template dialog needs the game window; try again once the island is loaded.');
+            S.kernel.ui.notify('The template dialog needs the game window; try again once the island is loaded.');
             return;
         }
         // Opening drops the draft, and hiding the dashboard would strand its
         // unsaved changes, so either kind of open edit refuses.
         var ui = S.kernel.ui;
         if (ui && typeof ui.hasOpenEdits === 'function' && ui.hasOpenEdits()) {
-            notify('Save or close the open window first');
+            S.kernel.ui.notify('Save or close the open window first');
             return;
         }
         if (ui && typeof ui.ensureStyle === 'function') ui.ensureStyle(MODAL_ID);

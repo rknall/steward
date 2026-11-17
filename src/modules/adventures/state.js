@@ -559,10 +559,6 @@
         return current().run;
     }
 
-    function notify(text) {
-        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
-    }
-
     // Rewrites the menu status line in place; no menu rebuild.
     function refresh() {
         if (S.kernel.ui && S.kernel.ui.status && S.kernel.ui.status.refresh) S.kernel.ui.status.refresh();
@@ -1473,7 +1469,7 @@
         S.kernel.warn('adventures', 'run paused at ' + pausePlace(r) + ': ' +
             nameOf(S.RunPause, reason) + ': ' + r.pause.message + who);
         save();
-        notify('Adventure run paused at ' + pausePlace(r) + ': ' + r.pause.message);
+        S.kernel.ui.notify('Adventure run paused at ' + pausePlace(r) + ': ' + r.pause.message);
         if (reason !== S.RunPause.User) playSound();
         refresh();
         return true;
@@ -1615,7 +1611,7 @@
         if (!r) return false;
         S.kernel.log('adventures', 'series done: ' + r.label + ' (' + finishedRuns() + ' run(s))');
         finish(r, rs);
-        notify('Adventure series done: ' + r.label + '.');
+        S.kernel.ui.notify('Adventure series done: ' + r.label + '.');
         return true;
     }
 
@@ -1632,7 +1628,7 @@
         r.stopReason = why;
         finish(r, rs);
         S.kernel.warn('adventures', 'series stopped at ' + lbl + ' after ' + finishedRuns() + ' run(s): ' + why);
-        notify('Adventure series stopped: ' + why);
+        S.kernel.ui.notify('Adventure series stopped: ' + why);
         return true;
     }
 

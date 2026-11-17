@@ -104,3 +104,12 @@ t.test('removal does not verify when the building list is unreadable', function 
     mod.plan({ zone: { isHome: true } });
     t.assert.strictEqual(removals(s.H), 1, 'the removal is still pending');
 });
+
+t.test('a non-number dispatchDelay queues the removal with the default delay', function () {
+    var s = setup([harness.boot().zone.building({ name: 'DepletedIronOre', grid: 7 })]);
+    s.H.settings.write('geologists', { enabled: true, dispatchDelay: 'x', removeDepleted: true });
+    s.H.module('geologists').plan({ zone: { isHome: true } });
+    var q = s.H.queued().filter(function (e) { return e.name === 'geologists.removeDepleted'; });
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].delay, s.H.Steward.modules.geologists.defaultSettings.dispatchDelay);
+});

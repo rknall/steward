@@ -621,3 +621,23 @@ t.test('a render whose portraits are all real schedules no redraw', function () 
     renderLive(H);
     t.assert.strictEqual(timers.length, 0);
 });
+
+t.test('Show in log prints the stored dispatch delay, 0 included', function () {
+    var H = harness.boot();
+    H.settings.write('explorers', { dispatchDelay: 0 });
+    H.clearLogs();
+    H.Steward.modules.explorers.showOverrides();
+    var line = H.logs().filter(function (l) {
+        return l.category === 'explorers' && /dispatchDelay/.test(l.args.join(' '));
+    });
+    t.assert.strictEqual(line.length, 1);
+    t.assert.ok(/dispatchDelay: 0 ms/.test(line[0].args.join(' ')), line[0].args.join(' '));
+
+    H.settings.write('explorers', { dispatchDelay: 'x' });
+    H.clearLogs();
+    H.Steward.modules.explorers.showOverrides();
+    var fallback = H.logs().filter(function (l) {
+        return l.category === 'explorers' && /dispatchDelay/.test(l.args.join(' '));
+    });
+    t.assert.ok(/dispatchDelay: 1500 ms/.test(fallback[0].args.join(' ')), String(fallback[0].args.join(' ')));
+});

@@ -136,10 +136,6 @@
         return typeof confirm === 'function' && confirm(text) === true;
     }
 
-    function notify(text) {
-        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
-    }
-
     // Rewrites the menu status line in place; no menu rebuild.
     function refresh() {
         if (S.kernel.ui && S.kernel.ui.status && S.kernel.ui.status.refresh) S.kernel.ui.status.refresh();
@@ -194,7 +190,7 @@
             S.kernel.warn('adventures', 'start check "' + rec.label + '" failed:', messageOf(problems[i]));
             if (i < 3) first.push(messageOf(problems[i]));
         }
-        notify('"' + rec.label + '" cannot start: ' + problems.length + ' problem(s). ' + first.join('; '));
+        S.kernel.ui.notify('"' + rec.label + '" cannot start: ' + problems.length + ' problem(s). ' + first.join('; '));
         return false;
     }
 
@@ -205,12 +201,12 @@
     function startCheck(rec, opts) {
         var executor = S.modules.adventures.executor;
         if (!executor || !executor.check) {
-            notify('The wave executor is not loaded; nothing started.');
+            S.kernel.ui.notify('The wave executor is not loaded; nothing started.');
             return null;
         }
         var chk = executor.check(rec, opts) || {};
         if (chk.listOk === false) {
-            notify('The specialist list cannot be read right now; try again in a moment.');
+            S.kernel.ui.notify('The specialist list cannot be read right now; try again in a moment.');
             return null;
         }
         var warnings = listOf(chk.warnings);
@@ -256,7 +252,7 @@
         var answer = ask('Start at which wave of "' + rec.label + '"? 1..' + waves, '1');
         var w = waveFrom(answer, waves);
         if (!w.ok) {
-            if (w.reason === 'invalid') notify('Not a wave number: ' + answer);
+            if (w.reason === 'invalid') S.kernel.ui.notify('Not a wave number: ' + answer);
             return false;
         }
 
@@ -270,7 +266,7 @@
         wakeRun();
         S.kernel.log('adventures', 'run started:', rec.label, 'x' + count, 'at wave', w.wave, 'of', waves,
             'zone', zoneId, '(' + warnings.length + ' warning(s))');
-        notify('Run started at wave ' + w.wave + ' of ' + waves + ': ' + rec.label +
+        S.kernel.ui.notify('Run started at wave ' + w.wave + ' of ' + waves + ': ' + rec.label +
             '. It acts while you view the map.' +
             (warnings.length ? ' ' + warnings.length + ' warning(s) in the log.' : ''));
         return true;
@@ -290,7 +286,7 @@
         wakeRun();
         S.kernel.log('adventures', 'run started from home:', rec.label, 'x' + count, zoneText(zoneId),
             '(' + warnings.length + ' warning(s))');
-        notify('Run started from home: ' + rec.label + ' ×' + count + '.' +
+        S.kernel.ui.notify('Run started from home: ' + rec.label + ' ×' + count + '.' +
             (warnings.length ? ' ' + warnings.length + ' warning(s) in the log.' : ''));
         return true;
     }
@@ -301,20 +297,20 @@
     // { rec, count, advLabel }, or null when the start ends here.
     function startPrompts(rec, id, kind) {
         if (!rec) {
-            notify(kind + ' ' + id + ' cannot be read.');
+            S.kernel.ui.notify(kind + ' ' + id + ' cannot be read.');
             return null;
         }
         var reads = {};
         var maps = available(rec.adventure, reads);
         if (maps === null) {
             // Name the read that failed: the star menu, or else the open list.
-            notify(reads.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
+            S.kernel.ui.notify(reads.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
                 : UNREADABLE_OWN);
             return null;
         }
         var advLabel = S.core.adventures.label(rec.adventure) || rec.adventure;
         if (maps < 1) {
-            notify('No ' + advLabel + ' map in the star menu.');
+            S.kernel.ui.notify('No ' + advLabel + ' map in the star menu.');
             return null;
         }
         var rs = store().current();
@@ -334,7 +330,7 @@
         var answer = ask('How many consecutive runs of "' + rec.label + '"? ' + maps + ' available.', String(maps));
         var r = countFrom(answer, maps);
         if (!r.ok) {
-            if (r.reason === 'invalid') notify('Not a run count: ' + answer);
+            if (r.reason === 'invalid') S.kernel.ui.notify('Not a run count: ' + answer);
             return null;
         }
         return { rec: rec, count: r.count, advLabel: advLabel };
@@ -347,14 +343,14 @@
 
         var list = store().ownRead();
         if (list === null) {
-            notify(UNREADABLE_OWN);
+            S.kernel.ui.notify(UNREADABLE_OWN);
             return false;
         }
         var entry = S.core.adventures.entryOf(list, rec.adventure);
         var zoneId = entry ? entry.zoneId : null;
         if (typeof zoneId === 'number' && S.core.zone.id() === zoneId) return startWaves(rec, p.count, zoneId);
         if (S.core.zone.isHome() === true) return startHome(rec, p.count, zoneId);
-        notify('Go home or view the ' + p.advLabel + ' island, then choose the template again.');
+        S.kernel.ui.notify('Go home or view the ' + p.advLabel + ' island, then choose the template again.');
         return false;
     }
 
@@ -379,7 +375,7 @@
         var answer = ask('Start at which trip of "' + rec.label + '"? 1..' + trips, '1');
         var w = waveFrom(answer, trips);
         if (!w.ok) {
-            if (w.reason === 'invalid') notify('Not a trip number: ' + answer);
+            if (w.reason === 'invalid') S.kernel.ui.notify('Not a trip number: ' + answer);
             return null;
         }
         return w.wave - 1;
@@ -402,12 +398,12 @@
         if (!p) return false;
         var rec = p.rec;
         if (S.core.zone.isHome() !== true) {
-            notify('Go home, then choose the scenario again.');
+            S.kernel.ui.notify('Go home, then choose the scenario again.');
             return false;
         }
         var unknown = unknownItems(rec);
         if (unknown === null) {
-            notify('Item definitions cannot be read right now; try again in a moment.');
+            S.kernel.ui.notify('Item definitions cannot be read right now; try again in a moment.');
             return false;
         }
         if (unknown.length) return checkFailed(rec, unknown);
@@ -423,7 +419,7 @@
 
         var list = store().ownRead();
         if (list === null) {
-            notify(UNREADABLE_OWN);
+            S.kernel.ui.notify(UNREADABLE_OWN);
             return false;
         }
         var entry = S.core.adventures.entryOf(list, rec.adventure);
@@ -452,7 +448,7 @@
         S.kernel.log('adventures', 'scenario run started from home:', rec.label, 'x' + p.count + ',',
             seriesText(p.count, trip, rec.trips.length) + ',', zoneText(zoneId),
             '(' + warnings.length + ' warning(s))');
-        notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', ' +
+        S.kernel.ui.notify('Scenario run started from home: ' + rec.label + ' ×' + p.count + ', ' +
             seriesText(p.count, trip, rec.trips.length) + '.' +
             (warnings.length ? ' Warning: ' + warnings.join('; ') + '.' : ''));
         return true;
@@ -482,7 +478,7 @@
 
     function pause() {
         if (!can().pause) {
-            notify('No running adventure run to pause.');
+            S.kernel.ui.notify('No running adventure run to pause.');
             return false;
         }
         cancelQueued();
@@ -492,20 +488,20 @@
     function resume() {
         var run = store().run();
         if (!run) {
-            notify('No adventure run to resume.');
+            S.kernel.ui.notify('No adventure run to resume.');
             return false;
         }
         if (run.status === S.RunStatus.Done) {
-            notify('The series is done; use Stop run.');
+            S.kernel.ui.notify('The series is done; use Stop run.');
             return false;
         }
         if (run.status !== S.RunStatus.Paused) {
-            notify('The run is not paused.');
+            S.kernel.ui.notify('The run is not paused.');
             return false;
         }
         if (!store().resume()) return false;
         wakeRun();
-        notify('Run resumed at ' + store().label() + ': ' + run.label + '.');
+        S.kernel.ui.notify('Run resumed at ' + store().label() + ': ' + run.label + '.');
         return true;
     }
 
@@ -514,18 +510,18 @@
     function endRepetition() {
         var req = current();
         if (!req) {
-            notify('No run requested.');
+            S.kernel.ui.notify('No run requested.');
             return false;
         }
         if (!repetitionLeft()) {
-            notify('This is the last run requested; there is no repetition to end.');
+            S.kernel.ui.notify('This is the last run requested; there is no repetition to end.');
             return false;
         }
         req.count = store().finishedRuns() + 1;
         req.ended = true;
         store().save();
         S.kernel.log('adventures', 'run repetition ended:', req.label);
-        notify('Repetition ended: ' + req.label + ' stops after the current run.');
+        S.kernel.ui.notify('Repetition ended: ' + req.label + ' stops after the current run.');
         refresh();
         return true;
     }
@@ -534,7 +530,7 @@
     // or attack is sent after the state is gone.
     function stop() {
         if (!can().stop) {
-            notify('No run requested.');
+            S.kernel.ui.notify('No run requested.');
             return false;
         }
         var rs = store().current();
@@ -542,7 +538,7 @@
         cancelQueued();
         store().clear();
         S.kernel.log('adventures', 'run stopped:', label);
-        notify('Run stopped.');
+        S.kernel.ui.notify('Run stopped.');
         return true;
     }
 

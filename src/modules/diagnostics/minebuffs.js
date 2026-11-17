@@ -23,11 +23,6 @@
     // Longest log line when the dump cannot be written to a file.
     var CHUNK_LEN = 1500;
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
         try { return fn(); }
@@ -176,12 +171,12 @@
             ? army.writeDump(army.dumpFileName('minebuffs', doc.zoneId), text) : null;
         if (w && w.ok) {
             S.kernel.log(cat, 'mine buffs written to ' + w.path);
-            notify('Mine buffs dumped to ' + w.path + '.');
+            S.kernel.ui.notify('Mine buffs dumped to ' + w.path + '.');
         } else {
             S.kernel.warn(cat, w && w.path ? 'write failed: ' + w.message
                                            : 'no writable dumps folder, logging the document');
             logChunks(cat, doc);
-            notify('Mine buffs dumped to log (category ' + cat + ').');
+            S.kernel.ui.notify('Mine buffs dumped to log (category ' + cat + ').');
         }
         S.kernel.log(cat, '--- end mine buffs ---');
     }

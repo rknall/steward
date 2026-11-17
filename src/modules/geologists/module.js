@@ -225,7 +225,11 @@
     function plan() {
         var c = S.core.specialists;
         var s = readSettings();
-        planRemoval(s, (s && typeof s.dispatchDelay === 'number') ? s.dispatchDelay : 0);
+        // One delay for both queues. A stored value that is not a number falls
+        // back to the default, not to 0, so a bad setting cannot send at once.
+        var delay = (s && typeof s.dispatchDelay === 'number') ? s.dispatchDelay
+            : S.modules.geologists.defaultSettings.dispatchDelay;
+        planRemoval(s, delay);
         if (!S.core.deposits || !S.core.deposits.types) {
             S.kernel.error('geologists', 'core.deposits.types unavailable — bundle order issue?');
             return;
@@ -286,8 +290,6 @@
         var overrides = (s && s.overrides) || {};
         var rule = kindRule(depCfg, types);
         var assigned = {};   // uid → true (this tick)
-        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay
-            : S.modules.geologists.defaultSettings.dispatchDelay;
         var picks = [];
         // A sent geologist can read Idle for a while before its task shows;
         // counting it as on task keeps a second geologist off the same slot.

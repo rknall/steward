@@ -104,14 +104,6 @@
         }
     }
 
-    function bui(name) {
-        return safe(function () { return S.core.locale.bui(name) || name; }, name);
-    }
-
-    function res(name) {
-        return safe(function () { return S.core.locale.res(name) || name; }, name);
-    }
-
     function pass(fn) {
         return S.kernel.hostRead.pass(fn);
     }
@@ -279,7 +271,7 @@
         var cfg = cfgOf(name);
         return {
             name:    name,
-            label:   bui(name),
+            label:   S.core.locale.bui(name),
             count:   1,
             level:   level(b),
             grid:    grid(b),
@@ -297,7 +289,7 @@
                 var mult = typeof items === 'number' && items > 0 ? items : 1;
                 var parts = [];
                 for (var k = 0; k < info.costs.length; k++) {
-                    parts.push((info.costs[k].amount * mult) + ' ' + res(info.costs[k].name));
+                    parts.push((info.costs[k].amount * mult) + ' ' + S.core.locale.res(info.costs[k].name));
                 }
                 return parts.join(', ') + ' per order';
             },
@@ -334,7 +326,7 @@
         for (var n in names) {
             if (!has(names, n) || String(names[n]) !== String(type)) continue;
             var cfg = cfgOf(n);
-            if (cfg.enabled === true && cfg.item) return { name: n, item: cfg.item, label: res(cfg.item) };
+            if (cfg.enabled === true && cfg.item) return { name: n, item: cfg.item, label: S.core.locale.res(cfg.item) };
         }
         return null;
     }
@@ -347,7 +339,7 @@
         return {
             type:        type,
             kind:        t.kind,
-            label:       first ? bui(first.name) : String(type),
+            label:       first ? S.core.locale.bui(first.name) : String(type),
             level:       b ? level(b) : (first ? first.level : null),
             count:       t.buildings ? t.buildings.length : 0,
             entries:     es,

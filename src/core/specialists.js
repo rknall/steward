@@ -626,13 +626,7 @@
         if (!taskEnum) return '';
         var key = TASK_LOCA_KEYS[taskEnum];
         if (!key) return String(taskEnum);
-        try {
-            if (typeof loca !== 'undefined' && loca && typeof loca.GetText === 'function') {
-                var t = loca.GetText('LAB', key);
-                if (t) return t;
-            }
-        } catch (e) { /* fall through */ }
-        return key;
+        return S.core.locale.lab(key);
     }
 
     // Decode the explorer's *current* task by reading both

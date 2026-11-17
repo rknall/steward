@@ -64,12 +64,8 @@
                 '--- discovery end --- matched:', matched,
                 'unmatched:', unmatched, 'total scanned:', matched + unmatched);
 
-            try {
-                if (typeof showGameAlert === 'function') {
-                    showGameAlert('Steward: discovered ' + matched + ' matching, ' +
-                                  unmatched + ' unmatched. See console.');
-                }
-            } catch (e) { /* alert is best-effort */ }
+            S.kernel.ui.notify('discovered ' + matched + ' matching, ' +
+                               unmatched + ' unmatched. See console.');
         } catch (e) {
             S.kernel.error('collect:discover', 'threw:', e);
         }
@@ -113,11 +109,6 @@
 
     function typesText(n) {
         return n + ' collectible type' + (n === 1 ? '' : 's');
-    }
-
-    function buiName(building) {
-        try { return S.core.locale.bui(building); }
-        catch (e) { return building; }
     }
 
     // Gem pit rows with their rate per 12 h, or null when none is readable:
@@ -177,7 +168,7 @@
         var rows = [];
         for (var i = 0; i < res.rows.length; i++) {
             var row = res.rows[i];
-            var label = buiName(row.building) + ' (grid ' + row.grid + ')';
+            var label = S.core.locale.bui(row.building) + ' (grid ' + row.grid + ')';
             rows.push([{ text: label, title: label }, rateCell(row.rate12h, row.rate12hBuffed)]);
         }
         $card.append(h.table({

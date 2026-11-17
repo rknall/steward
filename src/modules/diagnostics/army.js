@@ -37,11 +37,6 @@
     var SPEC_GETTERS = ['IsInUse', 'GetGeneralState', 'GetGarrisonGridIdx', 'isTravellingAway'];
     var ARMY_GETTERS = ['GetMaxMilitaryUnits', 'HasEliteUnits', 'GetUnitsCount'];
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     function insp() { return S.modules.diagnostics.inspect; }
 
     function fmt(v) { return insp().shortValue(v); }
@@ -210,7 +205,7 @@
             catch (e2) { S.kernel.error(cat, 'general ' + k + ' threw:', e2); }
         }
         S.kernel.log(cat, '--- end generals ---');
-        if (cat !== 'diag:sample') notify('Generals dumped to log (category ' + cat + ').');
+        if (cat !== 'diag:sample') S.kernel.ui.notify('Generals dumped to log (category ' + cat + ').');
     }
 
     // ---------------------------------------------------------------
@@ -277,7 +272,7 @@
         } catch (e4) { S.kernel.error(cat, 'unit catalogue dump threw:', e4); }
 
         S.kernel.log(cat, '--- end army ---');
-        notify('Army dumped to log (category ' + cat + ').');
+        S.kernel.ui.notify('Army dumped to log (category ' + cat + ').');
     }
 
     // ---------------------------------------------------------------
@@ -381,7 +376,7 @@
             }
         } catch (e) { S.kernel.error(cat, 'quest pool unavailable:', e); }
         S.kernel.log(cat, '--- end quests ---');
-        notify('Quests dumped to log (category ' + cat + ').');
+        S.kernel.ui.notify('Quests dumped to log (category ' + cat + ').');
     }
 
     function dumpAdventures() {
@@ -410,7 +405,7 @@
             }
         } catch (e) { S.kernel.error(cat, 'adventure manager unavailable:', e); }
         S.kernel.log(cat, '--- end adventures ---');
-        notify('Active adventures dumped to log (category ' + cat + ').');
+        S.kernel.ui.notify('Active adventures dumped to log (category ' + cat + ').');
     }
 
     // ---------------------------------------------------------------
@@ -490,7 +485,7 @@
         } catch (e) {
             S.kernel.error(cat, 'building list unavailable:', e);
             S.kernel.log(cat, '--- end buildings ---');
-            notify('Buildings dump failed (category ' + cat + ').');
+            S.kernel.ui.notify('Buildings dump failed (category ' + cat + ').');
             return;
         }
 
@@ -521,7 +516,7 @@
             if (w.ok) {
                 written = true;
                 S.kernel.log(cat, 'buildings: ' + records.length + ' written to ' + w.path);
-                notify('Buildings dumped to ' + w.path + '.');
+                S.kernel.ui.notify('Buildings dumped to ' + w.path + '.');
             } else {
                 S.kernel.warn(cat, 'write failed: ' + w.message);
             }
@@ -530,7 +525,7 @@
         }
         if (!written) {
             for (var k = 0; k < records.length; k++) S.kernel.log(cat, '  ' + json(records[k]));
-            notify('Buildings dumped to log (category ' + cat + ').');
+            S.kernel.ui.notify('Buildings dumped to log (category ' + cat + ').');
         }
         S.kernel.log(cat, '--- end buildings ---');
     }
@@ -691,7 +686,7 @@
         dumpAdventureDefinitions(cat);
         dumpBuffDefinitions(cat);
         S.kernel.log(cat, '--- end definitions ---');
-        notify('Definitions dumped to log (category ' + cat + ').');
+        S.kernel.ui.notify('Definitions dumped to log (category ' + cat + ').');
     }
 
     // ---------------------------------------------------------------
@@ -753,14 +748,14 @@
             try { clearTimeout(r.handle); }
             catch (e) { S.kernel.warn('diag', 'sampler clearTimeout threw:', e); }
             S.kernel.log('diag', 'sampler stopped after ' + r.count + ' samples');
-            notify('Generals sampler stopped.');
+            S.kernel.ui.notify('Generals sampler stopped.');
             return false;
         }
         run = { owner: S.kernel.lifecycle, count: 0, handle: null };
         S.kernel.log('diag', 'sampler started: every ' + (SAMPLE_MS / 1000) + ' s, ' +
                              SAMPLE_COUNT + ' samples (category diag:sample)');
         arm(run);
-        if (run) notify('Generals sampler started.');
+        if (run) S.kernel.ui.notify('Generals sampler started.');
         return !!run;
     }
 

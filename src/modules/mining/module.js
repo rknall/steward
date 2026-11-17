@@ -65,22 +65,44 @@
         resumeText: 'buffing resumes'
     });
 
-    function readSettings() {
+    function mergeSettings() {
         var stored = S.kernel.settings.read('mining') || {};
         var defaults = S.modules.mining.defaultSettings || {};
         var merged = {};
         var key;
+        var field;
         for (key in defaults) merged[key] = defaults[key];
         for (key in stored)   merged[key] = stored[key];
-        // Deep-merge nested deposits map so partial user edits don't
-        // wipe defaults for deposit types the user hasn't touched.
+        // Deposit rows merge per field: a stored row missing fields (an
+        // older build, a hand-edited file) still reads whole, the gaps
+        // filled from its default row. Types without a default row stay
+        // as stored.
         var depMerged = {};
         var defaultDeps = defaults.deposits || {};
         var storedDeps  = stored.deposits  || {};
-        for (key in defaultDeps) depMerged[key] = defaultDeps[key];
-        for (key in storedDeps)  depMerged[key] = storedDeps[key];
+        for (key in defaultDeps) {
+            var row = {};
+            var defRow = defaultDeps[key] || {};
+            var storedRow = storedDeps[key];
+            for (field in defRow) row[field] = defRow[field];
+            if (storedRow !== null && typeof storedRow === 'object') {
+                for (field in storedRow) row[field] = storedRow[field];
+            }
+            depMerged[key] = row;
+        }
+        for (key in storedDeps) {
+            if (!Object.prototype.hasOwnProperty.call(defaultDeps, key)) {
+                depMerged[key] = storedDeps[key];
+            }
+        }
         merged.deposits = depMerged;
         return merged;
+    }
+
+    // Every reader, this file included, goes through the export, so the
+    // dashboard, diagnostics and the tests all see one merge.
+    function readSettings() {
+        return S.modules.mining.readSettings();
     }
 
     // Reads the raw store, not readSettings(): the merge would fill in the
@@ -599,8 +621,9 @@
         });
     }
 
-    // Exposed for ui.js and the tests.
-    S.modules.mining.readSettings = readSettings;
+    // The one settings reader, shared with ui.js, diagnostics and the
+    // tests; the other two are exposed for ui.js and the tests.
+    S.modules.mining.readSettings = mergeSettings;
     S.modules.mining.buffBreaker  = buffEngine.breaker;
     S.modules.mining.buffHolds    = buffEngine.holds;
 

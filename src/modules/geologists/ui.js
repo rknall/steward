@@ -45,11 +45,6 @@
         S.kernel.settings.write('geologists', s);
     }
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     function fmtFactor(n) {
         if (typeof n !== 'number' || !isFinite(n)) return '?';
         return (Math.round(n * 100) / 100).toFixed(2);
@@ -157,7 +152,7 @@
         var gr = readGeologists();
         if (!S.kernel.read.has(gr)) {
             S.kernel.error('geologists', 'failed to list geologists:', gr.why);
-            return notify('Could not list geologists — see log.');
+            return S.kernel.ui.notify('Could not list geologists — see log.');
         }
         var allGeos = gr.value;
         var idle = 0, busy = 0, unknown = 0;
@@ -174,7 +169,7 @@
 
         if (!d || !d.types) {
             S.kernel.warn('geologists', 'core.deposits.types unavailable');
-            return notify('Geologist state dumped — core.deposits not ready.');
+            return S.kernel.ui.notify('Geologist state dumped — core.deposits not ready.');
         }
 
         var types = d.types();
@@ -223,7 +218,7 @@
                     '  ' + nm);
             }
         }
-        notify('Geologist ranking dumped to log.');
+        S.kernel.ui.notify('Geologist ranking dumped to log.');
     }
 
     // ---------------------------------------------------------------
@@ -280,11 +275,6 @@
     function onMapCount(depositName) {
         var r = S.core.deposits.byTypeRead(depositName);
         return S.kernel.read.isOk(r) ? r.value.length : null;
-    }
-
-    function resName(depositName) {
-        try { return S.core.locale.res(depositName) || depositName; }
-        catch (e) { return depositName; }
     }
 
     // Merge a partial change into settings.deposits[name]. h.update does a
@@ -409,7 +399,7 @@
         var $a;
         if (ks.length) {
             $a = h.link('override', onClick, {
-                title: 'override: only ' + kindNames(index, ks) + ' may search ' + resName(depositName)
+                title: 'override: only ' + kindNames(index, ks) + ' may search ' + S.core.locale.res(depositName)
             });
         } else {
             $a = h.link('default', onClick);
@@ -442,7 +432,7 @@
     }
 
     function countsText(index, ks, depositName) {
-        if (!ks.length) return 'No kind ticked: ' + resName(depositName) + ' searches as default.';
+        if (!ks.length) return 'No kind ticked: ' + S.core.locale.res(depositName) + ' searches as default.';
         var m = 0;
         for (var i = 0; i < ks.length; i++) {
             var e = index.byKind[String(ks[i])];
@@ -470,7 +460,7 @@
     function editorPanel(h, depositName, index, redraw) {
         var ks = S.modules.geologists.rowKinds(depositRow(h, depositName));
         var $p = $('<div>');
-        $p.append(h.subHead('OVERRIDE: ONLY THESE SEARCH ' + resName(depositName).toUpperCase(),
+        $p.append(h.subHead('OVERRIDE: ONLY THESE SEARCH ' + S.core.locale.res(depositName).toUpperCase(),
             h.link('Back to default', function () {
                 updateDeposit(h, depositName, { kinds: [] });
                 editing = null;
@@ -499,7 +489,7 @@
 
     function depositTableRow(h, depositName, index, redraw) {
         var row = depositRow(h, depositName);
-        var label = resName(depositName);
+        var label = S.core.locale.res(depositName);
         var onMap = onMapCount(depositName);
         var base = 'deposits.' + depositName + '.';
 
@@ -628,7 +618,7 @@
 
     function bestCell(g) {
         if (!g.best.trait) return { text: 'no trait', cls: 'steward-muted' };
-        var label = resName(g.best.name);
+        var label = S.core.locale.res(g.best.name);
         var detail = ' · amount ×' + fmtFactor(g.best.cap) + ' · time ×' + fmtFactor(g.best.time);
         var $c = $('<span>').text(label)
             .append($('<span>', { 'class': 'steward-muted' }).text(detail));
@@ -692,7 +682,7 @@
                 g.state === 'unknown' ? unknownCell(h, 'The status could not be read')
                     : h.statusBadge(g.state === 'idle', g.state === 'idle' ? null : S.core.specialists.orders.remaining(g.spec)),
                 bestCell(g),
-                g.task ? { text: resName(g.task), title: g.task } : { text: '—', cls: 'steward-muted' }
+                g.task ? { text: S.core.locale.res(g.task), title: g.task } : { text: '—', cls: 'steward-muted' }
             ]);
         }
         $card.append(h.table({

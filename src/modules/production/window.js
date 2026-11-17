@@ -73,10 +73,6 @@
     function M() { return S.modules.production; }
     function H() { return S.kernel.ui.helpers; }
 
-    function notify(text) {
-        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
-    }
-
     function has(o, k) { return S.kernel.is.has(o, k); }
 
     function textEl(tag, cls, text) {
@@ -92,14 +88,6 @@
         } catch (e) {
             return fallback;
         }
-    }
-
-    function bui(name) {
-        return safe(function () { return S.core.locale.bui(name) || name; }, name);
-    }
-
-    function res(name) {
-        return safe(function () { return S.core.locale.res(name) || name; }, name);
     }
 
     function pad2(n) { return n < 10 ? '0' + n : String(n); }
@@ -224,7 +212,7 @@
         if (f === 'item' || f === 'buff') {
             if (!v) return 'none';
             var map = has(state.labels, name) ? state.labels[name][f] : null;
-            return map && has(map, v) ? map[v] : res(v);
+            return map && has(map, v) ? map[v] : S.core.locale.res(v);
         }
         return String(v);
     }
@@ -247,7 +235,7 @@
             for (var k = 0; k < list.length; k++) {
                 var f = list[k];
                 if (was[f] === now[f]) continue;
-                out.push(bui(names[i]) + ' ' + fieldWord(f) + ' ' +
+                out.push(S.core.locale.bui(names[i]) + ' ' + fieldWord(f) + ' ' +
                     showValue(names[i], f, was[f]) + ' → ' + showValue(names[i], f, now[f]));
             }
         }
@@ -643,7 +631,7 @@
     // ---- Footer ---------------------------------------------------------------
 
     function closeWindow() {
-        if (isDirty()) notify('Automatic queue changes discarded');
+        if (isDirty()) S.kernel.ui.notify('Automatic queue changes discarded');
         // Hides only a shown window: a second hide during the fade would
         // unbalance the host's stage layer swap.
         if (S.kernel.ui && typeof S.kernel.ui.hideModal === 'function') S.kernel.ui.hideModal(modal);
@@ -653,7 +641,7 @@
         if (!isDirty()) return;
         var eff = effective(state.draft);
         S.kernel.settings.write('production', { buildings: copyBuildings(eff) });
-        notify('Automatic queues saved');
+        S.kernel.ui.notify('Automatic queues saved');
         state.draft = eff;
         state.orig = snapshot(eff);
         updateFooter();
@@ -713,7 +701,7 @@
     function open(tab) {
         if (typeof Modal === 'undefined') {
             S.kernel.error('production', 'host Modal class unavailable — cannot open the production window');
-            notify('The production window needs the game window; try again once the island is loaded.');
+            S.kernel.ui.notify('The production window needs the game window; try again once the island is loaded.');
             return;
         }
         // Opening drops the draft, and hiding the dashboard would strand its
@@ -721,7 +709,7 @@
         // refuses.
         var ui = S.kernel.ui;
         if (ui && typeof ui.hasOpenEdits === 'function' && ui.hasOpenEdits()) {
-            notify('Save or close the open window first');
+            S.kernel.ui.notify('Save or close the open window first');
             return;
         }
         if (ui && typeof ui.ensureStyle === 'function') ui.ensureStyle(MODAL_ID);

@@ -33,11 +33,6 @@
 
     var TIERS = [1, 2, 3];
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
         try { return fn(); }
@@ -374,12 +369,12 @@
             ? army.writeDump(army.dumpFileName('production', doc.zoneId), text) : null;
         if (w && w.ok) {
             S.kernel.log(cat, 'production written to ' + w.path);
-            notify('Production dumped to ' + w.path + '.');
+            S.kernel.ui.notify('Production dumped to ' + w.path + '.');
         } else {
             S.kernel.warn(cat, w && w.path ? 'write failed: ' + w.message
                                            : 'no writable dumps folder, logging the document');
             logChunks(cat, doc);
-            notify('Production dumped to log (category ' + cat + ').');
+            S.kernel.ui.notify('Production dumped to log (category ' + cat + ').');
         }
         S.kernel.log(cat, '--- end production ---');
     }

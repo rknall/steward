@@ -73,11 +73,6 @@
         return typeof st.nextDoneAt === 'number' ? hhmm(h, st.nextDoneAt) : 'none';
     }
 
-    function res(name) {
-        try { return S.core.locale.res(name) || name; }
-        catch (e) { return name; }
-    }
-
     function openManager() {
         var w = M().window;
         if (w && typeof w.open === 'function') w.open();
@@ -151,7 +146,7 @@
     // from the status snapshot, so a repaint costs no host reads.
     function bookLine(h, st) {
         if (st.booksItem === null || st.booksItem === undefined || st.booksItem === '') return '';
-        return ' · Bookbinder: ' + res(st.booksItem) +
+        return ' · Bookbinder: ' + S.core.locale.res(st.booksItem) +
             (typeof st.booksDoneAt === 'number' ? ' done ' + hhmm(h, st.booksDoneAt) : '');
     }
 

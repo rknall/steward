@@ -35,10 +35,6 @@
         }
     }
 
-    function res(name) {
-        return safe(function () { return S.core.locale.res(name) || name; }, name);
-    }
-
     function isNum(n) { return S.kernel.is.finite(n); }
 
     function at(h, ms) {
@@ -75,7 +71,7 @@
     // Why an empty queue stays empty: the automatic queue of its type, if any.
     function emptyReason(auto) {
         if (!auto) return ' No automatic queue.';
-        return ' Automatic queue ' + (auto.label || res(auto.item)) + ': orders when the building is idle.';
+        return ' Automatic queue ' + (auto.label || S.core.locale.res(auto.item)) + ': orders when the building is idle.';
     }
 
     function queueTitle(h, q, now) {
@@ -85,7 +81,7 @@
         var b = q.buff;
         if (b) {
             var until = isNum(b.remainingMs) ? ' until ' + at(h, now + b.remainingMs) : '';
-            parts.push('buff ' + (b.name ? res(b.name) : '?') + until);
+            parts.push('buff ' + (b.name ? S.core.locale.res(b.name) : '?') + until);
         } else {
             parts.push('no buff');
         }
@@ -122,7 +118,7 @@
             var src = safe(function () { return q.source(e); }, 'Other');
             var n = e['repeat'];
             out.push([
-                res(e.item),
+                S.core.locale.res(e.item),
                 cell(n > 1 ? n + ' × ' + e.amount : String(e.amount), 'steward-num'),
                 cell(produced(e, books), 'steward-num'),
                 cell(h.duration(e.remainingMs) || (e.finished ? 'done' : DASH), 'steward-num'),

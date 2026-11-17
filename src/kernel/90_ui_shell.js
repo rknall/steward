@@ -762,8 +762,9 @@
 
     // Surface a transient message to the user via the host's alert system.
     // Best-effort — silently no-ops if the host isn't ready (e.g., very
-    // early boot).
+    // early boot). Empty or non-string text shows nothing.
     function notify(text) {
+        if (typeof text !== 'string' || !text) return;
         try {
             if (typeof showGameAlert === 'function') {
                 showGameAlert('Steward: ' + text);

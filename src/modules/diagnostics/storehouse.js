@@ -31,11 +31,6 @@
     // host exposes those caps.
     var CAP_PROBES = ['StarfallStarDust', 'StarfallStarShards'];
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
         try { return fn(); }
@@ -362,12 +357,12 @@
             ? army.writeDump(army.dumpFileName('storehouse', doc.zoneId), text) : null;
         if (w && w.ok) {
             S.kernel.log(cat, 'storehouse written to ' + w.path);
-            notify('Storehouse dumped to ' + w.path + '.');
+            S.kernel.ui.notify('Storehouse dumped to ' + w.path + '.');
         } else {
             S.kernel.warn(cat, w && w.path ? 'write failed: ' + w.message
                                            : 'no writable dumps folder, logging the document');
             logChunks(cat, doc);
-            notify('Storehouse dumped to log (category ' + cat + ').');
+            S.kernel.ui.notify('Storehouse dumped to log (category ' + cat + ').');
         }
         S.kernel.log(cat, '--- end storehouse ---');
     }
