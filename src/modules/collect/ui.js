@@ -140,7 +140,6 @@
     var GEM_RESOURCE = 'HardCurrency';
     var GEM_TARGET = 20000;
 
-    // Days, hours and minutes, e.g. "2d 3h 05m".
     // Time until the storehouse holds GEM_TARGET gems at the total rate (buffed
     // while a buff is active); null when the stock or the rate is unknown.
     function gemTargetText(res) {
