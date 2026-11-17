@@ -41,19 +41,21 @@ Steward
 │   ├── deposits
 │   ├── packets
 │   ├── pickups        ← quest objects and collectibles, click action
+│   ├── ledger          ← persisted send-once ledger: sent, unseen, stale; one breaker per owner (rebuild)
 │   ├── locale
 │   ├── events
 │   ├── actions         ← send / verify / retry runner for write actions
 │   ├── adventures      ← adventure definitions, own adventures, close action
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
-│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, mining builds, production orders and buffs)
+│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, mining builds, production orders and buffs, rebuild)
 │   ├── buffing         ← shared building-buff engine: verified apply, per-grid hold, breaker; one instance per owner (mining, production)
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
-│   ├── construction    ← building placement and upgrade action defs, verified on the grid
+│   ├── construction    ← building placement, upgrade and rebuild action defs, verified on the grid
 │   ├── production      ← queue profiles and entries per type, generic order, complete, on/off, planner, demand ledger
 │   ├── quests          ← quest pool and claim action
 │   ├── resources       ← resource amount and free population reads
+│   ├── shells          ← depleted-shell reads: ready, changed, the rebuild diagnostic
 │   └── sound           ← pause alert sound
 ├── modules
 │   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
