@@ -126,11 +126,11 @@ t.test('snapshot: facts with and without pre-place and the id lookup', function 
     assert.strictEqual(a.preplace, 'no');
     assert.strictEqual(a.nr, '?');
     sdm.SetPrePlaceBuildingGridPos = function () {};
-    s.H.ctx.global = { buildingGroup: { GetNrFromName: function (n) { return n === 'Well_03' ? 176 : 0; } } };
+    s.H.host.game.def = function () { return { buildingGroup: { GetNrFromName: function (n) { return n === 'Well_03' ? 176 : 0; } } }; };
     var b = s.SH.snapshot(10, 'Well_03');
     assert.strictEqual(b.preplace, 'yes');
     assert.strictEqual(b.nr, 176);
-    s.H.ctx.global = { buildingGroup: { GetNrFromName: function () { throw new Error('x'); } } };
+    s.H.host.game.def = function () { return { buildingGroup: { GetNrFromName: function () { throw new Error('x'); } } }; };
     assert.strictEqual(s.SH.snapshot(10, 'Well_03').nr, '?');
 });
 
