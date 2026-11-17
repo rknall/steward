@@ -563,17 +563,6 @@
         return typeof n === 'number' ? String(n) : 'unreadable';
     }
 
-    // Precheck of a def that only acts on the home island: the zone's own
-    // read refusal while the zone view is not ok (loading or unreadable), so a
-    // failed read is retried rather than taken for "not home"; the plain
-    // refusal when the zone is known and is not home; null when home.
-    function homeRefusal() {
-        var v = S.core.zone.view();
-        if (!S.kernel.read.isOk(v)) return S.core.zone.UNREADABLE;
-        if (!v.value || v.value.home !== true) return 'not on the home island';
-        return null;
-    }
-
     // Production buff on one building of the home island, sent to that
     // building's grid. Verified only by the building showing a running
     // production buff: a stock drop alone does not say the buff landed on this
@@ -586,7 +575,7 @@
             timeoutMs: BUFF_TIMEOUT_MS,
             retries:   0,
             precheck: function () {
-                var off = homeRefusal();
+                var off = S.core.zone.homeRefusal();
                 if (off) return off;
                 if (!isNum(grid) || !(grid > 0)) return 'no target grid';
                 if (!buildingBuffMatch(name, buildingName, workyard)) return 'buff does not target ' + buildingName;
@@ -914,7 +903,7 @@
             timeoutMs: MAP_TIMEOUT_MS,
             precheck: function () {
                 found = null;
-                var off = homeRefusal();
+                var off = S.core.zone.homeRefusal();
                 if (off) return off;
                 var raw = readEntries();
                 var n = raw ? stockIn(raw, ADVENTURE_MAP_TYPE, name) : null;

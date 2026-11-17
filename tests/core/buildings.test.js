@@ -287,6 +287,47 @@ t.test('isUpgradable: true, false, absent method, throwing method, no building',
     t.assert.strictEqual(B.isUpgradable(null), null);
 });
 
+function dep(r, present, value) {
+    t.assert.strictEqual(r.present, present);
+    t.assert.strictEqual(r.value, value);
+}
+
+function depletedZone(H, fn) {
+    var z = H.zone.zone();
+    H.installZone(z);
+    if (fn) z.zone.mStreetDataMap.IsADepletedDeposit = fn;
+    return z;
+}
+
+t.test('depletedRead: no building gives null', function () {
+    var H = harness.boot();
+    depletedZone(H, function () { return true; });
+    t.assert.strictEqual(H.Steward.core.buildings.depletedRead(null), null);
+});
+
+t.test('depletedRead: no street map or no method is not present', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({ name: 'Shell', grid: 1 });
+    depletedZone(H, null);
+    dep(B.depletedRead(b), false, null);
+    var z = depletedZone(H, null);
+    z.zone.mStreetDataMap = null;
+    dep(B.depletedRead(b), false, null);
+});
+
+t.test('depletedRead: true, false and a throwing call', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var b = H.zone.building({ name: 'Shell', grid: 1 });
+    var z = depletedZone(H, function () { return true; });
+    dep(B.depletedRead(b), true, true);
+    z.zone.mStreetDataMap.IsADepletedDeposit = function () { return false; };
+    dep(B.depletedRead(b), true, false);
+    z.zone.mStreetDataMap.IsADepletedDeposit = function () { throw new Error('boom'); };
+    dep(B.depletedRead(b), true, null);
+});
+
 t.test('buffState reports presence and mBuffs_vector length', function () {
     var H = harness.boot();
     var B = H.Steward.core.buildings;
