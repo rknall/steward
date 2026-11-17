@@ -63,7 +63,7 @@
 	/* Moves the "on" class to the l3 link of the section in view. */
 	function initSpy() {
 		var main = doc.querySelector('.ug-main');
-		var links = doc.querySelectorAll('.ug-nav .l3 a');
+		var links = doc.querySelectorAll('.ug-nav .cur .l3 a');
 		if (!main || !links.length) { return; }
 		var byId = {};
 		var i;
@@ -86,6 +86,8 @@
 			for (j = 0; j < tops.length; j++) {
 				if (tops[j].getBoundingClientRect().top <= edge) { current = tops[j]; }
 			}
+			/* A short last section can never reach the edge, so the page end picks it. */
+			if (main.scrollTop + main.clientHeight >= main.scrollHeight - 2) { current = tops[tops.length - 1]; }
 			for (j = 0; j < links.length; j++) { links[j].classList.remove('on'); }
 			byId[current.id].classList.add('on');
 		}
