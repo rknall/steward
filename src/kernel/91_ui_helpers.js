@@ -479,9 +479,13 @@
         return $b;
     }
 
-    function empty(title, text) {
+    // titleCls adds a class to the title, so a variant (the muted
+    // not-readable-yet look) reuses the same structure.
+    function empty(title, text, titleCls) {
+        var cls = 'steward-empty-title';
+        if (typeof titleCls === 'string' && titleCls) cls += ' ' + titleCls;
         var $e = $('<div>', { 'class': 'steward-empty' });
-        $e.append($('<div>', { 'class': 'steward-empty-title' }).text(title || ''));
+        $e.append($('<div>', { 'class': cls }).text(title || ''));
         if (text) $e.append($('<span>').text(text));
         return $e;
     }
@@ -673,10 +677,19 @@
     // The look of a value whose read is not settled: muted "reading..." that
     // fills in by itself once a redraw reads it. Not a badge, so it never
     // looks like a real status.
+    // The wording of an unsettled read, shared by every view.
+    var READING = 'reading...';
+
     function unknown(title) {
-        var $u = $('<span>', { 'class': 'steward-muted' }).text('reading...');
+        var $u = $('<span>', { 'class': 'steward-muted' }).text(READING);
         if (title) $u.attr('title', title);
         return $u;
+    }
+
+    // The muted empty state of a list the game has not made readable yet;
+    // the redraw replaces it once the read settles.
+    function reading(text) {
+        return empty(READING, text === undefined ? 'Retrying automatically.' : text, 'steward-muted');
     }
 
     // ---------------------------------------------------------------
@@ -709,6 +722,8 @@
         fit:       fit,
         redrawOnce: redrawOnce,
         unknown:   unknown,
+        reading:   reading,
+        READING:   READING,
         set:       set,
         get:       get,
         settings:  settings,

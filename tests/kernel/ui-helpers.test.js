@@ -670,3 +670,19 @@ t.test('unknown renders the muted reading look', function () {
     assert.ok($u.hasClass('steward-muted'));
     assert.strictEqual($u.attr('title'), 'status not readable');
 });
+
+t.test('reading renders the muted empty state without find', function () {
+    var s = setup();
+    var $e = s.h.reading();
+    var $title = $e.children().eq(0);
+    assert.strictEqual($title.text(), s.h.READING);
+    assert.ok($title.hasClass('steward-empty-title'));
+    assert.ok($title.hasClass('steward-muted'));
+    assert.strictEqual($e.children().eq(1).text(), 'Retrying automatically.');
+});
+
+t.test('empty keeps two-argument calls unchanged', function () {
+    var s = setup();
+    var $e = s.h.empty('Title', 'Text');
+    assert.strictEqual($e.children().eq(0).attr('class'), 'steward-empty-title');
+});

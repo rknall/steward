@@ -232,12 +232,7 @@
         }
 
         var R = S.kernel.read;
-        var r;
-        try { r = c.byTypeRead(S.SpecialistType.Geologist); }
-        catch (e) {
-            S.kernel.error('geologists', 'byTypeRead threw:', e);
-            return;
-        }
+        var r = c.byTypeRead(S.SpecialistType.Geologist);
         // A dropped busy geologist would shorten busyOnDeposit, raise wanted
         // and over-dispatch the healthy idle ones, and an Unknown one may be
         // busy on any deposit, so a list that is not complete, or that holds
@@ -307,9 +302,7 @@
 
             // An unknown count must not read as zero: wanted would then equal
             // max and over-dispatch, so this type is skipped for this tick.
-            var onMapR;
-            try { onMapR = S.core.deposits.byTypeRead(info.name); }
-            catch (e) { onMapR = R.unreadable(e && e.message ? e.message : String(e)); }
+            var onMapR = S.core.deposits.byTypeRead(info.name);
             if (!R.isOk(onMapR)) {
                 S.kernel.warn('geologists', 'byType failed for', info.name, '- skipping this tick:', onMapR.why);
                 continue;

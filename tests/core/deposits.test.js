@@ -109,6 +109,21 @@ t.test('depletedManagedRead is unreadable when the building list is', function (
     t.assert.strictEqual(D.depletedManagedRead().state, 'unreadable');
 });
 
+t.test('depleted and depletedManagedRead agree on the Depleted prefix', function () {
+    var H = harness.boot();
+    var D = H.Steward.core.deposits;
+    var za = H.zone.zone()
+        .building(H.zone.building({ name: 'DepletedIronOre', grid: 1 }))
+        .building(H.zone.building({ name: 'DepletedFoo', grid: 2 }))
+        .building(H.zone.building({ name: 'IronOreMine', grid: 3 }));
+    H.installZone(za);
+    t.assert.strictEqual(D.depleted().length, 2);
+    var r = D.depletedManagedRead();
+    t.assert.strictEqual(r.state, 'ok');
+    t.assert.strictEqual(r.value.length, 1);
+    t.assert.strictEqual(H.Steward.core.buildings.name(r.value[0]), 'DepletedIronOre');
+});
+
 t.test('list concatenates byType over types()', function () {
     var Z = harness.boot().zone;
     var s = setup({

@@ -184,7 +184,7 @@
         var rows = [];
         var read = S.core.resources.listRead();
         var held = S.kernel.read.has(read) ? read.value : null;
-        var partial = !!held && read.state !== 'ok';
+        var partial = !!held && !S.kernel.read.isOk(read);
         var source = 'host';
         var i;
         if (held) {

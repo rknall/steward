@@ -58,9 +58,12 @@
     // The geologists as a Result: a list that could not be read stays apart
     // from one that is empty. Partial lists keep their rows.
     function readGeologists() {
-        try { return S.core.specialists.byTypeRead(S.SpecialistType.Geologist); }
-        catch (e) { return S.kernel.read.unreadable('threw: ' + (e && e.message ? e.message : String(e))); }
+        return S.core.specialists.byTypeRead(S.SpecialistType.Geologist);
     }
+
+    // The wording of an unsettled read lives in the helpers, so every view
+    // and log line says it the same way.
+    function readingWord() { return S.kernel.ui.helpers.READING; }
 
     // 'idle', 'busy' or 'unknown': a status that could not be read is
     // neither idle nor busy.
@@ -166,7 +169,7 @@
         }
         S.kernel.log('geologists', 'geologists — total:', allGeos.length,
                      '  idle:', idle, '  busy:', busy,
-                     unknown ? '  ' + unknown + ' reading...' : '',
+                     unknown ? '  ' + unknown + ' ' + readingWord() : '',
                      gr.state === S.kernel.read.PARTIAL ? '  (partial list)' : '');
 
         if (!d || !d.types) {
@@ -187,7 +190,7 @@
             var max = (typeof cfg.max === 'number') ? cfg.max : 0;
 
             var onMap = onMapCount(info.name);
-            var onMapText = onMap === null ? 'reading...' : onMap;
+            var onMapText = onMap === null ? readingWord() : onMap;
             if (onMap === null) onMap = 0;
 
             // Count busy geos on this deposit.
@@ -212,7 +215,7 @@
                 if (row.capacityFactor <= 1 && row.timeFactor >= 1) break;  // out of "interesting" picks
                 var nm = c.name(row.geo) || '?';
                 var rs = stateOf(c, row.geo);
-                var stTag = rs === 'idle' ? '[idle]' : (rs === 'busy' ? '[busy]' : '[reading...]');
+                var stTag = rs === 'idle' ? '[idle]' : (rs === 'busy' ? '[busy]' : '[' + readingWord() + ']');
                 S.kernel.log('geologists',
                     '    ' + stTag +
                     ' cap×' + fmtFactor(row.capacityFactor) +
@@ -275,9 +278,7 @@
     // Live count on the home zone; null when it cannot be read, so an
     // unknown count is never shown or counted as zero.
     function onMapCount(depositName) {
-        var r;
-        try { r = S.core.deposits.byTypeRead(depositName); }
-        catch (e) { return null; }
+        var r = S.core.deposits.byTypeRead(depositName);
         return S.kernel.read.isOk(r) ? r.value.length : null;
     }
 
@@ -634,12 +635,20 @@
         return { $: $c, title: label + detail };
     }
 
-    function liveMeta(snap) {
+    // The count line of the live card (brief) and of the Overview tile
+    // (full): one formula so the two cannot drift apart.
+    function countLine(snap, brief) {
         var n = snap.list.length;
         var head = n + ' geologist' + (n === 1 ? '' : 's');
-        var tail = snap.partial ? ' · partial' : '';
-        if (snap.unknown) return head + ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' reading...' + tail;
-        return (snap.busy ? head + ' · ' + snap.busy + ' busy' : head + ' · all idle') + tail;
+        if (snap.unknown) {
+            return head + ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' ' + readingWord();
+        }
+        if (!snap.busy) return head + ' · all idle';
+        return head + ' · ' + snap.busy + ' busy' + (brief ? '' : ' · ' + snap.idle + ' idle');
+    }
+
+    function liveMeta(snap) {
+        return countLine(snap, true) + (snap.partial ? ' · partial' : '');
     }
 
     function liveCard(h, redraw, pass) {
@@ -652,13 +661,11 @@
             }));
         var $card = h.card({
             title:  'Live state',
-            meta:   snap.ok ? liveMeta(snap) : 'reading...',
+            meta:   snap.ok ? liveMeta(snap) : h.READING,
             $tools: $tools
         });
         if (!snap.ok) {
-            var $e = h.empty('reading...', 'Retrying automatically.');
-            $e.find('.steward-empty-title').addClass('steward-muted');
-            $card.append($e);
+            $card.append(h.reading());
             return $card;
         }
 
@@ -748,17 +755,9 @@
         var snap = snapshot();
         var first;
         if (!snap.ok) {
-            first = 'reading...';
+            first = h.READING;
         } else {
-            var n = snap.list.length;
-            first = n + ' geologist' + (n === 1 ? '' : 's');
-            if (snap.unknown) {
-                first += ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' reading...';
-            } else {
-                first += snap.busy
-                    ? ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle'
-                    : ' · all idle';
-            }
+            first = countLine(snap, false);
         }
         var dc = depositCounts(h);
         return [{

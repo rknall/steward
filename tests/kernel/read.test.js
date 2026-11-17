@@ -368,3 +368,9 @@ t.test('read constants sit in TIMEOUTS and LIMITS', function () {
     t.assert.strictEqual(S.kernel.LIMITS.READ_WAIT_TRIES, 3);
     t.assert.strictEqual(S.kernel.LIMITS.READ_REDRAWS, 3);
 });
+
+t.test('message is exported and formats an error or a value', function () {
+    var R = boot().R;
+    t.assert.strictEqual(R.message(new Error('x')), 'x');
+    t.assert.strictEqual(R.message('y'), 'y');
+});

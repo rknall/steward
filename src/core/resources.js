@@ -99,7 +99,7 @@
                 warnedThrow = true;
                 S.kernel.warn('resources', 'GetPlayerResources_vector threw:', e);
             }
-            return S.kernel.read.unreadable('threw: ' + ((e && e.message) ? e.message : String(e)));
+            return S.kernel.read.unreadable('threw: ' + S.kernel.read.message(e));
         }
     }
 

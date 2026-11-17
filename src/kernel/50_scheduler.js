@@ -55,7 +55,7 @@
                 // raw members may still describe the previous one, so isHome
                 // and isAdventure hold only when the view is ok.
                 var v = S.core.zone.view();
-                var ok = v.state === 'ok';
+                var ok = S.kernel.read.isOk(v);
                 ctx.zone.state = v.state;
                 ctx.zone.id = v.value ? v.value.id : null;
                 ctx.zone.isHome = ok && v.value.home === true;

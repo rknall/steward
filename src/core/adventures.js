@@ -207,30 +207,26 @@
         var R = S.kernel.read;
         var out = [];
         var lost = 0;
+        var mgr = manager();
+        if (!mgr) return R.unreadable('no adventure manager');
+        var advs = mgr.getAdventures();
         try {
-            var mgr = manager();
-            if (!mgr) return R.unreadable('no adventure manager');
-            var advs = mgr.getAdventures();
-            try {
-                if (advs && typeof advs.toArray === 'function') {
-                    var arr = advs.toArray();
-                    if (arr && typeof arr.length === 'number') advs = arr;
-                }
-            } catch (e1) { /* fall back to the index walk */ }
-            if (!advs || typeof advs.length !== 'number') return R.unreadable('no adventure list');
-            for (var i = 0; i < advs.length; i++) {
-                var adv = advs[i];
-                if (!mgr.isMyAdventure(adv)) continue;
-                var name = adv.adventureName;
-                var zoneId = adv.zoneID;
-                if (typeof name !== 'string' || name === '' || typeof zoneId !== 'number') {
-                    lost++;
-                    continue;
-                }
-                out.push({ name: name, zoneId: zoneId });
+            if (advs && typeof advs.toArray === 'function') {
+                var arr = advs.toArray();
+                if (arr && typeof arr.length === 'number') advs = arr;
             }
-        } catch (e) {
-            return R.unreadable('threw: ' + ((e && e.message) ? e.message : String(e)));
+        } catch (e1) { /* fall back to the index walk */ }
+        if (!advs || typeof advs.length !== 'number') return R.unreadable('no adventure list');
+        for (var i = 0; i < advs.length; i++) {
+            var adv = advs[i];
+            if (!mgr.isMyAdventure(adv)) continue;
+            var name = adv.adventureName;
+            var zoneId = adv.zoneID;
+            if (typeof name !== 'string' || name === '' || typeof zoneId !== 'number') {
+                lost++;
+                continue;
+            }
+            out.push({ name: name, zoneId: zoneId });
         }
         return lost ? R.partial(out, lost, 'own adventure without name or zone id') : R.ok(out);
     }

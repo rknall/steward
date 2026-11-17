@@ -303,7 +303,7 @@
                     // Log a failing index only when its error text changes,
                     // so a render loop stays quiet.
                     try {
-                        var msg = (e && e.message) ? e.message : String(e);
+                        var msg = S.kernel.read.message(e);
                         if (lastIndexErr[targetName] !== msg) {
                             lastIndexErr[targetName] = msg;
                             S.kernel.debug('buildings', 'byName ' + targetName +

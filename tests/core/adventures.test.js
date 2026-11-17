@@ -399,6 +399,25 @@ t.test('ownRead is ok for a complete list and unreadable without a manager', fun
     assert.strictEqual(s.adv.ownRead().state, 'unreadable');
 });
 
+t.test('a throwing manager is unreadable and not memoized in a pass', function () {
+    var s = setup();
+    var calls = 0;
+    withManager(s, {
+        getAdventures: function () {
+            calls++;
+            if (calls === 1) throw new Error('boom');
+            return [{ adventureName: 'AdvA', zoneID: 11 }];
+        },
+        isMyAdventure: function () { return true; }
+    });
+    s.S.kernel.hostRead.pass(function () {
+        var first = s.adv.ownRead();
+        assert.strictEqual(first.state, 'unreadable');
+        assert.strictEqual(first.why.indexOf('threw: '), 0);
+        assert.strictEqual(s.adv.ownRead().state, 'ok');
+    });
+});
+
 t.test('own is [] for an empty manager list', function () {
     var s = setup();
     withManager(s, { getAdventures: function () { return []; }, isMyAdventure: function () { return true; } });

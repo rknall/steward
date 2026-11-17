@@ -247,11 +247,6 @@
         return threw ? THREW : null;
     }
 
-    function specDescription(spec) {
-        var d = descriptionRead(spec);
-        return d === THREW ? null : d;
-    }
-
     function baseTypeOf(typeNum) {
         if (typeof typeNum !== 'number') return null;
         // Fast path: the standard three already match their base.
@@ -570,26 +565,6 @@
         if (!spec) return null;
         try { return typeof spec.GetTask === 'function' ? spec.GetTask() : null; }
         catch (e) { return null; }
-    }
-
-    function hasTask(spec) {
-        // Confirmed via the spike: GetTask() returns null for idle specialists
-        // and a Flash task object (which JSON-stringifies to "{}") for busy
-        // ones. Truthiness check is sufficient.
-        var t = specTask(spec);
-        return !!t;
-    }
-
-    // IsInUse() is the cross-type "busy" flag. Generals expose
-    // GetGeneralState() with -1 = idle-traveling/working, 0 = idle, plus
-    // values for various activity sub-states. We use IsInUse first because
-    // the spike showed it returns true for working explorers (where
-    // GetGeneralState returns -1 even when idle).
-    function isInUse(spec) {
-        if (!spec) return false;
-        try { if (typeof spec.IsInUse === 'function') return !!spec.IsInUse(); }
-        catch (e) { /* fall through */ }
-        return false;
     }
 
     // The task object, null when idle, or THREW when GetTask cannot be read

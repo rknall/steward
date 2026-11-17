@@ -285,6 +285,7 @@
         absent: absent,
         num: num,
         show: show,
+        message: message,
         source: source,
         get: get,
         wait: wait,

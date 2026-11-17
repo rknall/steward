@@ -278,8 +278,7 @@
                 // Neither "none" nor a count: the list is not readable now and a
                 // redraw fills it in once it is.
                 var $card0 = h.card({ title: 'Live state', meta: 'updated ' + h.clock() });
-                var $e = h.empty('reading...', 'Retrying automatically.');
-                $e.find('.steward-empty-title').addClass('steward-muted');
+                var $e = h.reading();
                 $slot.empty().append($card0.append($e));
                 h.fit();
                 return;
@@ -327,7 +326,7 @@
                 .append($('<span>', { 'class': 'steward-warn' }).text(counts.busy + ' busy'))
                 .append(' · ' + counts.idle + ' idle');
             if (counts.unknown) {
-                $line.append(' · ').append(h.unknown('status not readable').text(counts.unknown + ' reading...'));
+                $line.append(' · ').append(h.unknown('status not readable').text(counts.unknown + ' ' + h.READING));
             }
         }
         return [{

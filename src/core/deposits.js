@@ -88,7 +88,7 @@
         try {
             return R.ok(byType(typeName, opts));
         } catch (e) {
-            return R.unreadable(e && e.message ? e.message : String(e));
+            return R.unreadable(R.message(e));
         }
     }
 
@@ -112,13 +112,16 @@
         return null;
     }
 
+    // Depleted deposits surface as buildings whose name starts with "Depleted".
+    function isDepletedName(bn) {
+        return typeof bn === 'string' && bn.indexOf('Depleted') === 0;
+    }
+
     function depleted(opts) {
         opts = opts || {};
-        // Depleted deposits surface as buildings whose name starts with "Depleted".
         if (!S.core.buildings) return [];
         return S.core.buildings.byPredicate(function (b) {
-            var bn = S.core.buildings.name(b);
-            return typeof bn === 'string' && bn.indexOf('Depleted') === 0;
+            return isDepletedName(S.core.buildings.name(b));
         }, opts);
     }
 
@@ -127,7 +130,7 @@
     function isManagedDepleted(b) {
         if (!S.core.buildings) return false;
         var bn = S.core.buildings.name(b);
-        if (typeof bn !== 'string' || bn.indexOf('Depleted') !== 0) return false;
+        if (!isDepletedName(bn)) return false;
         var rows = S.core.deposits.types();
         for (var i = 0; i < rows.length; i++) {
             if (bn.indexOf(rows[i].name) > 0) return true;
@@ -154,9 +157,7 @@
         if (!R.has(r)) return r;
         var out = [];
         for (var i = 0; i < r.value.length; i++) {
-            var bn = S.core.buildings.name(r.value[i]);
-            if (typeof bn === 'string' && bn.indexOf('Depleted') === 0 &&
-                    isManagedDepleted(r.value[i])) out.push(r.value[i]);
+            if (isManagedDepleted(r.value[i])) out.push(r.value[i]);
         }
         if (r.state === R.PARTIAL) return R.partial(out, r.lost, r.why, r.zoneId);
         return R.ok(out, r.zoneId);

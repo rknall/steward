@@ -75,12 +75,7 @@
     function plan() {
         var c = S.core.specialists;
         var R = S.kernel.read;
-        var r;
-        try { r = c.byTypeRead(S.SpecialistType.Explorer); }
-        catch (e) {
-            S.kernel.error('explorers', 'byTypeRead threw:', e);
-            return;
-        }
+        var r = c.byTypeRead(S.SpecialistType.Explorer);
 
         // An unreadable or not yet ready list says nothing about any explorer,
         // so nothing is settled or sent; the module is woken to read again
@@ -97,7 +92,7 @@
 
         // One read serves both the guard and the idle filter, so earlier
         // sends are judged against the same state this pass dispatches from.
-        c.sendGuard.settle('explorers', all, r.state === R.OK);
+        c.sendGuard.settle('explorers', all, R.isOk(r));
         if (all.length === 0) return;
 
         // The reader already leaves out entries without a stable uniqueID; an

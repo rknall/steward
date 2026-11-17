@@ -224,16 +224,10 @@
 
     function readQueueTypes() {
         if (S.core.zone.isHome() !== true) return [];
-        var r;
-        try { r = S.core.buildings.listRead(); }
-        catch (e) {
-            S.kernel.warn('production', 'buildings.listRead threw:', e);
-            return null;
-        }
+        var r = S.core.buildings.listRead();
         // Not ok means unreadable or still loading; the next tick retries.
         if (!S.kernel.read.isOk(r)) return null;
         var all = r.value;
-        if (!all || typeof all.length !== 'number') return null;
         var bl = S.core.buildings;
         var byType = {};
         var types = [];

@@ -172,7 +172,6 @@ function setup() {
 
     var S = H.Steward;
     S.core.buildings.listRead = function () {
-        if (world.buildingsThrow) throw new Error('list failed');
         if (world.buildingsUnreadable) return S.kernel.read.unreadable('building list unreadable', 1);
         return S.kernel.read.ok(world.buildings, 1);
     };
@@ -534,9 +533,6 @@ t.test('queueTypes groups by type, highest level first, and is [] off home', fun
     assert.strictEqual(list[1].buildings[0].level, 5);
     assert.strictEqual(list[1].buildings[0].name, 'Workshop');
 
-    b.world.buildingsThrow = true;
-    assert.strictEqual(b.P.queueTypes(), null);
-    b.world.buildingsThrow = false;
     b.world.home = false;
     assert.strictEqual(b.P.queueTypes().length, 0);
 });
