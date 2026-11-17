@@ -100,8 +100,9 @@
             return typeof sdm.SetPrePlaceBuildingGridPos === 'function' ? 'yes' : 'no';
         });
         out.nr = safe(function () {
-            if (typeof global === 'undefined') return '?';
-            return global.buildingGroup.GetNrFromName(buildingName);
+            var g = game.def('global');
+            if (!g) return '?';
+            return g.buildingGroup.GetNrFromName(buildingName);
         });
         return out;
     }
