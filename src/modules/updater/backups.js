@@ -41,7 +41,7 @@
     }
 
     function nowMs() {
-        return typeof U().now === 'function' ? U().now() : Date.now();
+        return U().now();
     }
 
     // Deliberately looser than Steward.kernel.is.plainObject: it checks JSON.parse

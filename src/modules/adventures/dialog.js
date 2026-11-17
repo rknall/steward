@@ -873,7 +873,7 @@
 
     function saveDraft() {
         if (!canSaveDraft()) return;
-        var r = T().save(state.draft, new Date().getTime());
+        var r = T().save(state.draft, S.kernel.now());
         if (!r.ok) {
             state.problems = r.problems;
             render();

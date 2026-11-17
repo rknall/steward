@@ -464,11 +464,11 @@
     function tryStanding(s, ctx, names) {
         refreshNeeds(s, names);
         if (!s.standing) {
-            lastPass = { at: Date.now(), rows: [] };
+            lastPass = { at: S.kernel.now(), rows: [] };
             return;
         }
         var r = S.core.production.plan(S.core.production.demand.list(), planOpts(s));
-        lastPass = { at: Date.now(), rows: r.rows };
+        lastPass = { at: S.kernel.now(), rows: r.rows };
         for (var i = 0; i < r.orders.length; i++) {
             var o = r.orders[i];
             if (orderBreaker.admit(1) === 0) return;         // open and no probe due

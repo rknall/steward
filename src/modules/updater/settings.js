@@ -159,6 +159,6 @@
     S.modules.updater.saveState = saveState;
     S.modules.updater.seed      = seed;
     // Read through the module object at call time so tests can replace it.
-    S.modules.updater.now = function () { return Date.now(); };
+    S.modules.updater.now = function () { return S.kernel.now(); };
 
 }(Steward));

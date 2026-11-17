@@ -260,7 +260,7 @@
 
     api.TTL_MS    = TTL_MS;
     // Overridable so tests can move time; read at every call.
-    api.clock     = function () { return Date.now(); };
+    api.clock     = function () { return S.kernel.now(); };
     api.put       = put;
     api.drop      = drop;
     api.dropOwner = dropOwner;

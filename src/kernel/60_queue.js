@@ -142,7 +142,7 @@
     // never reaches runOne, so it cannot skip the next poll.
     function noteDeferring(ids) {
         try {
-            var now = Date.now();
+            var now = S.kernel.now();
             var depthNow = queue.length;
             if (deferral === null) {
                 deferral = { since: now, loggedAt: now, ids: ids, warned: false };
@@ -171,7 +171,7 @@
     function noteDeferralEnd(kind) {
         try {
             if (deferral === null) return;
-            var s = S.kernel.text.seconds(Date.now() - deferral.since);
+            var s = S.kernel.text.seconds(S.kernel.now() - deferral.since);
             if (kind === 'resumed') {
                 S.kernel.log('queue', 'resumed after ' + s + ' s');
             } else if (kind === 'empty') {
@@ -254,7 +254,7 @@
         if (deferral === null) return null;
         return {
             since: deferral.since,
-            ms:    Date.now() - deferral.since,
+            ms:    S.kernel.now() - deferral.since,
             ids:   deferral.ids.slice(),
             depth: queue.length
         };

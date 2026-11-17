@@ -307,7 +307,7 @@
         var label = view.draft.label;
         var wasRunning = !!(run && view.draft.id && run.id === view.draft.id);
         var where = wasRunning ? runningWhere(run) : '';
-        var r = Q().save(view.draft, new Date().getTime());
+        var r = Q().save(view.draft, S.kernel.now());
         if (!r.ok) {
             view.problems = r.problems;
             ctx.render();

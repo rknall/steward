@@ -96,7 +96,7 @@
             return { open: open, run: run, nextProbeAt: nextProbeAt };
         }
 
-        inst.clock       = typeof o.clock === 'function' ? o.clock : function () { return Date.now(); };
+        inst.clock       = typeof o.clock === 'function' ? o.clock : function () { return S.kernel.now(); };
         inst.MISSES      = misses;
         inst.COOLDOWN_MS = cooldown;
         inst.miss        = miss;

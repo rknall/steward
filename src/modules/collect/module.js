@@ -206,7 +206,7 @@
     }
 
     S.modules.collect.CLICK_RETRY_MS = CLICK_RETRY_MS;
-    S.modules.collect.now = function () { return Date.now(); };
+    S.modules.collect.now = function () { return S.kernel.now(); };
 
     S.kernel.register({
         id:       'collect',

@@ -67,7 +67,7 @@ Steward.kernel.register({
 - **Pure boolean return.** Returning `null`/`undefined` is treated as `false`.
 - **Throws are swallowed.** A throw is treated as `false` and logged at WARN.
 - Receives `ctx`:
-  - `ctx.now` — `Date.now()` at tick start.
+  - `ctx.now` — `Steward.kernel.now()` at tick start (wall clock, ms).
   - `ctx.tick` — monotonically incrementing integer.
   - `ctx.zone` — `{ id, state, isHome, isAdventure, isFriend }` snapshot. `state` is the zone view's Result state (`ok`, `partial`, `unreadable`, `notReady`); `isHome` and `isAdventure` are true only when it is `ok`.
   - `ctx.session` — module-shared session flags (read-only).

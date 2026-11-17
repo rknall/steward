@@ -234,7 +234,7 @@
             if (!has.call(waits, memKey)) waits[memKey] = { since: null, tries: 0 };
             rec = waits[memKey];
         }
-        var now = Date.now();
+        var now = S.kernel.now();
         if (typeof rec.since !== 'number') {
             rec.since = now;
             rec.tries = 0;

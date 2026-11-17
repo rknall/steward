@@ -163,7 +163,7 @@
             $c.append(h.empty('Nothing is in production right now.'));
             return $c;
         }
-        var now = Date.now();
+        var now = S.kernel.now();
         var $stack = $('<div>', { 'class': 'steward-stack' });
         for (var j = 0; j < shown.length; j++) {
             if (shown[j]) $stack.append(queueCard(h, shown[j], now));

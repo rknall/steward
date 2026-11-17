@@ -21,6 +21,10 @@
  *   assert(H.queued().length === 1);
  *   var H2 = harness.reload(H);             // second injection, same context
  *
+ * opts.now replaces Steward.kernel.now after load, so a test moves the one
+ * clock of the bundle: harness.boot({ now: function () { return T; } }). Off by
+ * default, because several tests assert real time. reload() reapplies it.
+ *
  * opts.timers may override setTimeout / clearTimeout / setInterval /
  * clearInterval in the context (default: inert stubs).
  */
@@ -93,11 +97,11 @@ function boot(opts) {
     };
     vm.createContext(ctx);
 
-    return load(ctx, host, sections);
+    return load(ctx, host, sections, opts.now);
 }
 
 // Runs the section files into ctx and wraps the resulting Steward.
-function load(ctx, host, sections) {
+function load(ctx, host, sections, now) {
     var files = loadOrder.collect(sections, REPO_ROOT);
     for (var i = 0; i < files.length; i++) {
         var rel = files[i];
@@ -114,6 +118,8 @@ function load(ctx, host, sections) {
         throw new Error('Bootstrap failed — Steward global not set after loading ' + files.length + ' files');
     }
 
+    if (typeof now === 'function') Steward.kernel.now = now;
+
     var caps = kernelStubs.attachCaptures(Steward);
 
     return {
@@ -121,6 +127,7 @@ function load(ctx, host, sections) {
         ctx:        ctx,
         host:       host,
         sections:   sections,
+        now:        typeof now === 'function' ? now : undefined,
         zone:       zoneStubs,
         specs:      specStubs,
         logs:       caps.logs,
@@ -151,7 +158,7 @@ function load(ctx, host, sections) {
 // opts.sections) into the existing context and returns a new harness object.
 function reload(H, opts) {
     opts = opts || {};
-    return load(H.ctx, H.host, opts.sections || H.sections);
+    return load(H.ctx, H.host, opts.sections || H.sections, H.now);
 }
 
 function noop() {}

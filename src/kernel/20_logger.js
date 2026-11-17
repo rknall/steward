@@ -384,7 +384,7 @@
             try {
                 var window = typeof ms === 'function' ? ms() : ms;
                 if (typeof window !== 'number' || !isFinite(window)) window = 0;
-                var now = Date.now();
+                var now = S.kernel.now();
                 if (lastAt !== null && now - lastAt < window) {
                     held++;
                     return false;

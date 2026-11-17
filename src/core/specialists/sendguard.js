@@ -205,7 +205,7 @@
         return { open: b.open, run: b.run, pending: np, held: nh, nextProbeAt: b.nextProbeAt };
     }
 
-    guard.clock             = function () { return Date.now(); };
+    guard.clock             = function () { return S.kernel.now(); };
     guard.VERIFY_MS         = VERIFY_MS;
     guard.STALE_MS          = STALE_MS;
     guard.HOLD_BASE_MS      = HOLD_BASE_MS;

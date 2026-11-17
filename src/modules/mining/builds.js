@@ -71,7 +71,7 @@
 
     // Wall clock, because holds outlive the session in the file. Tests
     // replace it through S.modules.mining.builds.clock.
-    api.clock = function () { return Date.now(); };
+    api.clock = function () { return S.kernel.now(); };
 
     var breaker = S.core.breaker.create({
         category:   'mining',

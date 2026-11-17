@@ -198,7 +198,7 @@
         for (i = 0; i < list.length; i++) {
             present[removeKey(S.core.buildings.grid(list[i]))] = true;
         }
-        var t = Date.now();
+        var t = S.kernel.now();
         var waiting = false;
         for (var k in removePending) {
             if (!Object.prototype.hasOwnProperty.call(removePending, k)) continue;
@@ -370,7 +370,7 @@
             if (!b || !S.core.deposits.isManagedDepleted(b)) return;
             try {
                 if (S.core.deposits.removeDepleted(b)) {
-                    removePending[removeKey(g)] = Date.now();
+                    removePending[removeKey(g)] = S.kernel.now();
                     S.kernel.log('geologists', 'removing depleted deposit',
                                  S.core.buildings.name(b), 'at grid', g);
                 } else {

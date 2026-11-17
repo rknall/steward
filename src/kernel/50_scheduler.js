@@ -44,7 +44,7 @@
 
     function buildContext() {
         var ctx = {
-            now:     Date.now(),
+            now:     S.kernel.now(),
             tick:    state.tickCount,
             zone:    { id: null, isHome: false, isAdventure: false, isFriend: false },
             session: {}
@@ -193,7 +193,7 @@
     }
 
     function tickBody() {
-        var now = Date.now();
+        var now = S.kernel.now();
         noteGap(now);
         state.tickCount++;
         var ctx = buildContext();
@@ -252,7 +252,7 @@
     function wake(id, delayMs) {
         if (!state.running || !S.kernel.registry.get(id)) return false;
         var ms = Math.max(typeof delayMs === 'number' ? delayMs : 0, S.kernel.TIMEOUTS.WAKE_MIN_MS);
-        var due = Date.now() + ms;
+        var due = S.kernel.now() + ms;
         if (state.wakes.hasOwnProperty(id)) {
             if (state.wakes[id].due <= due) return false;
             clearTimeout(state.wakes[id].timer);
@@ -294,7 +294,7 @@
         state.running = true;
         // A resume after a pause is no gap, and needs no immediate heartbeat.
         state.lastTickAt = null;
-        state.lastHeartbeatAt = Date.now();
+        state.lastHeartbeatAt = S.kernel.now();
         S.kernel.log('scheduler', 'started, tickInterval=' + state.tickIntervalMs + 'ms');
         // Defer the first tick to next loop turn so callers can finish setting up.
         state.timer = setTimeout(tick, 0);

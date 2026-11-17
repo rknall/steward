@@ -75,7 +75,7 @@
     }
 
     function nowMs() {
-        return typeof U().now === 'function' ? U().now() : Date.now();
+        return U().now();
     }
 
     // Native path of a path under the client install directory, or null.

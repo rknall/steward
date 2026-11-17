@@ -552,7 +552,7 @@
     }
 
     function now() {
-        return new Date().getTime();
+        return S.kernel.now();
     }
 
     // Read through the namespace so a test clock replaces every use.

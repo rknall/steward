@@ -305,7 +305,7 @@
             var listedType = {};
             for (var r = 0; r < set.shown.length; r++) listedType[String(set.shown[r].type)] = true;
             var out = [];
-            var now = Date.now();
+            var now = S.kernel.now();
             for (var i = 0; i < set.kept.length; i++) {
                 var t = set.kept[i];
                 var es = safe(function () { return P().entries(t.type); }, null);
@@ -444,7 +444,7 @@
             var list = counted(sc.kept, sc.mining, sc.names);
             var running = 0, unreadable = 0, entryCount = 0, nextDoneAt = null, nextItem = null;
             var booksItem = null, booksDoneAt = null, booksFound = false;
-            var now = Date.now();
+            var now = S.kernel.now();
             for (var i = 0; i < list.length; i++) {
                 var es = safe(function () { return P().entries(list[i].type); }, null);
                 if (es === null) { unreadable++; continue; }
@@ -521,7 +521,7 @@
     }
 
     function status(maxAgeMs) {
-        var now = Date.now();
+        var now = S.kernel.now();
         var part;
         if (typeof maxAgeMs === 'number' && cache && now >= cache.at && now - cache.at <= maxAgeMs) {
             part = cache.value;
