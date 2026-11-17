@@ -38,9 +38,11 @@
     // to the log. Helps users tune overrides before flipping `enabled`.
     function showOverrides() {
         var s = readSettings();
+        // A stored 0 is a real delay, so test the type rather than truthiness.
+        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay : S.modules.explorers.defaultSettings.dispatchDelay;
         S.kernel.log('explorers', '--- explorer state ---');
         S.kernel.log('explorers', 'enabled:', !!s.enabled,
-                     '  dispatchDelay:', s.dispatchDelay || 5000, 'ms');
+                     '  dispatchDelay:', delay, 'ms');
 
         try {
             var liveRaw = S.core.events.liveEventNames();

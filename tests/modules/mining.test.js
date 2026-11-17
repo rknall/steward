@@ -716,3 +716,81 @@ t.test('plan runs inside a read pass', function () {
     t.assert.strictEqual(seen[0], true);
     t.assert.strictEqual(hr.inPass(), false);
 });
+
+// --- one reader, whole rows ---------------------------------------------------
+
+function freshDepositZone(H) {
+    var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
+    var z = H.zone.zone()
+        .deposits('IronOre', [depo])
+        .buildQueue(0, 4)
+        .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+}
+
+t.test('a level edit on a deposit row the store lacks saves the whole row', function () {
+    var H = harness.boot();
+    mountQueue(H, 0, 4);
+    var s = onlyMiningEnabled('IronOre', true);
+    delete s.deposits.IronOre;
+    H.settings.write('mining', s);
+    var $r = rowFor(build(H, 'render'), 'IronOre');
+    $r.find('input').eq(2).val('5').trigger('change');
+    H.Steward.kernel.ui.closeDashboard(true);
+    var row = H.settings.read('mining').deposits.IronOre;
+    t.assert.strictEqual(row.targetLevel, 5);
+    t.assert.strictEqual(row.enabled, true);
+    t.assert.strictEqual(row.build, true);
+    t.assert.strictEqual(row.upgrade, false);
+    t.assert.strictEqual(row.pause, false);
+    t.assert.strictEqual(row.buff, '');
+    t.assert.strictEqual(row.refill, '');
+
+    freshDepositZone(H);
+    H.module('mining').plan({ zone: { isHome: true } });
+    var q = H.queued();
+    t.assert.strictEqual(q.length, 1);
+    t.assert.strictEqual(q[0].name, 'mining.buildMine');
+});
+
+t.test('a buff choice on a mason row the store lacks keeps enabled and refill', function () {
+    var s = onlyMiningEnabled('IronOre', true);
+    delete s.deposits.Stone;
+    var H = withBuffs({ settings: s });
+    var $r = rowFor(build(H, 'render'), 'Stone');
+    $r.find('select').val('MineBuff').trigger('change');
+    H.Steward.kernel.ui.closeDashboard(true);
+    var row = H.settings.read('mining').deposits.Stone;
+    t.assert.strictEqual(row.buff, 'MineBuff');
+    t.assert.strictEqual(row.enabled, true);
+    t.assert.strictEqual(row.refill, '');
+});
+
+t.test('a stored partial row reads back whole', function () {
+    var H = harness.boot();
+    var s = onlyMiningEnabled('IronOre', true);
+    s.deposits.IronOre = { targetLevel: 4 };
+    s.deposits.Madeup = { x: 1 };
+    H.settings.write('mining', s);
+    var deps = H.Steward.modules.mining.readSettings().deposits;
+    var d = H.Steward.modules.mining.defaultSettings.deposits.IronOre;
+    t.assert.strictEqual(deps.IronOre.targetLevel, 4);
+    ['enabled', 'build', 'upgrade', 'pause', 'buff', 'refill'].forEach(function (k) {
+        t.assert.strictEqual(deps.IronOre[k], d[k], k);
+    });
+    t.assert.deepStrictEqual(deps.Madeup, { x: 1 });
+});
+
+t.test('every mining reader goes through the one export', function () {
+    var H = harness.boot();
+    t.assert.strictEqual(typeof H.Steward.modules.mining.readSettings, 'function');
+    t.assert.strictEqual(Object.keys(H.Steward.modules.mining.readSettings().deposits).length, 9);
+
+    H.settings.write('mining', onlyMiningEnabled('IronOre', true));
+    freshDepositZone(H);
+    H.Steward.modules.mining.readSettings = function () {
+        return { enabled: false, deposits: {} };
+    };
+    H.module('mining').plan({ zone: { isHome: true } });
+    t.assert.strictEqual(H.queued().length, 0);
+});

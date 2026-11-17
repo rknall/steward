@@ -16,9 +16,9 @@
  *
  * Every shown value is the stored setting overlaid with the dashboard
  * buffer, so a re-render keeps a pending edit visible. Per-deposit writes
- * go through updateDeposit, which preserves every schema field (build,
- * upgrade, targetLevel, pause, buff, refill) so later phase landings don't
- * have to migrate user settings.
+ * go through updateDeposit, which starts from the shown row and keeps every
+ * schema field (enabled, build, upgrade, targetLevel, pause, buff, refill),
+ * so a saved row is always whole, even for a type the store lacked.
  *
  * The tab is drawn in one host-read pass, so every option and status line of
  * a draw shows the same stock read, and an unreadable stock shows `?`.
@@ -28,20 +28,9 @@
 
     if (!S.modules.mining) S.modules.mining = {};
 
+    // The one reader lives in module.js; read it at call time.
     function readSettings() {
-        var stored = S.kernel.settings.read('mining') || {};
-        var defaults = S.modules.mining.defaultSettings || {};
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        var depMerged = {};
-        var defaultDeps = defaults.deposits || {};
-        var storedDeps  = stored.deposits  || {};
-        for (key in defaultDeps) depMerged[key] = defaultDeps[key];
-        for (key in storedDeps)  depMerged[key] = storedDeps[key];
-        merged.deposits = depMerged;
-        return merged;
+        return S.modules.mining.readSettings();
     }
 
     // What the screen shows: the stored settings with the unsaved buffer
@@ -221,14 +210,16 @@
     }
 
     function updateDeposit(h, depositName, partial) {
-        // Read from the dashboard buffer, NOT from persisted settings —
-        // multiple edits before Save must layer on top of each other or
-        // earlier pending changes get clobbered by stale persisted reads.
+        // The edit starts from the row the screen shows (buffer over stored
+        // over default): pending edits layer on each other, and a row the
+        // store lacks is saved whole instead of as the one edited field,
+        // which would leave it disabled. Only the edited row enters the
+        // buffer; the others stay as the buffer holds them.
         var s = h.settings('mining');
         var deposits = {};
         var k;
         for (k in (s.deposits || {})) deposits[k] = s.deposits[k];
-        var current = deposits[depositName] || {};
+        var current = shownSettings(h).deposits[depositName] || {};
         // Preserve every known field — copy first, then overlay partial.
         var next = {};
         var fields = ['enabled', 'build', 'upgrade', 'targetLevel',
@@ -426,7 +417,6 @@
         return $s.text(text);
     }
 
-    S.modules.mining.readSettings  = readSettings;
     S.modules.mining.side          = side;
     S.modules.mining.render        = render;
     S.modules.mining.summary       = summary;
