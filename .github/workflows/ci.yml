@@ -62,6 +62,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Built on every PR so a broken page fails here, before a release.
+      - name: Build user guide
+        run: npm run guide
+
+      - name: Upload user guide artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: userguide-${{ steps.version.outputs.version }}
+          path: build/userguide
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Lint source (AIR ruleset)
         run: npm run lint
 

@@ -20,13 +20,17 @@ dispatched paths.
 
 1. Take `git diff --name-only <base>` plus untracked files.
 2. Map them to the docs that may be stale:
-   - `src/modules/<id>/**` -> `docs/userguide/modules/<id>.html`.
-   - A new module directory -> a new fragment that follows the module-page
-     section order (see an existing fragment), plus a row in README "Modules".
+   - `src/modules/<id>/**` -> `src/modules/<id>/guide/page.html`.
+   - A new module directory -> a new `guide/page.html` with the structure in
+     `docs/MODULE_GUIDE.md` "User guide page", plus a README "Modules" row.
+   - Settings or defaults changes -> that page's `ug-set` blocks under
+     "Settings". Menu, tab or flow changes -> the steps of the affected
+     `ug-story`. A new capability or flow -> a new `ug-story` under "What you
+     can do".
+   - A change to a module's `ui.section.title` renames it in the guide
+     automatically; check the prose that names it.
    - `src/kernel/9*_ui_*.js` and `90_ui_shell.js` -> `docs/userguide/ui.html`.
    - Install or update paths -> `docs/userguide/install.html`.
-   - Settings, defaults or menu changes -> the module's Settings table and
-     "Where to find it".
    - Scenario format -> `docs/SCENARIOS.md` and the adventures page.
    - Other `docs/*.md` and README tables when the diff makes them stale.
 3. Derive every fact from the code at HEAD, or from a user-facing doc. Never
@@ -34,10 +38,13 @@ dispatched paths.
    `docs/analysis/*`); read them for facts only.
 4. For new UI add a screenshot placeholder (format in
    `docs/userguide/img/README.md`) instead of an image, and list the shots needed.
-5. Edit only `docs/**`, `README.md` and the "Where to read" part of `CLAUDE.md`.
-   Never edit `src/`, `scripts/`, `tests/` or workflows.
+   Module shots go in `src/modules/<id>/guide/img/`.
+5. Edit only `docs/**`, `README.md`, the "Where to read" part of `CLAUDE.md` and
+   `src/modules/*/guide/**`. Never any other part of `src/`, nor `scripts/`,
+   `tests/` or workflows.
 6. Never `git add`, commit or push; the orchestrator publishes.
-7. Run `node scripts/userguide.js --out <scratchpad dir>` and
+7. Run `node scripts/userguide.js --check <each edited fragment>` first, then
+   `node scripts/userguide.js --out <scratchpad dir>` and
    `node tests/runner.js tests/scripts/userguide.test.js tests/scripts/userguide-pages.test.js`.
    Fix the docs you edited until both pass. Do not run lint or the full suite.
 8. When nothing user-facing changed, say so in the output and edit nothing.

@@ -1,0 +1,52 @@
+<h1>Troubleshooting</h1>
+<p class="ug-lead">Common symptoms, what to check and what to do. The log (<a href="logs.html">Logs and data folder</a>) is the first place to look for most of them.</p>
+
+<h2>The ~Steward~ menu does not appear</h2>
+<p>The script was not loaded.</p>
+<ul>
+  <li>Check that <code>user_steward.js</code> is in the client's <code>userscripts/</code> folder (<code>&lt;TSO client folder&gt;/userscripts/</code>).</li>
+  <li>Reload scripts from the client menu, or restart the client.</li>
+  <li>Open the client's scripts manager and check that steward is not switched off. If it was switched off while steward ran, reloading does not stop it, so restart the client.</li>
+  <li>Look under the client's <code>Tools</code> menu: with a menu style other than grouped, steward sits there.</li>
+</ul>
+
+<h2>Steward does nothing</h2>
+<ul>
+  <li>Look at the first item of the menu. <code>Steward: &#10005; Paused</code> means everything is paused. Click it to resume, or use <code>Automation</code> on the dashboard's Overview.</li>
+  <li>Check that the module is on: its quick toggle in the menu shows <code>&#10003;</code>, and the dashboard tab's dot is lit.</li>
+  <li>Check the menu's status line. <code>queue held N min</code> means a dialog on screen is holding the actions; close it. If no steward window is visible, the game layer may be covering it, and restarting the client clears that.</li>
+  <li>Look in the log for a <code>heartbeat</code> line about every 15 minutes. No heartbeat for longer means the timer stopped.</li>
+  <li>A <code>tick gap</code> warning says the timer was held back, for example by a locked or disconnected session.</li>
+</ul>
+
+<h2>There is no log file</h2>
+<ul>
+  <li>Check <code>Write the log to a file</code> in the Logging card (<code>Settings&hellip;</code>, <code>General</code>).</li>
+  <li>Check the <code>Data folder</code> field of the <code>About</code> card. <code>No writable steward folder</code> means steward found no place to write.</li>
+  <li>Look for the fallback folders named in <a href="logs.html">Logs and data folder</a>.</li>
+</ul>
+
+<h2>An update was not installed</h2>
+<ul>
+  <li>Open the <code>Updates</code> menu or the Updates group on the Settings screen and run a check. Steward checks on start at most once per hour; nothing installs without a confirm unless automatic install is on.</li>
+  <li>If GitHub cannot be reached, check the connection and try again.</li>
+  <li>An update is installed only when its size, checksum and version match. A release with no published checksum cannot be installed automatically.</li>
+  <li>Test releases and releases older than 0.12.0 show up only when the matching switches in the Updates group are on. A development build is never installed automatically.</li>
+</ul>
+<p>See <a href="updater.html">Updates</a>.</p>
+
+<h2>A scenario run paused on its own</h2>
+<p>The run stops with a reason instead of guessing. Known cases:</p>
+<ul>
+  <li><strong>BuffFailed</strong>: a burst of buffs could not be sent completely. Resume sends every grid again, including the ones that already went out, so check the star menu stock first.</li>
+  <li>Quest objects of an unread quest are not clicked until the quest is read.</li>
+  <li>The final clean-up waits for quest objects it may never be able to click and then pauses after its pick-up limit.</li>
+</ul>
+<p>See <a href="adventures.html#scenario-runs">Scenario runs</a>.</p>
+
+<h2>A wave run pauses as Unreachable or AttackRefused</h2>
+<ul>
+  <li><strong>Unreachable</strong>: an attack line in a wave needs a path that opens only when a buff line of the same wave kills a blocking camp. Put the buff kill in an earlier wave.</li>
+  <li><strong>AttackRefused</strong>: a buff and then an attack on the same camp in one wave, where the buff kills it. Drop the attack line, or move the buff to an earlier wave.</li>
+</ul>
+<p>See <a href="adventures.html#wave-runs">Wave runs</a>.</p>

@@ -1,0 +1,30 @@
+<h1>Installing</h1>
+<p class="ug-lead">Installing steward means copying one file into the client's <code>userscripts/</code> folder and reloading scripts.</p>
+
+<h2>First install</h2>
+<p>The first install is manual. After it, steward can update itself (see <a href="updater.html">Updates</a>).</p>
+<div class="ug-story">
+  <p class="ug-want">You want steward running in your client.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Download <code>user_steward.js</code> from the latest release on the steward GitHub page.</li>
+      <li>Put the file in the <code>userscripts/</code> folder of your TSO client (<code>&lt;TSO client folder&gt;/userscripts/</code>).</li>
+      <li>Reload scripts from the client menu, or restart the client.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The <code>~Steward~</code> menu appears in the client's menu bar.</dd>
+  </dl>
+</div>
+
+<h2>What the client does with the file</h2>
+<p>The client loads its own scripts first and then every file in <code>userscripts/</code>. Reloading scripts loads the file again: the new copy of steward stops the old one before it starts, so you never run two at once.</p>
+<p>The client's scripts manager can switch single userscripts on and off. If steward is switched off there and scripts are reloaded, no new copy is loaded, and an already running copy stays alive until you restart the client.</p>
+
+<h2>Where the menu appears</h2>
+<p>The client's menu style decides the place. With the default grouped style <code>~Steward~</code> sits in the menu bar itself. With any other style it is nested in the client's <code>Tools</code> menu.</p>
+
+<h2>Where steward keeps its files</h2>
+<p>Steward writes its logs, dumps and adventure templates to a <code>steward/</code> folder inside the client folder. See <a href="logs.html">Logs and data folder</a>.</p>
+
+<figure class="ug-shot" data-shot="install-menu.png"><div class="ug-shot-box">Screenshot to come: the ~Steward~ menu in the client's menu bar</div><figcaption>The <code>~Steward~</code> menu after a successful install.</figcaption></figure>

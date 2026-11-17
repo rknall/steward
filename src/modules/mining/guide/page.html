@@ -1,0 +1,154 @@
+<p class="ug-lead">Builds, upgrades, pauses and buffs the mines of your deposits, and buffs the masons, on your home island.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want a mine built on every deposit that has none.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Steward dashboard (<strong>Open Dashboard…</strong> in the <strong>~Steward~</strong> menu) and select the <strong>Mining</strong> tab.</li>
+      <li>In the <strong>Mining</strong> card, turn on <strong>Build, upgrade and buff mines</strong>.</li>
+      <li>In the <strong>Mines per deposit</strong> table, check that <strong>Build</strong> is on for the deposits you want.</li>
+      <li>Click <strong>Save</strong>, and stay on your home island.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Every deposit of those types with no building on its grid gets a mine, as long as the build queue has a free slot, you have a building licence left and you can afford the mine. A grid that already holds any building, even a depleted one, is left alone. The module is off until you turn it on.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want your mines raised to a level you choose.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the <strong>Mines per deposit</strong> table, turn on <strong>Upgrade</strong> for the deposit.</li>
+      <li>Set <strong>Up to level</strong> to the level you want (any whole number from 1).</li>
+      <li>Click <strong>Save</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Mines below that level are upgraded. The game decides how high a mine can go, so a level above its real maximum just stops there.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a mine paused before its deposit runs dry.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Set <strong>Pause threshold</strong> in the <strong>Mining</strong> card: the amount a deposit may fall to.</li>
+      <li>In the <strong>Mines per deposit</strong> table, turn on <strong>Pause</strong> for the deposit.</li>
+      <li>Click <strong>Save</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A producing mine whose deposit has less than the threshold left is paused. Steward only pauses: it never resumes a mine, and with <strong>Pause</strong> off it leaves your own pauses alone.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a production buff kept on your mines and masons.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the <strong>Buff</strong> column of the <strong>Mines per deposit</strong> table, pick a buff from the list for the deposit. Masons for stone, marble and granite are in the <strong>MASONS</strong> block below it.</li>
+      <li>Click <strong>Save</strong>.</li>
+      <li>Check the line under the list: it shows the stock and how many buildings are buffed.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The buff is applied to every mine or mason of that type that is producing, has no buff and is not being upgraded, a few at a time, and each apply is checked on the building. The list offers only the buffs the game offers for that building and shows how much each gives; <strong>None</strong> switches buffing off for the type. Steward does not build masons, it only buffs them.</dd>
+  </dl>
+</div>
+
+<figure class="ug-shot" data-shot="mining-tab.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Mining tab with the Mines per deposit table.</figcaption>
+</figure>
+
+<h2 id="settings">Settings</h2>
+<p>The module switch, the delay and the threshold are on the <strong>Mining</strong> card; the per-deposit settings are the columns of the <strong>Mines per deposit</strong> table. Everything takes effect after <strong>Save</strong>.</p>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Build, upgrade and buff mines</strong> switch. When off, the module does nothing.</p>
+  <p><em>Change it when</em> you want steward to manage your mines, or to stop.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>actionDelay</code></h3>
+  <p class="ug-def">Default: 1500 ms</p>
+  <p>The <strong>Delay between actions</strong>: the pause between two actions queued in one pass.</p>
+  <p><em>Change it when</em> you want a gentler or a faster pace.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>pauseThreshold</code></h3>
+  <p class="ug-def">Default: 50 units</p>
+  <p>The <strong>Pause threshold</strong>, shared by all deposits: a mine with <strong>Pause</strong> on is paused once its deposit has less than this left.</p>
+  <p><em>Change it when</em> you want mines stopped earlier or later.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.enabled</code></h3>
+  <p class="ug-def">Default: On for all nine deposit types</p>
+  <p>Whether the module manages that deposit type at all. It is stored per deposit and has no control on the tab.</p>
+  <p><em>Change it when</em> you want a type left completely alone.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.build</code></h3>
+  <p class="ug-def">Default: On for the six mine types (stone, marble and granite have no mine)</p>
+  <p>The <strong>Build</strong> column: place a mine on deposits of the type that have none.</p>
+  <p><em>Change it when</em> you want to place mines yourself.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.upgrade</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Upgrade</strong> column: raise mines of the type up to the level below.</p>
+  <p><em>Change it when</em> you want steward to level your mines.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.targetLevel</code></h3>
+  <p class="ug-def">Default: 3</p>
+  <p>The <strong>Up to level</strong> column: the level <strong>Upgrade</strong> aims for. Any whole number from 1; the game limits the real top level.</p>
+  <p><em>Change it when</em> you want higher or lower mines.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.pause</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Pause</strong> column: pause producing mines of the type when their deposit falls under the <strong>Pause threshold</strong>. It only pauses; it never resumes.</p>
+  <p><em>Change it when</em> you want to stretch the life of a deposit.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.buff</code></h3>
+  <p class="ug-def">Default: None (off) for all nine types</p>
+  <p>The <strong>Buff</strong> column: the production buff applied to the type's mines, or to its masons for stone, marble and granite. A stored buff the game no longer offers stays in the list, marked not offered, and is never applied.</p>
+  <p><em>Change it when</em> you want buildings of that type buffed.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.refill</code></h3>
+  <p class="ug-def">Default: off (empty)</p>
+  <p>Reserved for a refill step that is not built yet. It does nothing and has no control on the tab.</p>
+  <p><em>Change it when</em> never, for now.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buffVersion</code></h3>
+  <p class="ug-def">Default: 1</p>
+  <p>An internal marker. Buff choices stored before buffing existed are cleared once at start, and this marker records that it was done. A fresh install already carries it.</p>
+  <p><em>Change it when</em> never; leave it as it is.</p>
+</div>
+
+<h2 id="notes">Notes</h2>
+<ul>
+  <li>Each pass works deposit by deposit in the order build, upgrade, pause, buff.</li>
+  <li>The Mining card shows the build queue (slots used of total) and your licences, plus <strong>Buffed now</strong> and the <strong>Buff breaker</strong>.</li>
+  <li>If buffs are applied but not seen on their building several times in a row, the breaker opens and the tab shows a "Buffing paused" notice. Only buffing stops; building, upgrading and pausing keep running. It tries again with one probe every few minutes, and reloading scripts resets it.</li>
+  <li>A building whose buff apply was not seen is held for a while, because the buff may have landed unseen.</li>
+  <li>The Geologists module finds the deposits; this module builds on them on a later pass.</li>
+</ul>

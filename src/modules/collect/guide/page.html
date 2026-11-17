@@ -1,0 +1,81 @@
+<p class="ug-lead">Clicks map pickups for you, one target at a time.</p>
+<h2>What you can do</h2>
+<div class="ug-story">
+  <p class="ug-want">You want to stop clicking collectibles on your home island.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Steward dashboard and select the Collect tab.</li>
+      <li>Under "Collect pickups", make sure "Collect on the home island" is on, then press Save.</li>
+      <li>Leave the game on your home island.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The module clicks every collectible whose name matches the pattern list, one at a time, and counts it only once the object is gone from the map. The "On this zone" card lists what is on the zone right now.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to catch an event's pickups without adding anything by hand.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Leave "Collect on the home island" on while the event runs.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Collectibles of any running event are picked up automatically; the pattern list does not need an entry for them.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to keep an adventure running without stopping to click quest objects.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the Collect tab, keep "Also on adventure maps" on.</li>
+      <li>Start the adventure as usual.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>On the adventure map it also clicks the quest objects an open quest still waits for, and it holds back while an adventure attack is in flight so it never interrupts one.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to pick up an item the module keeps missing.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the Collect tab, press Discover next to "List the collectibles on this zone". It runs at once and logs every candidate on the current map.</li>
+      <li>Find the item's name in the log (see <a href="logs.html">Logs and data folder</a>).</li>
+      <li>Add a fragment of that name to <code>namePatterns</code>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The next pass treats that item as a collectible. A click that fails is retried after one minute while other targets go first.</dd>
+  </dl>
+</div>
+<figure class="ug-shot" data-shot="collect-tab.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The steward panel with the Collect tab open.</figcaption>
+</figure>
+<h2>Settings</h2>
+<p>Every setting, what it changes and when to touch it.</p>
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>Master switch, shown as "Collect on the home island". When off the module does nothing, also during adventures.</p>
+  <p><em>Change it when</em> you want to click pickups yourself.</p>
+</div>
+<div class="ug-set">
+  <h3><code>namePatterns</code></h3>
+  <p class="ug-def">Default: <code>Collectible</code></p>
+  <p>Name fragments a building must contain to count as a collectible. Running events add their own fragment automatically.</p>
+  <p><em>Change it when</em> something is not picked up and Discover shows its name.</p>
+</div>
+<div class="ug-set">
+  <h3><code>adventureZones</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>Shown as "Also on adventure maps". Also click pickups and quest objects on adventure maps. Every other zone is left alone.</p>
+  <p><em>Change it when</em> you want to handle adventure maps by hand.</p>
+</div>
+<h2>Notes</h2>
+<ul>
+  <li>During a scenario run only objects a running quest names are clicked.</li>
+  <li>The Adventures module reads <code>enabled</code>, <code>adventureZones</code> and <code>namePatterns</code> to decide whether its Pickups step waits for this module.</li>
+  <li>With a gem pit on the home island, the Collect tab also shows its output per 12 hours. Below the zone card it lists the items in the mayor's house.</li>
+</ul>

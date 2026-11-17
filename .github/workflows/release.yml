@@ -108,18 +108,6 @@ jobs:
           STEWARD_VERSION: ${{ steps.plan.outputs.version }}
         run: npm run build
 
-      - name: Build user guide
-        if: steps.plan.outputs.go == 'true'
-        env:
-          STEWARD_VERSION: ${{ steps.plan.outputs.version }}
-        run: npm run guide
-
-      - name: Upload user guide for Pages
-        if: steps.plan.outputs.go == 'true'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: build/userguide
-
       - name: Create GitHub Release
         if: steps.plan.outputs.go == 'true'
         env:
@@ -132,6 +120,19 @@ jobs:
           --title "steward $TAG"
           --notes-file notes.md
           --target "$GITHUB_SHA"
+
+      # After the release, so a guide failure never blocks the release itself.
+      - name: Build user guide
+        if: steps.plan.outputs.go == 'true'
+        env:
+          STEWARD_VERSION: ${{ steps.plan.outputs.version }}
+        run: npm run guide
+
+      - name: Upload user guide for Pages
+        if: steps.plan.outputs.go == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/userguide
 
   pages:
     name: Deploy user guide to GitHub Pages

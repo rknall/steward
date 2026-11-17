@@ -1,0 +1,123 @@
+<p class="ug-lead">Sends your idle geologists to search for deposits, so the map keeps the number of deposits you want.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want geologists sent out whenever there are fewer deposits on your island than you want.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Steward dashboard (<strong>Open Dashboard…</strong> in the <strong>~Steward~</strong> menu) and select the <strong>Geologists</strong> tab.</li>
+      <li>In the <strong>Geologists</strong> card, turn on <strong>Send geologists</strong>.</li>
+      <li>In the <strong>DEPOSITS TO SEARCH</strong> table, switch <strong>Search</strong> on for each deposit you want, and set <strong>Max</strong>, the number to keep on the map.</li>
+      <li>Click <strong>Save</strong>, and stay on your home island.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>For each deposit you search, steward counts what is on the map plus what geologists are already searching for. If that is below <strong>Max</strong>, it sends the best idle geologist for the missing ones, one send after another with the <strong>Delay between sends</strong> pause. A number in the <strong>On map</strong> column is marked when it is below <strong>Max</strong>. The module is off until you turn it on.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a kind of geologist kept for certain deposits only.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the <strong>DEPOSITS TO SEARCH</strong> table, click the word <strong>default</strong> after the <strong>Search</strong> switch of a deposit.</li>
+      <li>In the row that opens, tick the kinds of geologist that may search this deposit. Each chip shows how many geologists you own of that kind.</li>
+      <li>Click <strong>Save</strong>. To undo, open the row again and click <strong>Back to default</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The word reads <strong>override</strong> for that deposit. Only the ticked kinds search it, and a kind ticked for any deposit is kept for the deposits that list it and stays idle otherwise. A kind covers every geologist of that kind, now and later.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to see which geologist is best for which deposit, before or while the module runs.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the <strong>Geologists</strong> tab, read the <strong>Live state</strong> table: <strong>Geologist</strong>, <strong>Status</strong>, <strong>Best deposit</strong> and <strong>Searching</strong>.</li>
+      <li>Use the chips <strong>All</strong>, <strong>Busy</strong>, <strong>Idle</strong> and <strong>With a trait</strong> to narrow it.</li>
+      <li>Click <strong>Show ranking in log</strong> for a per-deposit ranking in the log.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd><strong>Best deposit</strong> shows the deposit a trait favours, with its amount and time factors. <strong>Show ranking in log</strong> runs at once, with no Save, and ranks only the geologists the module could actually send to each deposit.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want depleted deposits cleared so the grid frees up for new searches.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the <strong>Geologists</strong> tab, turn on <strong>Remove depleted deposits</strong>.</li>
+      <li>Click <strong>Save</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Depleted deposit buildings of the deposit types you manage are removed on your home island, one at a time. A deposit that still holds ore is never touched.</dd>
+  </dl>
+</div>
+
+<figure class="ug-shot" data-shot="geologists-tab.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Geologists tab with the deposits table and the Live state table.</figcaption>
+</figure>
+
+<h2 id="settings">Settings</h2>
+<p>Switches and numbers are changed on the <strong>Geologists</strong> tab and take effect after <strong>Save</strong>.</p>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Send geologists</strong> switch. When off, no geologist is sent and nothing is removed.</p>
+  <p><em>Change it when</em> you want steward to take over searching, or to take it back yourself.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>dispatchDelay</code></h3>
+  <p class="ug-def">Default: 1500 ms</p>
+  <p>The <strong>Delay between sends</strong>: the pause between two geologists sent in one pass.</p>
+  <p><em>Change it when</em> you want a gentler or a faster pace.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>removeDepleted</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Remove depleted deposits</strong> switch. When on, steward removes depleted deposit buildings of the managed types on the home island, which frees their grid for new searches.</p>
+  <p><em>Change it when</em> depleted deposits are blocking space you want searched again.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.enabled</code></h3>
+  <p class="ug-def">Default: On for every deposit type</p>
+  <p>The <strong>Search</strong> switch of a deposit row. A deposit with Search off is never searched for.</p>
+  <p><em>Change it when</em> you do not want a deposit type on the map.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.max</code></h3>
+  <p class="ug-def">Default: Stone 8, bronze ore 6, marble 10, iron ore 19, gold ore 9, coal 6, granite 6, titanium ore 4, salpeter 4</p>
+  <p>The <strong>Max</strong> column: how many deposits of the type steward keeps on the map. Searches are sent while the count on the map plus the count being searched for is below it. The defaults are the values used by other TSO helper scripts against the live game.</p>
+  <p><em>Change it when</em> you want more or fewer of a deposit for your zone or play style.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>deposits.kinds</code></h3>
+  <p class="ug-def">Default: none, so any geologist whose kind is not reserved may search</p>
+  <p>The kinds of geologist that may search a deposit, set with the <strong>default</strong> / <strong>override</strong> word of the row. Clearing the list brings the deposit back to the default.</p>
+  <p><em>Change it when</em> a special kind of geologist should be saved for particular deposits.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>overrides</code></h3>
+  <p class="ug-def">Default: none</p>
+  <p>Pins a named geologist to a list of deposits: it is only considered for those. A geologist must pass both this and the kind rule above. It is not shown on the tab; it is edited in the settings file by hand.</p>
+  <p><em>Change it when</em> one named geologist should only ever search certain deposits.</p>
+</div>
+
+<h2 id="notes">Notes</h2>
+<ul>
+  <li>The best geologist for a deposit is chosen by search amount first and speed second.</li>
+  <li>If the list of geologists could not be read in full, steward sends nothing that pass; the tab then says the geologists could not be read.</li>
+  <li>The Overview tab has a Geologists tile with the busy count and how many deposit types are below their max.</li>
+</ul>

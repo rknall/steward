@@ -1,0 +1,181 @@
+<p class="ug-lead">Keeps your timed production queues busy: when a building's queue is empty it orders the item you chose, with a buff if you want one.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want a building to start the same item again whenever its queue runs empty.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the production manager: in the <strong>~Steward~</strong> menu choose <strong>Production</strong>, then <strong>Open production manager…</strong>. The button of the same name on the <strong>Production</strong> tab of the dashboard does the same.</li>
+      <li>In the window <strong>Steward production</strong>, stay on the <strong>Production Manager</strong> tab and pick the chip <strong>All buildings</strong>.</li>
+      <li>On the row of the building, choose an item in <strong>Item · cost</strong> and set <strong>Items</strong>, the number of runs in one order.</li>
+      <li>Turn on <strong>Enable</strong> for that row and click <strong>Save</strong>.</li>
+      <li>Turn on <strong>Auto-production</strong> in the <strong>Production</strong> submenu, or on the <strong>Production</strong> tab, and save there.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The row now appears under the chip <strong>Automatic queues</strong>. Whenever that building's queue holds nothing, steward orders the item with the <strong>Items</strong> value, and checks that the order shows up in the queue. The cost shown in the row is for one order. The module is off until you turn on <strong>Auto-production</strong>, and it only works on your home island.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a production buff on the buildings steward just put to work.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the production manager, pick a buff in the <strong>Buff</strong> column of the row. Only buffs the game offers for that building and that you have in stock are listed.</li>
+      <li>Click <strong>Save</strong>.</li>
+      <li>Keep <strong>Building buffs</strong> on in the <strong>Production</strong> submenu.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each automatic order of that row carries the buff, but only when the building has none running. A buff is never spent on a building that already has one, and a row with a buff but no item is never buffed. Mines and masons stay with the Mining module.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to switch parts of production on or off quickly.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <strong>~Steward~</strong> menu and its <strong>Production</strong> submenu.</li>
+      <li>Click <strong>Auto-production</strong>, <strong>Automatic queues</strong> or <strong>Building buffs</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A tick means on, a cross means off. A click takes effect at once, with no Save. The line under <strong>Auto-production</strong> shows the number of queues and entries, when the next one is done and whether the breaker is ok or open. Turning the module off stops only its own work; adventure runs keep ordering their own items.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to see what every production queue holds right now.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the window <strong>Steward production</strong>, open the <strong>Queues</strong> tab.</li>
+      <li>Use the chips <strong>Producing</strong> and <strong>All</strong> to narrow the list, and <strong>Refresh</strong> to read again.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each queue is a card of entries with <strong>Item</strong>, <strong>Amount</strong>, <strong>Produced</strong>, <strong>Remaining</strong>, <strong>Done at</strong> and <strong>Source</strong>, and says which automatic queue it has. The tab is read when it opens and on <strong>Refresh</strong>, and never redraws on its own.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want finished books collected for you.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the production manager, enable the Bookbinder row.</li>
+      <li>On the <strong>Settings</strong> tab of the window, check that <strong>Bookbinder auto-complete</strong> is on.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Finished books of the Bookbinder queue are collected, one per pass, while that row is enabled. The switch on the <strong>Settings</strong> tab applies at once.</dd>
+  </dl>
+</div>
+
+<figure class="ug-shot" data-shot="production-manager.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Steward production window on the Production Manager tab.</figcaption>
+</figure>
+
+<h2 id="settings">Settings</h2>
+<p>The switches and numbers of the module are on the <strong>Production</strong> tab of the dashboard and in the <strong>Production</strong> submenu. The per-building rows are in the production manager window.</p>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Auto-production</strong> switch. When off, the module orders and buffs nothing.</p>
+  <p><em>Change it when</em> you want steward to keep queues filled, or to stop.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>actionDelay</code></h3>
+  <p class="ug-def">Default: 1500 ms</p>
+  <p>The <strong>Delay between actions</strong>: the pause between two actions queued in one pass.</p>
+  <p><em>Change it when</em> you want a gentler or a faster pace.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>ordersPerPass</code></h3>
+  <p class="ug-def">Default: 2</p>
+  <p>The <strong>Orders per pass</strong>: at most this many orders per pass, from 1 to 5. Each verified send holds the module for up to 15 seconds.</p>
+  <p><em>Change it when</em> many queues are empty and you want them filled in fewer passes.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buffsPerPass</code></h3>
+  <p class="ug-def">Default: 2</p>
+  <p>The <strong>Buffs per pass</strong>: at most this many buffs per pass, from 1 to 5.</p>
+  <p><em>Change it when</em> you want buffs sent faster or slower.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>standing</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>The <strong>Automatic queues</strong> switch. Gates all automatic orders; a row that is off still never acts.</p>
+  <p><em>Change it when</em> you want to pause automatic orders but keep your rows.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buffs</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>The <strong>Building buffs</strong> switch. Gates the buff sent with the orders. Mines and masons stay with the Mining module.</p>
+  <p><em>Change it when</em> you want orders without buffs.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>bookComplete</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>The <strong>Bookbinder auto-complete</strong> switch on the <strong>Settings</strong> tab of the window: collect the finished Bookbinder queue. It only acts while the Bookbinder row is enabled.</p>
+  <p><em>Change it when</em> you want to collect books yourself.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buildings</code></h3>
+  <p class="ug-def">Default: no rows</p>
+  <p>One row per building name, edited in the production manager. A building with no row has nothing configured. The queue runs at your highest-level building of that name, which is the only one ordered into or buffed.</p>
+  <p><em>Change it when</em> you add or change what a building produces.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buildings.item</code></h3>
+  <p class="ug-def">Default: none (off)</p>
+  <p>The item in <strong>Item · cost</strong> that is ordered into an idle queue. An item the game would not let you order now is not ordered.</p>
+  <p><em>Change it when</em> you want the building to make something else.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buildings.items</code></h3>
+  <p class="ug-def">Default: 1</p>
+  <p>The <strong>Items</strong> column: how many runs go into one order. It is cut down to what the queue allows; a queue that takes one run shows a fixed 1, and books go one at a time.</p>
+  <p><em>Change it when</em> you want bigger or smaller orders.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buildings.buff</code></h3>
+  <p class="ug-def">Default: none (off)</p>
+  <p>The <strong>Buff</strong> column: the buff sent with each automatic order while the building has none running.</p>
+  <p><em>Change it when</em> you want that building buffed.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>buildings.enabled</code></h3>
+  <p class="ug-def">Default: Off for a new row</p>
+  <p>The <strong>Enable</strong> switch of the row. It gates the order, the buff and, for the Bookbinder row, the collection.</p>
+  <p><em>Change it when</em> you want a row to start or stop without losing its settings.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>settingsVersion</code></h3>
+  <p class="ug-def">Default: 2</p>
+  <p>An internal marker for the layout of the stored settings, so older stored settings are migrated once at start.</p>
+  <p><em>Change it when</em> never; leave it as it is.</p>
+</div>
+
+<h2 id="notes">Notes</h2>
+<ul>
+  <li>Only buildings with a production queue are covered. Farms and sawmills without a queue, and mines and masons, are not.</li>
+  <li>The window refuses to open over unsaved dashboard or Settings changes, and the dashboard refuses to open over unsaved changes in the window. A new zone closes the window, so an unsaved draft is dropped.</li>
+  <li>A buff that has run out of stock reads <strong>None</strong> in the list. A Save writes what the window shows, so it clears such a buff on every row, and the change note names it.</li>
+  <li>An order that does not show up in its queue holds that building for 30 minutes. Five misses in a row open the breaker and pause all automatic queues; the dashboard then shows a "Production paused" banner with a <strong>Reset</strong> link, and the module tries again by itself later. Buffs have a breaker of their own.</li>
+  <li>An adventure run keeps the resources it needs, so an automatic queue waits when a run holds them.</li>
+  <li>The Overview tab has a Production tile with a <strong>Manager</strong> link.</li>
+</ul>

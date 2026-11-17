@@ -10,7 +10,10 @@ Every module lives under `src/modules/<id>/`. By convention:
 src/modules/<id>/
 ├── module.js     # The IIFE that calls Steward.kernel.register({...})
 ├── settings.js   # Default settings schema
-└── ui.js         # Settings panel (optional)
+├── ui.js         # Settings panel (optional)
+└── guide/
+    ├── page.html # The module's user-guide page (required)
+    └── img/      # Screenshots for that page (optional)
 ```
 
 You can split into more files if the module grows; the build picks them up alphabetically per directory. Just make sure `module.js` is concatenated last so its `register` call sees the rest of the module's helpers.
@@ -319,6 +322,47 @@ See [CORE_USAGE.md](CORE_USAGE.md), Rule 6.5.
 
 - `src/modules/collect/` (v0.1) — the canonical reference module once it lands in P3.
 - autoTSO's `aBuildings.collectibles` (`autoTSO/user_auto.js:5021`) — proven game-side logic to mirror.
+
+## User guide page
+
+Every module directory needs `guide/page.html`, or `npm run guide` and CI fail. The
+file is an HTML fragment: the build adds the crumb, the sidebar and the page title,
+and the title is the module's `ui.section.title`, so the page has no `<h1>`. It is
+not bundled or linted, and the ES5 rule does not apply to it.
+
+The page has this structure:
+
+- A lead, `<p class="ug-lead">`: one sentence saying what the module is for.
+- `<h2>What you can do</h2>` with one `ug-story` per use case. Each story says
+  where to find the control (dashboard tab, Settings group, menu entry) and quotes
+  on-screen labels verbatim:
+
+  ```html
+  <div class="ug-story">
+    <p class="ug-want">You want to ...</p>
+    <dl><dt>Steps</dt><dd><ol><li>...</li></ol></dd>
+        <dt>Result</dt><dd>...</dd></dl>
+  </div>
+  ```
+
+- `<h2>Settings</h2>` with one intro sentence and one `ug-set` per settings key:
+
+  ```html
+  <div class="ug-set">
+    <h3><code>key</code></h3>
+    <p class="ug-def">Default: ...</p>
+    <p>Meaning.</p>
+    <p><em>Change it when</em> ...</p>
+  </div>
+  ```
+
+- `<h2>Notes</h2>`: optional, and the last `h2` when present.
+
+Name screenshots `<id>-<what>.png` and keep them in `guide/img/`.
+
+`node scripts/userguide.js --check src/modules/<id>/guide/page.html` checks one page
+against these rules. `node scripts/userguide.js --out <dir>` builds a preview of the
+whole guide into `<dir>`.
 
 ## Testing
 

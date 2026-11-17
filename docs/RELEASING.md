@@ -76,8 +76,9 @@ the in-game updater reads this repository's releases.
 
 ## User guide (GitHub Pages)
 
-The end-user guide is plain HTML. Its sources live in `docs/userguide/`, and
-`npm run guide` (`scripts/userguide.js`) stamps the shared layout onto each page
+The end-user guide is plain HTML. The general pages are in `docs/userguide/`, each module's page is
+`src/modules/<id>/guide/page.html`, and the module name in the sidebar is its
+registered title. `npm run guide` (`scripts/userguide.js`) stamps the shared layout onto each page
 and writes the result to `build/userguide/`. The version in each page footer is
 resolved like the bundle's (see "Version sources"): `STEWARD_VERSION`, then git
 describe, then `package.json`.

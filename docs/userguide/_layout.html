@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}} - steward user guide</title>
+<script>
+/* Applies the stored theme before the first paint so a dark choice never flashes light. */
+(function () {
+	'use strict';
+	try {
+		var t = localStorage.getItem('steward-guide-theme');
+		if (t === 'light' || t === 'dark') {
+			document.documentElement.setAttribute('data-theme', t);
+		}
+	} catch (e) { /* storage blocked: the system theme applies */ }
+}());
+</script>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body class="ug">
+<header class="ug-head">
+	<button type="button" class="ug-menu" aria-controls="ug-nav" aria-expanded="false" aria-label="Menu">&#9776;</button>
+	<span class="ug-logo" aria-hidden="true">&#9670;</span>
+	<span class="ug-name">steward</span>
+	<span class="ug-tag">user guide</span>
+	<span class="ug-tools">
+		<button type="button" class="ug-theme" aria-label="Switch to dark theme">&#9788;</button>
+		<a class="ug-gh" href="{{repo}}">GitHub</a>
+	</span>
+</header>
+<div class="ug-body">
+	<nav id="ug-nav" class="ug-nav" aria-label="User guide">
+{{nav}}
+		<p class="ug-ver">steward {{version}}</p>
+	</nav>
+	<div class="ug-scrim"></div>
+	<main class="ug-main">
+{{content}}
+		<footer class="ug-foot">steward {{version}}</footer>
+	</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

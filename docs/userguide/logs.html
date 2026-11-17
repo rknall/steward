@@ -1,0 +1,39 @@
+<h1>Logs and data folder</h1>
+<p class="ug-lead">Steward writes a log file and a few other files into its own folder. The log is the first thing to look at when something seems wrong, and the first thing to attach when you report a problem.</p>
+
+<h2>The steward folder</h2>
+<p>Steward keeps its files in a <code>steward/</code> folder inside the client folder (<code>&lt;TSO client folder&gt;/steward/</code>). The Settings screen shows the exact path: open <code>Settings&hellip;</code>, group <code>General</code>, card <code>About</code>, field <code>Data folder</code>. If steward cannot use that folder, the field reads <code>No writable steward folder</code>.</p>
+<ul>
+  <li><code>logs/console.log</code>: the current log. Older logs sit beside it as <code>console.log.1</code>, <code>console.log.2</code> and so on, the lowest number being the newest.</li>
+  <li><code>dumps/</code>: files written by the <a href="diagnostics.html">Diagnostics</a> probes.</li>
+  <li>adventure templates, written by the <a href="adventures.html">Adventures</a> module.</li>
+  <li><code>backups/</code>: settings backups the <a href="updater.html">Updates</a> module takes before an install.</li>
+</ul>
+<p>If the log folder cannot be used, steward falls back to its application storage folder and then to the documents folder, and writes a note about it at start-up.</p>
+
+<h2>The Logging settings</h2>
+<p>Open <code>Settings&hellip;</code>, group <code>General</code>, card <code>Logging</code>:</p>
+<ul>
+  <li><code>Write the log to a file</code>: switches the file on or off. The path is shown under the label.</li>
+  <li><code>Include debug lines</code>: much more detail, for bug reports. Off by default.</li>
+  <li><code>Start a new file every day</code>: also starts a new file at the first line written on a new day.</li>
+  <li><code>Start a new file at</code>: the size in MB at which the current file is closed and a new one starts. <code>0</code> turns this off.</li>
+  <li><code>Old files to keep</code>: how many older files are kept. <code>0</code> keeps none.</li>
+</ul>
+<p>Save applies these at once, with no reload. With the defaults the log files together take at most about 40 MB.</p>
+
+<h2>Reading a log line</h2>
+<p>A line looks like this:</p>
+<pre>[LOG]   [2026-04-26 14:32:01] [collect] queued 3 collectibles, 1 lootable</pre>
+<p>It holds a level (<code>LOG</code> for normal events, <code>WARN</code> for a surprise steward recovered from, <code>ERROR</code> for something that broke, <code>DEBUG</code> only with debug lines on), the time, the module or area, and the message.</p>
+<p>A few lines show that steward is healthy. At start-up one line begins <code>boot complete</code> and names the version and the number of modules. While running, a <code>heartbeat</code> line from the scheduler appears about every 15 minutes. A <code>deferring</code> line means a game dialog is holding the action queue, and a <code>resumed</code> line says it moved on again.</p>
+
+<h2>What to attach to a problem report</h2>
+<ul>
+  <li>the version (<code>Build</code> in the <code>About</code> card);</li>
+  <li><code>logs/console.log</code>, and for a bug that you can repeat, a log taken with <code>Include debug lines</code> on;</li>
+  <li>files from <code>dumps/</code> if a Diagnostics probe was involved;</li>
+  <li>what you did and what you expected.</li>
+</ul>
+
+<figure class="ug-shot" data-shot="logs-settings.png"><div class="ug-shot-box">Screenshot to come: the Logging and About cards</div><figcaption>The Logging card and the data folder on the Settings screen.</figcaption></figure>

@@ -1,0 +1,51 @@
+<p class="ug-lead">One-shot probes that write what steward sees in the game to the log or to files, for reporting problems.</p>
+<h2>What you can do</h2>
+<div class="ug-story">
+  <p class="ug-want">You want to capture the game's state to attach to a problem report.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <code>~Steward~</code> menu and choose <code>Settings…</code>.</li>
+      <li>Select the Diagnostics group.</li>
+      <li>Press Run next to a probe, for example "Dump host snapshot" or "Dump kernel state". Each button runs at once and Save is not needed.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The probe writes its lines to the log and the banner at the top of the group shows which probe ran last. See <a href="logs.html">Logs and data folder</a> for where the log is.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want a file with the buildings, mine buffs or production of the zone you are viewing.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Diagnostics group on the Settings screen.</li>
+      <li>In the "This zone" card, press Run next to "Dump buildings", "Dump mine buffs" or "Dump production".</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each of these writes a JSON file into the <code>steward/dumps</code> folder inside the data folder.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to record what your generals and army are doing over time.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the Diagnostics group, find "Sample generals" in the "Army" card.</li>
+      <li>Press Start. The button then reads "Stop" with the time left, and a second press stops the sampling.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The sampler takes a reading at a fixed interval for a fixed span; the card shows both next to the button. "Dump generals" and "Dump army" take a single snapshot instead.</dd>
+  </dl>
+</div>
+<p>The probes are grouped in four cards: Specialists, This zone, Army, and Game data and steward. They only read; the module never sends anything to the game.</p>
+<figure class="ug-shot" data-shot="diagnostics-group.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Diagnostics group of the Settings screen.</figcaption>
+</figure>
+<h2>Settings</h2>
+<p>Diagnostics has no settings. Its probes run only when you press a button.</p>
+<h2>Notes</h2>
+<ul>
+  <li>The module does nothing on its own: it never queues work for the game and runs no automation.</li>
+  <li>Dump files can be long and list game objects in detail. Check one before you share it.</li>
+</ul>

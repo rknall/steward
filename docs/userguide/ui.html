@@ -1,0 +1,42 @@
+<h1>The steward UI</h1>
+<p class="ug-lead">Steward shows itself in three places: a menu in the client's menu bar, the Steward dashboard and the Steward settings screen.</p>
+
+<h2>The ~Steward~ menu</h2>
+<p>The menu holds, from the top:</p>
+<ul>
+  <li>a pause toggle that reads <code>Steward: &#10003; Active</code> or <code>Steward: &#10005; Paused</code>; click it to pause or resume all automation at once;</li>
+  <li>a status line, for example how many modules are registered, and, when a dialog has held the action queue for a while, how many minutes it has been held;</li>
+  <li><code>Open Dashboard&hellip;</code>;</li>
+  <li>submenus that some modules add, for example <code>Events</code>, <code>Production</code>, <code>Updates</code> and <code>Adventures</code>;</li>
+  <li>one quick toggle per module that has an on/off switch, shown as <code>&#10003;</code> (on) or <code>&#10005;</code> (off) before the module's name;</li>
+  <li><code>Settings&hellip;</code>.</li>
+</ul>
+<p>The Adventures module also adds its own <code>~Adventures~</code> entry to the menu bar, right after <code>~Steward~</code>, for pausing, resuming and ending a run. See <a href="adventures.html">Adventures</a>.</p>
+
+<h2>The dashboard</h2>
+<p>Open it with <code>Open Dashboard&hellip;</code>. Its title is <code>Steward</code>. The header shows a badge (Running or Paused) and a one-line summary. Under it is a tab bar, then one panel with the selected tab.</p>
+<p>The tabs are <code>Overview</code>, then <code>Explorers</code>, <code>Geologists</code>, <code>Mining</code>, <code>Collect</code>, <code>Events</code> and <code>Production</code>. A tab is shown only when a module belongs on it. A tab carries a dot when one of its modules has an on/off switch (lit while a module is on and steward is not paused) and a mark while a module there has unsaved changes.</p>
+<p>The <code>Overview</code> tab shows:</p>
+<ul>
+  <li><code>Automation</code>, the master switch. It pauses at once: it is the pause, not a setting;</li>
+  <li><code>Queue</code>, the number of actions waiting;</li>
+  <li>the check interval and <code>Build</code>, the version you run;</li>
+  <li>one tile per module that has one. The tile switches are ordinary settings and wait for Save.</li>
+</ul>
+<p>On a module tab, the module's settings stand in a column beside its main area. In a small window that column folds into a one-line strip with a <code>Show settings</code> link (and <code>Hide settings</code> to fold it again).</p>
+
+<figure class="ug-shot" data-shot="ui-dashboard.png"><div class="ug-shot-box">Screenshot to come: the Steward dashboard with its tab bar</div><figcaption>The Steward dashboard.</figcaption></figure>
+
+<h2>Save and Close</h2>
+<p>Changes you make on the dashboard or the settings screen are kept in a buffer. Nothing applies until you press <code>Save</code>; <code>Close</code> throws the changes away. The footer says <code>No changes. Settings apply when you press Save.</code> while the buffer is untouched, and otherwise counts the changes. Only the pause switch on the Overview acts at once.</p>
+
+<h2>The settings screen</h2>
+<p>Open it with <code>Settings&hellip;</code> in the <code>~Steward~</code> menu. Its title is <code>Steward settings</code>. A navigation list on the left shows one group at a time on the right:</p>
+<ul>
+  <li><code>General</code>: the <code>Logging</code> and <code>Scheduler</code> cards and an <code>About</code> card with the build and the data folder. See <a href="logs.html">Logs and data folder</a>;</li>
+  <li>one group per module that has no dashboard tab of its own (Adventures, Diagnostics and Updates).</li>
+</ul>
+<p>In the <code>Scheduler</code> card, <code>Check for work every</code> sets how often steward looks for something to do. It accepts at least 10 seconds. A lower value is faster but busier.</p>
+<p>Modules whose buttons act at once, such as Diagnostics, are listed under <code>RUNS AT ONCE</code>; Save does nothing for them.</p>
+
+<figure class="ug-shot" data-shot="ui-settings.png"><div class="ug-shot-box">Screenshot to come: the Steward settings screen, General group</div><figcaption>The Steward settings screen.</figcaption></figure>

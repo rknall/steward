@@ -1,0 +1,30 @@
+<h1>Overview</h1>
+<p class="ug-lead">Steward is an add-on for the Adobe AIR 32 client of The Settlers Online that automates routine work for you: it picks up collectibles, sends specialists out, runs adventures and keeps production busy.</p>
+
+<h2>What steward is</h2>
+<p>Steward is one userscript file, <code>user_steward.js</code>, that the client loads next to its own scripts. It runs inside the client, so it works on the game you already have open and needs no second program. Every kind of automation is a separate module that you can switch on or off on its own.</p>
+<p>Steward does nothing until you have installed it (see <a href="install.html">Installing</a>). Once it is loaded, a <code>~Steward~</code> menu appears in the client's menu bar, and everything is controlled from there and from two windows (see <a href="ui.html">The steward UI</a>).</p>
+
+<h2>The modules</h2>
+<p>Each module has its own page with use cases, its settings and notes.</p>
+<ul>
+  <li><a href="adventures.html">Adventures</a>: runs adventure templates and scenario files as a series of maps, from home back to home, with pause and resume.</li>
+  <li><a href="collect.html">Collect Pickups</a>: clicks map pickups on the home island and the quest objects that open quests wait for on adventures.</li>
+  <li><a href="diagnostics.html">Diagnostics</a>: read-only probes on the Settings screen that write kernel, host and specialist state to the log.</li>
+  <li><a href="eventcalc.html">Event calculator</a>: read-only event calculator, an explorer event-item estimate and a refill calculator for event fields.</li>
+  <li><a href="explorers.html">Explorers</a>: sends idle explorers to the task the precedence chain picks.</li>
+  <li><a href="geologists.html">Geologists</a>: sends idle geologists to deposit-search tasks, up to the wanted number of deposits per type.</li>
+  <li><a href="mining.html">Mining</a>: builds, upgrades, pauses and buffs the mines and masons on the home island.</li>
+  <li><a href="production.html">Production</a>: keeps the timed production queues of the home island busy with automatic orders and buffs.</li>
+  <li><a href="updater.html">Updates</a>: checks GitHub Releases, installs a chosen release and steps down to an older one.</li>
+</ul>
+
+<h2>Where to start</h2>
+<ol>
+  <li>Install the script and reload scripts: <a href="install.html">Installing</a>.</li>
+  <li>Learn the menu, the dashboard and the Settings screen: <a href="ui.html">The steward UI</a>.</li>
+  <li>Pick the modules you want and read their pages.</li>
+  <li>If something does not work, see <a href="troubleshooting.html">Troubleshooting</a> and <a href="logs.html">Logs and data folder</a>.</li>
+</ol>
+
+<figure class="ug-shot" data-shot="index-dashboard.png"><div class="ug-shot-box">Screenshot to come: the Overview tab of the Steward dashboard</div><figcaption>The Overview tab of the Steward dashboard.</figcaption></figure>

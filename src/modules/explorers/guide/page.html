@@ -1,0 +1,116 @@
+<p class="ug-lead">Sends your idle explorers on a search for you and picks the search that suits each one.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want idle explorers sent out without sending each one by hand.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Steward dashboard (<strong>Open Dashboard…</strong> in the <strong>~Steward~</strong> menu) and select the <strong>Explorers</strong> tab.</li>
+      <li>In the <strong>Explorers</strong> card, turn on <strong>Send explorers</strong>.</li>
+      <li>Click <strong>Save</strong>, and stay on your home island.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each pass, every idle explorer is sent on the search steward picks for it, one send after another with the <strong>Delay between sends</strong> pause between them. The module is off until you turn it on, and it only works while you are on your home island.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to see what steward would send each explorer before you switch the module on.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the <strong>Explorers</strong> tab, read the <strong>Live state</strong> table: its columns are <strong>Explorer</strong>, <strong>Status</strong>, <strong>Current task</strong> and <strong>Next task</strong>.</li>
+      <li>Use the chips <strong>All</strong>, <strong>Busy</strong>, <strong>Idle</strong> and <strong>Overrides</strong> to narrow the list.</li>
+      <li>Under <strong>Per-explorer overrides</strong>, press <strong>Show in log</strong> for a fuller dump.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The <strong>Next task</strong> column shows the search each explorer would get, with an <strong>override</strong> tag where you fixed one. <strong>Show in log</strong> writes the same picks, the idle and busy counts and the events it found to the log, and shows a short notice in the game. Nothing is sent by looking.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want explorers to farm event items during a treasure event.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Keep <strong>Treasure during events</strong> on (it is on by default).</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>While a treasure event is in its content phase, every explorer is sent on a treasure search, also those that would otherwise prefer adventures, and the search with the best items per hour is chosen. A cooldown or a shop-only phase does not count as an event.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a different search for explorers that have no special trait.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>On the <strong>Explorers</strong> tab, open the <strong>Default task</strong> list.</li>
+      <li>Pick a search, or <strong>Auto (Prolonged baseline)</strong> to go back to the longest treasure search.</li>
+      <li>Click <strong>Save</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Explorers without a trait recommendation, and treasure explorers outside an event, use your pick. The list names the game's own searches, treasure and adventure.</dd>
+  </dl>
+</div>
+
+<figure class="ug-shot" data-shot="explorers-tab.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Explorers tab with its settings card and the Live state table.</figcaption>
+</figure>
+
+<h3 id="precedence">Which search an explorer gets</h3>
+<p>For each idle explorer steward decides in this order, and the first rule that applies wins:</p>
+<ol>
+  <li>A fixed task you gave that explorer by name (see <code>overrides</code> below).</li>
+  <li>The default the game itself holds for that explorer type.</li>
+  <li>The explorer's trait. An explorer that leans toward adventures gets the longest adventure search. One that leans toward treasure gets, during a treasure event, the search with the best items per hour, otherwise a skill search it has learned, otherwise your <strong>Default task</strong> if it is a treasure search, otherwise the longest treasure search.</li>
+  <li>An explorer without a trait gets your <strong>Default task</strong>, then the game's global default, then the longest treasure search.</li>
+</ol>
+
+<h2 id="settings">Settings</h2>
+<p>These are the settings of the module. Switches and numbers are changed on the <strong>Explorers</strong> tab and take effect after <strong>Save</strong>.</p>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The <strong>Send explorers</strong> switch. When off, the module sends nothing.</p>
+  <p><em>Change it when</em> you want steward to take over, or hand explorers back to yourself.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>dispatchDelay</code></h3>
+  <p class="ug-def">Default: 1500 ms</p>
+  <p>The <strong>Delay between sends</strong>: the pause between two explorers sent in one pass. A large roster takes a few minutes at this speed on purpose, so the server is not flooded.</p>
+  <p><em>Change it when</em> sends fail or you want a gentler pace.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>forceTreasureOnEvents</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>The <strong>Treasure during events</strong> switch. When on, a treasure event in its content phase pulls every explorer onto a treasure search. When off, the traits decide, even during events.</p>
+  <p><em>Change it when</em> you farm adventure items and do not want explorers pulled off adventures.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>defaultTask</code></h3>
+  <p class="ug-def">Default: Auto (the longest treasure search)</p>
+  <p>The <strong>Default task</strong> list: the search for explorers with no trait recommendation. You may choose a treasure or an adventure search. Searches that need a learned skill are not in the list, since steward uses them for the explorers that have the skill.</p>
+  <p><em>Change it when</em> your plain explorers should do something other than the longest treasure search.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>overrides</code></h3>
+  <p class="ug-def">Default: none</p>
+  <p>A fixed search per explorer, by the explorer's name. This is the only rule that beats everything else. The screen only counts them under <strong>Per-explorer overrides</strong> and says they are edited in settings.json; they cannot be set from the tab.</p>
+  <p><em>Change it when</em> one named explorer must always do the same search.</p>
+</div>
+
+<h2 id="notes">Notes</h2>
+<ul>
+  <li>Explorers that are busy, or were just sent and have not left idle yet, are skipped. If sends repeatedly change nothing, steward holds the explorer back and pauses sending for a while instead of retrying in a loop.</li>
+  <li>An explorer with an unreadable name or identity is left out of the list.</li>
+  <li>The Overview tab has an Explorers tile with the busy and idle counts and the current default task.</li>
+</ul>

@@ -24,7 +24,7 @@ Start here if you're new to the codebase.
 
 | Doc | What it covers |
 |---|---|
-| [`userguide/`](userguide/) | End-user HTML guide: install, the in-game UI and one page per module. `npm run guide` builds it to `build/userguide/`. |
+| [`userguide/`](userguide/) | End-user HTML guide: install and the in-game UI (general pages here); each module's page lives in `src/modules/<id>/guide/`. `npm run guide` builds it to `build/userguide/`. |
 
 ## Planning
 

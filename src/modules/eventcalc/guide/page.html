@@ -1,0 +1,80 @@
+<p class="ug-lead">A read-only calculator for the live event: what your explorers bring, how many refills the event fields still need, and which event resources you hold.</p>
+<h2>What you can do</h2>
+<div class="ug-story">
+  <p class="ug-want">You want a quick estimate of the event items your explorers will bring.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <code>~Steward~</code> menu, then the <code>Events</code> submenu.</li>
+      <li>Choose <code>Estimate event items</code>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A game alert shows the items per day, the items until the item phase ends and how many explorers were counted. Without a live event with explorer items it says so.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want the full numbers for the running event.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <code>~Steward~</code> menu, then <code>Events</code>, and choose <code>Event calculator…</code>. This opens the dashboard on the Events tab.</li>
+      <li>Read the "Explorer event items" card (only while such an event is live): explorers counted, items per day and items until they stop.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The estimate takes the best task per explorer. Traits that change the loot count are not included.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to know how many refills your event fields still need.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Events tab as above.</li>
+      <li>In the "Refill calculator" card read, for each field, Amount, Per 12 h and Refills needed. A "Buffed 12 h" column appears while a field is buffed.</li>
+      <li>Away from the home island the fields cannot be read: type the amount of each field into its Amount box instead.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Refills needed is what is still missing when the event shop closes. A total row sums every column. Amounts you typed last only until the dashboard is drawn again.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to see which event resources you hold.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Events tab and scroll to the "Event resources" card.</li>
+      <li>Switch "Only the active event" off to list every event's resources.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A table of Resource, Event and Amount.</dd>
+  </dl>
+</div>
+<figure class="ug-shot" data-shot="eventcalc-tab.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Events tab with the calculator cards.</figcaption>
+</figure>
+<h2>Settings</h2>
+<p>These values are saved with the other steward settings.</p>
+<div class="ug-set">
+  <h3><code>routeSeconds</code></h3>
+  <p class="ug-def">Default: 6</p>
+  <p>The one-way walk in seconds between an event field and the storehouse. Every produced unit costs a round trip on top of the field's production time. There is no on-screen control for it.</p>
+  <p><em>Change it when</em> your fields sit further from or closer to the storehouse than the default assumes.</p>
+</div>
+<div class="ug-set">
+  <h3><code>unitsPerItem</code></h3>
+  <p class="ug-def">Default: 1</p>
+  <p>How many deposit units one refill item adds to a field. There is no on-screen control for it.</p>
+  <p><em>Change it when</em> an event ships a refill item that adds more than one unit.</p>
+</div>
+<div class="ug-set">
+  <h3><code>heldActiveOnly</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>Shown as "Only the active event" under the "Event resources" table. On lists only the live event's resources; off lists every event's.</p>
+  <p><em>Change it when</em> you want to see resources of events that are not running.</p>
+</div>
+<h2>Notes</h2>
+<ul>
+  <li>The module is a calculator. It never runs on the schedule and sends nothing to the game, so it has no on/off switch.</li>
+  <li>The remaining time is the shop close the event reports; the card has no control for it.</li>
+</ul>

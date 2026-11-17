@@ -1,0 +1,95 @@
+<p class="ug-lead">Checks GitHub for newer steward releases and installs one on your confirmation, with a settings backup first.</p>
+<h2>What you can do</h2>
+<div class="ug-story">
+  <p class="ug-want">You want to know whether a newer steward exists.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <code>~Steward~</code> menu, then the <code>Updates</code> submenu.</li>
+      <li>The first line shows the status. Choose <code>Check for updates now</code> to look again.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A game alert tells you the result. By default steward also checks once when the client starts, at most once an hour.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to install a newer release.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open <code>~Steward~</code>, then <code>Updates</code>, and choose <code>Install v…</code> (the entry names the new version; it reads <code>Updates…</code> when none is waiting). This opens the Updates group of the Settings screen.</li>
+      <li>In the release card press the Install button and read the confirm box.</li>
+      <li>Confirm.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Steward downloads the release, verifies it, saves your settings to a backup, writes the new file and reloads the scripts. If the client cannot reload scripts, restart it.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want to go back to an older version.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Updates group of the Settings screen.</li>
+      <li>In the "Versions" card press Install next to the older release and confirm.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The settings saved when you left that version are restored. Without an exact match the newest backup from an older version is used, and with none your settings stay as they are. The "Settings backup restored" column shows which.</dd>
+  </dl>
+</div>
+<div class="ug-story">
+  <p class="ug-want">You want updates to install without asking.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the Updates group, under "Update options", switch on "Install updates automatically".</li>
+      <li>Press Save.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>A newer plain release is installed when steward is idle and the release has a checksum. A settings backup is made first.</dd>
+  </dl>
+</div>
+<figure class="ug-shot" data-shot="updater-group.png">
+  <div class="ug-shot-box">Screenshot to come</div>
+  <figcaption>The Updates group of the Settings screen.</figcaption>
+</figure>
+<h2>How an install is checked</h2>
+<p>The file comes only from the steward repository's releases on GitHub. Before it is written, steward checks that its size matches the release, that its SHA-256 checksum matches the one GitHub lists, and that it is the version the release names. A download that fails a check is rejected and nothing changes. If a release lists no checksum, it is not installed automatically and the confirm box says it is checked by size and version only.</p>
+<p>Steward then saves your settings as a backup file in <code>steward/backups</code> and keeps the old script next to the new one as <code>user_steward.js.backup</code>. All profiles share the script file, so an install changes the version for every profile.</p>
+<h2>Settings</h2>
+<p>All of these are in the Updates group of the Settings screen, under "Update options"; changes apply with Save.</p>
+<div class="ug-set">
+  <h3><code>checkOnStart</code></h3>
+  <p class="ug-def">Default: On</p>
+  <p>Shown as "Check for updates when the client starts". At most one check an hour, whatever you set.</p>
+  <p><em>Change it when</em> you do not want steward to contact GitHub on start. You can still check by hand.</p>
+</div>
+<div class="ug-set">
+  <h3><code>autoInstall</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>Shown as "Install updates automatically". Releases only; a settings backup is made first.</p>
+  <p><em>Change it when</em> you want steward to stay current without asking. Leave it off if you prefer to confirm each install.</p>
+</div>
+<div class="ug-set">
+  <h3><code>showPrereleases</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>Shown as "Show test releases". Adds alpha and beta releases to the Versions list and to update checks. A test build always sees them.</p>
+  <p><em>Change it when</em> you want to try test releases.</p>
+</div>
+<div class="ug-set">
+  <h3><code>showOldReleases</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>Shown as "Show versions before 0.12.0". Those releases have no updater: after installing one, steward cannot update itself and you must copy the file into <code>userscripts</code> by hand.</p>
+  <p><em>Change it when</em> you need to go back past the first release with an updater.</p>
+</div>
+<div class="ug-set">
+  <h3><code>keepBackups</code></h3>
+  <p class="ug-def">Default: 20</p>
+  <p>Shown as "Settings backups to keep". Older backups of this profile are deleted after each install. The value must be at least 1.</p>
+  <p><em>Change it when</em> you want a longer or shorter history to step back to.</p>
+</div>
+<h2>Notes</h2>
+<ul>
+  <li>A development build is shown as such and is never installed automatically.</li>
+  <li>A backup holds all steward settings, never the updater's own state, and only the current profile's backups are listed.</li>
+</ul>

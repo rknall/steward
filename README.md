@@ -79,7 +79,7 @@ The version comes from `git describe`; `package.json` holds the placeholder `0.0
 
 | Doc | What it covers |
 |---|---|
-| [User guide](https://rknall.github.io/steward/) (sources in `docs/userguide/`) | How to install and use steward and each module. |
+| [User guide](https://rknall.github.io/steward/) (sources in `docs/userguide/` and `src/modules/*/guide/`) | How to install and use steward and each module. |
 | [`docs/README.md`](docs/README.md) | Index of the documentation and a suggested reading order. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kernel / core / module layering, lifecycle, bundle order. |
 | [`docs/SCHEDULER.md`](docs/SCHEDULER.md) | Priority tiers, cooperative round-robin, tick model, queue contract. |

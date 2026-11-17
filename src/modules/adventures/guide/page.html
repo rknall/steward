@@ -1,0 +1,154 @@
+<p class="ug-lead">Adventures runs a whole series of adventure maps for you, from home and back, either from a scenario that steward already knows or from a run template you build.</p>
+
+<h2>What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want to run a built-in scenario, such as Storm Recovery or Twins.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Go home.</li>
+      <li>Open the <strong>~Steward~</strong> menu of the client, then <strong>Adventures</strong>, then the <strong>Scenarios</strong> folder.</li>
+      <li>Choose the scenario. A row ends in a count such as <code>&times;2</code>, the maps of that adventure in your star menu. A row with <code>&times;0</code> is greyed out, because you have no such map.</li>
+      <li>Answer the prompt <strong>How many consecutive runs</strong> with the number of runs you want, up to the maps you have.</li>
+      <li>If a map of that adventure is already open, steward also asks <strong>Start at which trip</strong>. Answer 1 to start from the beginning.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The run starts. At home it produces the items the first trip needs, starts the map and applies the items on the island while the quests ask for them. Collect Pickups finishes each trip, then the run closes the map and goes on to the next one. It needs no generals.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to build a run template for your own attack adventure and run it.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the <strong>Settings</strong> screen, then the <strong>Adventures</strong> group, and choose <strong>Run templates&hellip;</strong>. The <strong>~Steward~</strong> &rsaquo; <strong>Adventures</strong> menu has the same <strong>Run templates&hellip;</strong> entry.</li>
+      <li>In the window <strong>Steward adventures</strong>, choose <strong>New template</strong>.</li>
+      <li>Fill the <strong>Template</strong> card: a <strong>Label</strong> (the name shown in the menu), the <strong>Adventure</strong>, and the <strong>Loadout</strong> battle file (<strong>Choose&hellip;</strong>).</li>
+      <li>In <strong>Speed</strong>, switch <strong>Use a horseshoe</strong> on if you want one, and pick it in <strong>Horseshoe</strong>. In <strong>On arrival</strong>, <strong>Send all to the star on arrival</strong> is on by default.</li>
+      <li>In <strong>Waves and steps</strong>, choose <strong>Add waves&hellip;</strong> and pick the battle files in the order they run. Drag a row or use the arrows to reorder them.</li>
+      <li>Choose <strong>Save template</strong>. It stays disabled until the template has everything it needs, and the footer says what is missing.</li>
+      <li>Go home, or view the adventure island, then open <strong>~Steward~</strong> &rsaquo; <strong>Adventures</strong> and choose the template. Answer how many consecutive runs you want. From the island steward also asks <strong>Start at which wave</strong>.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The template is a file in the steward folder, so you can share it, and it survives a profile switch. The run musters the loadout generals, starts the map, sends the waves and closes the map, then retrains if you switched that on (see Settings).</dd>
+  </dl>
+  <figure class="ug-shot" data-shot="adventures-template-window.png"><div class="ug-shot-box">Screenshot to come</div><figcaption>The Steward adventures window with a template open.</figcaption></figure>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to pause, resume or end a run that is under way.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>While a run is running or paused, the <strong>~Adventures~</strong> menu appears in the client's menu bar. It is not there when no run is active.</li>
+      <li>Open it. The top rows show the run title and where it stands.</li>
+      <li>Choose <strong>Pause run</strong> while the run is running. Choose <strong>Resume run</strong> while it is paused: the run enters the step it stopped at again, so nothing is skipped.</li>
+      <li>Choose <strong>End repetition</strong> to finish the run in progress and not start another one, when you asked for more than one run.</li>
+      <li>Choose <strong>Stop run</strong> to drop the run and its request.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each command is greyed out unless it applies now. The menu also lists the steps of the run in groups, with a mark for done, current and not yet reached, and a step that does not apply to the run shows <code>not used</code>. When a check fails the run pauses and the status line says where it stands and why. The same four commands are also in the <strong>~Steward~</strong> &rsaquo; <strong>Adventures</strong> menu.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a run to do something between two waves, such as unloading generals or pausing for you.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open your template in <strong>Run templates</strong> and go to the <strong>Waves and steps</strong> card.</li>
+      <li>Choose <strong>Add step&hellip;</strong>. In the <strong>Add a step</strong> card pick <strong>Unload generals</strong>, <strong>Send generals home</strong>, <strong>Pause with a sound</strong> or <strong>Pause x min</strong>, and where it goes (<strong>At the end</strong> or <strong>After wave</strong> a number).</li>
+      <li>Save the template.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The step runs between those two waves, never inside a battle file. A step can only be changed by removing it and adding a new one.</dd>
+  </dl>
+</div>
+
+<h2>Scenario runs</h2>
+
+<p>A scenario run plays a scenario adventure without generals. Each trip to the map applies items to their grids, picks up what the quests ask for and returns home to produce the next trip's items. Steward ships these scenarios, listed in the <strong>Scenarios</strong> folder, in a sub-folder per campaign when the adventure has one:</p>
+
+<ul>
+  <li>A New Experience</li>
+  <li>Heart of the Wood</li>
+  <li>Hero Wanted</li>
+  <li>Nothing Special</li>
+  <li>Retro Style</li>
+  <li>Riches of the Mountain</li>
+  <li>Save the Towns</li>
+  <li>Storm Recovery</li>
+  <li>The Jester's Map</li>
+  <li>Twins</li>
+  <li>Where Do Easter Eggs Come From?</li>
+</ul>
+
+<p>How a scenario run behaves:</p>
+<ul>
+  <li><strong>Start from home.</strong> A scenario can only be started at home. If steward cannot read an item the scenario needs, the start is refused and nothing is stored.</li>
+  <li><strong>Production first.</strong> The run leaves home only when the items of the trip are in stock and nothing of them is still queued. It waits as long as that takes.</li>
+  <li><strong>Only what a quest asks for.</strong> On the island an item is applied and an object picked up only while a running quest asks for it, so nothing is wasted on a quest that does not take it.</li>
+  <li><strong>Waiting between maps.</strong> The run waits 180 seconds after the last map it saw closed before it starts the next one. The wait also holds across Stop, a new start and a client restart.</li>
+  <li><strong>Your own scenario files.</strong> A scenario file with the same name as a built-in one in the <code>adventures/scenarios</code> folder of the steward data folder replaces the built-in one. A file that cannot be read is listed greyed out as a broken scenario file, so you can see why it is missing.</li>
+</ul>
+
+<p>For the exact file format and every rule, see the scenario notes in the repository documentation. Problems you may meet are collected on the <a href="troubleshooting.html">Troubleshooting</a> page.</p>
+
+<h2>Wave runs</h2>
+
+<p>A wave run plays the waves of your template one after the other. Within a wave the attack and buff lines go out in file order: the first at once, and each later one after its own delay.</p>
+
+<ul>
+  <li><strong>Buff lines.</strong> A buff line aimed at a camp is applied from the star menu. It counts as done when your stock drops, not when the camp dies, so a buff that only weakens a camp does not hold the wave. A later line on a camp that a buff killed is dropped.</li>
+  <li><strong>Send all to the star.</strong> After arrival every general goes to the star empty, so each wave loads from a known state. The <strong>Send all to the star on arrival</strong> switch in the template turns this off, and the run menu then shows <code>Send all to the star</code> as <code>not used</code>.</li>
+  <li><strong>Starting in the middle.</strong> From the island you choose a start wave. Wave 1 runs the steps before it as well. A later wave starts at its own battle file and skips the steps before it, because they belong to the part of the map already played.</li>
+</ul>
+
+<p>Two things a wave run cannot do:</p>
+<ul>
+  <li>An attack line whose path opens only when a buff line of the same wave kills a blocking camp. The wave waits and the run pauses as unreachable. Put the buff kill in an earlier wave.</li>
+  <li>A buff and then an attack on the same camp, where the buff kills it. The attack is refused and the run pauses. Drop the attack line, or move the buff to an earlier wave.</li>
+</ul>
+
+<h2>Settings</h2>
+
+<p>These settings are in the <strong>Adventures</strong> group of the <strong>Settings</strong> screen. They are saved with the screen's own save button. Run templates are not settings: each one is its own file.</p>
+
+<div class="ug-set">
+  <h3><code>lastDir</code></h3>
+  <p class="ug-def">Default: empty</p>
+  <p>The folder where the battle-file picker opened last, so the next pick starts there. It has no control on the Settings screen: steward writes it when you pick battle files in the template window.</p>
+  <p><em>Change it when</em> you do not need to: it only saves you browsing to the same folder again.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>stuckMinutes</code></h3>
+  <p class="ug-def">Default: 45</p>
+  <p>The <strong>Stuck step limit</strong>, in minutes, in the card <strong>Running an adventure</strong>. A step on the island that has waited this long goes home and back, which makes the client refresh what it reports. <code>0</code> turns it off.</p>
+  <p><em>Change it when</em> a run seems to wait for something that has already happened. Values below 10 let the trip fire during the normal waits of a scenario run, which only costs travel time.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>retrain</code></h3>
+  <p class="ug-def">Default: off</p>
+  <p>The <strong>Retrain lost troops</strong> switch, in the card <strong>After each map</strong>: orders the troops lost on a map back, for every run. It is read again each time a run reaches the retrain step, so changing it takes effect in the middle of a run.</p>
+  <p><em>Change it when</em> you want every run to restore its army without your help.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>retrainSettlersOnly</code></h3>
+  <p class="ug-def">Default: off</p>
+  <p>The <strong>Only with enough settlers</strong> switch, also in <strong>After each map</strong>. While retraining is on, a run that lacks the free settlers for the orders, and cannot top them up with a population buff, skips retraining and carries on instead of pausing. It is greyed out, with the note <em>Needs Retrain lost troops</em>, while retraining is off; its stored value is kept.</p>
+  <p><em>Change it when</em> an unattended series should keep going even if it cannot retrain every map.</p>
+</div>
+
+<h2>Notes</h2>
+
+<ul>
+  <li>The run only acts while you view the right zone: home, the run's island, or either, as the current step needs. On another zone nothing is sent and nothing pauses, and the run carries on when you view the right zone again.</li>
+  <li>A run survives a script reload or a client restart. Its state is kept in its own file, so it picks up again without sending an order twice.</li>
+  <li>Scenario runs let Collect Pickups click quest objects on the island. If Collect Pickups cannot do that, the start warns that quest objects will not be clicked.</li>
+  <li>The Overview tile of Adventures shows whether a run is active and how many run templates you have, with links to <strong>Templates</strong> and <strong>Settings</strong>.</li>
+</ul>

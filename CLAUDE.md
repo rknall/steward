@@ -9,7 +9,8 @@ transpiler.
 
 - `npm ci` first in a fresh clone (`node_modules/` is not committed).
 - `npm run build` produces `build/user_steward.js`, the only bundle.
-- `npm run guide` writes the HTML user guide (sources in `docs/userguide/`) to
+- `npm run guide` writes the HTML user guide (general pages in
+  `docs/userguide/`, each module's page in `src/modules/<id>/guide/`) to
   `build/userguide/`; Pages deploys it on release.
 - `npm test` runs the zero-dependency runner over `tests/<area>/*.test.js`.
 - `npm run lint` runs ESLint with the AIR ruleset (`scripts/lint-air.js`).
@@ -29,6 +30,8 @@ transpiler.
 `.includes()`/`.startsWith()`/`.find()`, destructuring or spread. Details:
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). `scripts/` and `tests/` are
 CommonJS Node. Follow each file's existing style.
+`src/modules/<id>/guide/` holds the module's user-guide page (HTML and images). It
+is not bundled or linted, and the ES5 rule does not apply to it.
 
 Never create a second source of truth. Derive from the existing list, enum
 (`src/kernel/15_enums.js`), constant or function.
@@ -48,7 +51,7 @@ reload scripts from the client menu. Runtime output goes to
 - [docs/SCHEDULER.md](docs/SCHEDULER.md): priority tiers, tick and queue contract.
 - [docs/analysis/HOST_INTEGRATION.md](docs/analysis/HOST_INTEGRATION.md): how the AIR client loads userscripts and which globals it provides.
 - [docs/SCENARIOS.md](docs/SCENARIOS.md): scenario runs, file format, known limits.
-- [docs/userguide/](docs/userguide/): end-user guide, kept current by the so-documenter stage.
+- [docs/userguide/](docs/userguide/) (general pages) and `src/modules/<id>/guide/` (one page per module): end-user guide, kept current by the so-documenter stage.
 - [docs/TSO_API.md](docs/TSO_API.md), [docs/LOGGING.md](docs/LOGGING.md).
 
 ## Workflow
