@@ -50,21 +50,13 @@
     var RETRAIN = { Settings: 'settings', On: 'on', Off: 'off' };
     var NO_MAP  = { Pause: 'pause', Skip: 'skip' };
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function str(v) {
-        return typeof v === 'string' ? v : '';
-    }
+    function str(v) { return S.kernel.is.str(v); }
 
-    function trim(v) {
-        return str(v).replace(/^\s+|\s+$/g, '');
-    }
+    function trim(v) { return S.kernel.is.trim(str(v)); }
 
     function templates() {
         return S.modules.adventures.templates;
@@ -74,22 +66,14 @@
         return S.modules.adventures.scenarios;
     }
 
-    // Pure. Whether v is one of the values of the enum object.
-    function isValue(en, v) {
-        for (var k in en) {
-            if (Object.prototype.hasOwnProperty.call(en, k) && en[k] === v) return true;
-        }
-        return false;
-    }
-
     function isKnownKind(kind) {
-        return isValue(KIND, kind);
+        return S.kernel.enumHas(KIND, kind);
     }
 
     // Pure. A whole number of at least `min`, or `fallback` for anything that
     // is not a finite number.
     function whole(v, min, fallback) {
-        if (typeof v !== 'number' || !isFinite(v)) return fallback;
+        if (!S.kernel.is.finite(v)) return fallback;
         var n = Math.floor(v);
         return n < min ? min : n;
     }
@@ -143,8 +127,8 @@
             loop:    raw.loop === true,
             passes:  whole(raw.passes, 0, 0),
             early:   raw.early === true,
-            retrain: isValue(RETRAIN, raw.retrain) ? raw.retrain : RETRAIN.Settings,
-            noMap:   isValue(NO_MAP, raw.noMap) ? raw.noMap : NO_MAP.Pause,
+            retrain: S.kernel.enumHas(RETRAIN, raw.retrain) ? raw.retrain : RETRAIN.Settings,
+            noMap:   S.kernel.enumHas(NO_MAP, raw.noMap) ? raw.noMap : NO_MAP.Pause,
             saved:   typeof raw.saved === 'number' ? raw.saved : null
         };
     }

@@ -183,8 +183,8 @@
 
     // The maps of the entry a queue's Start begins with (queues.startIndex).
     // advs: the adventure of each entry, null where its record cannot be
-    // read, which counts as no map. null while a star menu read fails before
-    // that entry is found, 0 when none has a map.
+    // read, which counts as no map. null while the star menu or the own
+    // adventures cannot be read before that entry is found, 0 when none has a map.
     function queueMaps(rec, advs, pass) {
         var countOf = function (i) { return advs[i] ? mapsOf(advs[i], pass) : 0; };
         var r = S.modules.adventures.queues.startIndex(rec.noMap, advs.length, countOf);
@@ -204,7 +204,7 @@
             advs.push(er ? er.adventure : null);
         }
         var k = rec.entries.length;
-        return countRow(rec.label + ' (' + k + (k === 1 ? ' entry)' : ' entries)'), function (pass) {
+        return countRow(rec.label + ' (' + S.kernel.text.plural(k, 'entry', 'entries') + ')', function (pass) {
             return queueMaps(rec, advs, pass);
         }, function () {
             var run = S.modules.adventures.run;

@@ -1,7 +1,8 @@
 'use strict';
 
 // The queue editor views, driven through the jq element-tree fake with a
-// stand-in for the window's ctx (render, backToList, notify, helpers).
+// stand-in for the window's ctx (render, backToList, helpers); alerts go
+// through the host.
 
 var t = require('../runner');
 var harness = require('../harness');
@@ -18,7 +19,7 @@ function plain(v) { return JSON.parse(JSON.stringify(v)); }
 function setup() {
     var afs = airfs.make();
     var notes = [];
-    var H = harness.boot({ host: { air: afs.air } });
+    var H = harness.boot({ host: { air: afs.air, showGameAlert: function (m) { notes.push(m); } } });
     var $ = jq.install(H);
     var S = H.Steward;
     var w = {
@@ -45,7 +46,6 @@ function setup() {
             return $e.text(text);
         },
         act: function (fn) { return fn; },
-        notify: function (m) { notes.push(m); },
         syncMenu: function () { w.synced++; },
         render: function () {
             w.$body.empty();
@@ -145,7 +145,7 @@ t.test('saving a new mixed queue writes a file with kinds and options', function
     assert.strictEqual(recs[0].early, true);
     assert.strictEqual(w.mode, 'list');
     assert.strictEqual(w.synced, 1);
-    assert.deepStrictEqual(w.notes, ['Queue Mixed saved.']);
+    assert.deepStrictEqual(w.notes, ['Steward: Queue Mixed saved.']);
     assert.strictEqual(w.qv.isDirty(), false);
 });
 
@@ -297,4 +297,27 @@ t.test('editing() is true only while a draft is held', function () {
     click(w.$body, w.$, 'Edit');
     assert.strictEqual(w.qv.editing(), false);
     assert.ok(w.$body.text().indexOf('Could not open ' + id) > -1);
+});
+
+t.test('Back to list on a changed draft alerts that the queue changes were discarded', function () {
+    var w = setup();
+    function backToList() {
+        var hit = null;
+        w.$body.find('a').each(function () {
+            if (!hit && w.$(this).text() === 'Back to list') hit = w.$(this);
+        });
+        assert.ok(hit, 'Back to list link exists');
+        hit.trigger('click');
+    }
+    openEdit(w, null);
+    w.$body.find('input').eq(0).val('Changed').trigger('input');
+    backToList();
+    assert.deepStrictEqual(w.notes, ['Steward: Queue changes discarded']);
+    assert.strictEqual(w.mode, 'list');
+
+    w.notes.length = 0;
+    openEdit(w, null);
+    backToList();
+    assert.deepStrictEqual(w.notes, []);
+    assert.strictEqual(w.mode, 'list');
 });

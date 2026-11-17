@@ -100,10 +100,6 @@
         return S.modules.adventures.queues;
     }
 
-    function notify(text) {
-        if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
-    }
-
     function log(text) {
         S.kernel.log(CATEGORY, st().label() + ': ' + text);
     }
@@ -1188,9 +1184,9 @@
     // entry (the next pass when the queue loops), past the entries a Skip
     // entry here stepped over. With No map left set to skip, an entry whose
     // map is used up drops its remaining runs and following entries with no
-    // map are stepped over; a star menu that cannot be read is waited for,
-    // and a looping queue with no map for any entry pauses instead of
-    // spinning. The next entry's first run is built before anything is
+    // map are stepped over; a star menu or own adventures list that cannot
+    // be read is waited for, and a looping queue with no map for any entry
+    // pauses instead of spinning. The next entry's first run is built before anything is
     // counted: a list it needs that cannot be read now is waited for, and an
     // entry that cannot run pauses here, so Resume repeats this step, Skip
     // entry steps over it, and the finished run is counted once.
@@ -1210,7 +1206,7 @@
         if (skipMaps && !seriesEnd) {
             n = run().available(req.adventure, pass);
             if (n === null) {
-                ld().waitRead(r, 'star menu');
+                ld().waitRead(r, pass.maps === null ? 'star menu' : 'own adventures');
                 return;
             }
             if (n === 0) {
@@ -1230,7 +1226,7 @@
                 var entry = q.entries[at.index];
                 n = run().available(entry.adventure, pass);
                 if (n === null) {
-                    ld().waitRead(r, 'star menu');
+                    ld().waitRead(r, pass.maps === null ? 'star menu' : 'own adventures');
                     return;
                 }
                 if (n > 0) break;

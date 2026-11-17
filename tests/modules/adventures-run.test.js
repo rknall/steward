@@ -3435,6 +3435,24 @@ t.test('noMap skip starts at the first entry with a map and names the ones stepp
     assert.ok(/No map for any entry of "Event loop"/.test(lastNotice(none)), lastNotice(none));
 });
 
+t.test('a queue start names the read that failed: star menu or open adventures', function () {
+    var q = queueSetup();
+    var id = mixedQueue(q, { noMap: 'skip' });
+    q.own = null;
+    assert.strictEqual(q.run.startQueue(id), false);
+    assert.strictEqual(q.st.current().request, null);
+    assert.strictEqual(q.alerts[q.alerts.length - 1],
+        'Steward: Your open adventures cannot be read right now. Try again in a moment.');
+
+    var m = queueSetup();
+    var mid = mixedQueue(m, { noMap: 'skip' });
+    m.S.core.buffs.mapCounts = function () { return null; };
+    assert.strictEqual(m.run.startQueue(mid), false);
+    assert.strictEqual(m.st.current().request, null);
+    assert.strictEqual(m.alerts[m.alerts.length - 1],
+        'Steward: The star menu cannot be read right now. Try again in a moment.');
+});
+
 t.test('entryRun builds the first run of each kind and says when a read must wait', function () {
     var q = queueSetup({ open: { Bandits: 55 } });
     var copy = q.qs.toRun(q.qs.get(mixedQueue(q)));

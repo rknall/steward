@@ -413,7 +413,6 @@
             iconBtn: iconBtn,
             textEl: textEl,
             act: act,
-            notify: notify,
             syncMenu: syncMenu,
             render: render,
             backToList: function () {

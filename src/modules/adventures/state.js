@@ -731,10 +731,6 @@
         return q && q.queue ? q.queue : null;
     }
 
-    function plural(n, one, many) {
-        return n + ' ' + (n === 1 ? one : many);
-    }
-
     // The queue's place, 'Long and short 1/3' and, while it loops,
     // ', pass 2/3' (2/infinity sign without a pass limit), ending in ': '.
     function queuePart(q) {
@@ -779,8 +775,8 @@
                 return 'Stopped: ' + queuePart(q) + r.label + ', ' + finishedRuns() + ' run(s): ' + r.stopReason;
             }
             if (q) {
-                return 'Done: ' + q.label + ', ' + plural(q.entries.length, 'entry', 'entries') +
-                    (q.loop === true ? ', ' + plural(q.pass + 1, 'pass', 'passes') : '');
+                return 'Done: ' + q.label + ', ' + S.kernel.text.plural(q.entries.length, 'entry', 'entries') +
+                    (q.loop === true ? ', ' + S.kernel.text.plural(q.pass + 1, 'pass', 'passes') : '');
             }
             if (r.stopReason) return 'Stopped: ' + r.label + ', ' + finishedRuns() + ' run(s): ' + r.stopReason;
             return 'Done: ' + r.label + ', ' + finishedRuns() + ' run(s)';

@@ -578,7 +578,9 @@
             return available(copy.entries[i].adventure, pass);
         });
         if (!r) {
-            S.kernel.ui.notify('The star menu cannot be read right now. Try again in a moment.');
+            // Name the read that failed: the star menu, or else the open list.
+            S.kernel.ui.notify(pass.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
+                : UNREADABLE_OWN);
             return null;
         }
         if (r.index < 0) {

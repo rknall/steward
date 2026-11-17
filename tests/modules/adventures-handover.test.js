@@ -286,6 +286,21 @@ t.test('noMap skip waits on an unreadable star menu without counting', function 
     assert.strictEqual(busyText(q), 'star menu not readable');
 });
 
+t.test('noMap skip waits on an unreadable own adventures list without counting', function () {
+    var q = setup();
+    startQueue(q, [['template', q.long, 2], ['template', q.short, 1]], { noMap: 'skip' });
+    q.own = null;
+    var r = next(q);
+    assert.strictEqual(r.status, q.S.RunStatus.Running);
+    assert.strictEqual(r.step, q.S.RunStep.Next);
+    assert.strictEqual(req(q).finished, 0);
+    assert.strictEqual(busyText(q), 'own adventures not readable');
+    // Once the list reads again, the waiting Next counts the finished run.
+    delete q.own;
+    next(q);
+    assert.strictEqual(req(q).finished, 1);
+});
+
 t.test('noMap skip pauses an endless queue with no map anywhere', function () {
     var q = setup();
     var S = q.S;

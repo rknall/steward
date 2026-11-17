@@ -30,8 +30,9 @@
  * The window calls renderList($c, ctx), renderEdit($c, ctx, id) (null id
  * starts a new queue), isDirty(), editing() (a draft is held, so the window
  * shows the editor) and reset(). ctx carries the window's
- * helpers: btn, iconBtn, textEl, act (wraps a click handler), notify,
- * syncMenu, render (rebuild the view), backToList.
+ * helpers: btn, iconBtn, textEl, act (wraps a click handler),
+ * syncMenu, render (rebuild the view), backToList. Alerts go through
+ * S.kernel.ui.notify.
  *
  * Reload safety: no timers and no function cached from another file; every
  * handler calls S.modules.adventures.* and S.kernel.* when it runs. Every
@@ -62,10 +63,6 @@
     function T() { return S.modules.adventures.templates; }
     function Sc() { return S.modules.adventures.scenarios; }
     function H() { return S.kernel.ui.helpers; }
-
-    function plural(n, one, many) {
-        return n + ' ' + (n === 1 ? one : many);
-    }
 
     function snapshot(draft) {
         return JSON.stringify(Q().normalize(draft));
@@ -104,7 +101,7 @@
 
     // Whole number from typed text, or null when it is not one.
     function wholeOf(text, min) {
-        var t = String(text).replace(/^\s+|\s+$/g, '');
+        var t = S.kernel.is.trim(text);
         if (!/^\d+$/.test(t)) return null;
         var n = parseInt(t, 10);
         return n < min ? null : n;
@@ -122,15 +119,15 @@
             else other++;
         }
         var parts = [];
-        if (a) parts.push(plural(a, 'adventure', 'adventures'));
-        if (s) parts.push(plural(s, 'scenario', 'scenarios'));
+        if (a) parts.push(S.kernel.text.plural(a, 'adventure', 'adventures'));
+        if (s) parts.push(S.kernel.text.plural(s, 'scenario', 'scenarios'));
         if (other) parts.push(other + ' unknown');
         return rec.entries.length + (parts.length ? ' (' + parts.join(', ') + ')' : '');
     }
 
     function loopText(rec) {
         if (!rec.loop) return 'no loop';
-        return rec.passes > 0 ? plural(rec.passes, 'pass', 'passes') : 'endless';
+        return rec.passes > 0 ? S.kernel.text.plural(rec.passes, 'pass', 'passes') : 'endless';
     }
 
     function optionsText(rec) {
@@ -230,7 +227,7 @@
         var $card = h.card({
             icon:   '⚔',
             title:  'Run queues',
-            meta:   plural(good, 'queue', 'queues') + ' · start one from ~Steward~ › Adventures › Queues',
+            meta:   S.kernel.text.plural(good, 'queue', 'queues') + ' · start one from ~Steward~ › Adventures › Queues',
             $tools: folder ? ctx.btn('New queue', ctx.act(function () { newQueue(ctx); })) : null
         });
         $card.append(h.table({
@@ -317,7 +314,7 @@
             return;
         }
         reset();
-        ctx.notify('Queue ' + label + ' saved.' + (wasRunning
+        S.kernel.ui.notify('Queue ' + label + ' saved.' + (wasRunning
             ? ' The running queue is not changed: your edits apply at its next start (it is on ' + where + ' now).'
             : ''));
         ctx.syncMenu();
@@ -482,7 +479,7 @@
     function enumOptions(en, labels) {
         var out = [];
         for (var key in en) {
-            if (Object.prototype.hasOwnProperty.call(en, key)) {
+            if (S.kernel.is.has(en, key)) {
                 out.push({ label: labels[en[key]] || en[key], value: en[key] });
             }
         }
@@ -547,7 +544,7 @@
         $mid = $('<span>');
         $f.append($save).append(' ').append($mid).append(' ')
             .append(H().link('Back to list', ctx.act(function () {
-                if (isDirty()) ctx.notify('Queue changes discarded');
+                if (isDirty()) S.kernel.ui.notify('Queue changes discarded');
                 reset();
                 ctx.backToList();
             })));
@@ -570,7 +567,7 @@
         var draft = view.draft;
         var $crumb = $('<div>', { 'class': 'steward-crumb' });
         $crumb.append(h.link('Run queues', ctx.act(function () {
-            if (isDirty()) ctx.notify('Queue changes discarded');
+            if (isDirty()) S.kernel.ui.notify('Queue changes discarded');
             reset();
             ctx.backToList();
         })));
