@@ -68,8 +68,38 @@ link and whether lint and tests passed. Only that job gets
 comment and keeps only the artifact on the run page. A new push cancels the
 PR's running check; runs on `main` always finish.
 
+The same run also builds the user guide and uploads it as the artifact
+`userguide-<version>` (see "User guide (GitHub Pages)").
+
 Per-PR prereleases were rejected: they need `contents: write` on PR code, and
 the in-game updater reads this repository's releases.
+
+## User guide (GitHub Pages)
+
+The end-user guide is plain HTML. Its sources live in `docs/userguide/`, and
+`npm run guide` (`scripts/userguide.js`) stamps the shared layout onto each page
+and writes the result to `build/userguide/`. The version in each page footer is
+resolved like the bundle's (see "Version sources"): `STEWARD_VERSION`, then git
+describe, then `package.json`.
+
+- On every PR, CI builds the guide and uploads it as the artifact
+  `userguide-<version>`, so a broken page fails the PR and the result can be
+  previewed.
+- On a release, the Release workflow builds the guide with the release version,
+  right after the bundle, and uploads it as the Pages artifact. A second job,
+  `pages`, then deploys it with `actions/deploy-pages`. It runs only when the
+  release does, and it needs `pages: write` and `id-token: write`.
+- The guide is published at https://rknall.github.io/steward/.
+
+One-time repository settings, done by the repository owner:
+
+1. Settings -> Pages -> Source: GitHub Actions.
+2. Settings -> Environments -> `github-pages` -> deployment branches and tags:
+   add a tag rule `v*`. Without it, a release started by pushing a tag is
+   refused by the environment, and only the main and manual paths deploy.
+
+Until step 1 is done, the `pages` job fails while the release itself still
+succeeds.
 
 ## What the in-game updater depends on
 

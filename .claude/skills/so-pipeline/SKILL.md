@@ -1,6 +1,6 @@
 ---
 name: so-pipeline
-description: Orchestrates every change to steward source, build or docs through the so-* subagent pipeline (Investigation, Plan, Plan Review, Implement, Refactor, Review, Present). Use for any bugfix, feature, build or refactor task. Not for read-only questions or git housekeeping.
+description: Orchestrates every change to steward source, build or docs through the so-* subagent pipeline (Investigation, Plan, Plan Review, Implement, Refactor, Review, Present, Document). Use for any bugfix, feature, build or refactor task. Not for read-only questions or git housekeeping.
 ---
 
 # so-pipeline orchestrator
@@ -32,7 +32,7 @@ Read `.claude/pipeline/RULES.md` once at the start; agents read it themselves.
 - After its result: `<stage> r<n> [<slice>] <model>: <STATUS> <path> -> <next>`
 - Rulings: `Ruling: <decision> - <why> - <cost if wrong>`
 
-`<stage>` is one of `investigation plan plan-review implement refactor review present`.
+`<stage>` is one of `investigation plan plan-review implement refactor review present document`.
 `<slice>` is a slice id (`s1`), `build`, or a sub-investigation area. `<next>` is the
 document's `## Next` lines joined with `; `.
 
@@ -54,6 +54,7 @@ one-line status, then read only the `## Next` section of the reported path.
 | refactor | so-refactorer | sonnet; opus if more than 6 slices or more than 15 files | plan, base |
 | review | so-reviewer | opus | plan, implement and refactor docs, ledger, base, PR number |
 | present | so-presenter | sonnet | plan, review, ledger, base |
+| document | so-documenter | sonnet | plan, PRESENT.md, ledger, base |
 
 ## Routing on `## Next`
 
@@ -69,12 +70,12 @@ one-line status, then read only the `## Next` section of the reported path.
   and start the next wave only after its approval ruling.
 - `review-set <path>` -> run Review sets. Plan-review may report it before its waves
   line: run it before wave 1; disapprove -> `replan` with the verdicts file. Present may
-  report it before `done`: run it, then Finish (comments go into the report).
+  report it before `done`: run it, then document (comments go into the report).
 - `refactor` -> refactor. `review` -> review.
 - `replan` -> plan (round+1) with the findings documents as input.
 - `reimplement: s2,s4` -> those slices only, with the review doc, then build, Publish,
   refactor, review.
-- `present` -> present. After present: Finish.
+- `present` -> present. After present: document. After document: Finish.
 
 ## Publish (Draft PR)
 

@@ -8,6 +8,9 @@ name: Release
 #   push of a v* tag   -> release that tag
 # Tags created here by GITHUB_TOKEN do not trigger workflows, so a main-path
 # release never starts a second tag-path run. Nothing here commits or pushes.
+# On a release the user guide is built with the same version and deployed to
+# GitHub Pages by a second job; it lives here because a separate workflow
+# triggered by the release event would never fire for a GITHUB_TOKEN release.
 
 on:
   push:
@@ -27,6 +30,8 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
 
     steps:
       - name: Checkout code
@@ -103,6 +108,18 @@ jobs:
           STEWARD_VERSION: ${{ steps.plan.outputs.version }}
         run: npm run build
 
+      - name: Build user guide
+        if: steps.plan.outputs.go == 'true'
+        env:
+          STEWARD_VERSION: ${{ steps.plan.outputs.version }}
+        run: npm run guide
+
+      - name: Upload user guide for Pages
+        if: steps.plan.outputs.go == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/userguide
+
       - name: Create GitHub Release
         if: steps.plan.outputs.go == 'true'
         env:
@@ -115,3 +132,20 @@ jobs:
           --title "steward $TAG"
           --notes-file notes.md
           --target "$GITHUB_SHA"
+
+  pages:
+    name: Deploy user guide to GitHub Pages
+    needs: release
+    if: needs.release.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

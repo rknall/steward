@@ -8,8 +8,9 @@ transpiler.
 ## Commands
 
 - `npm ci` first in a fresh clone (`node_modules/` is not committed).
-- `npm run build` produces `build/user_steward.js`, the only artefact, in the
-  only build directory.
+- `npm run build` produces `build/user_steward.js`, the only bundle.
+- `npm run guide` writes the HTML user guide (sources in `docs/userguide/`) to
+  `build/userguide/`; Pages deploys it on release.
 - `npm test` runs the zero-dependency runner over `tests/<area>/*.test.js`.
 - `npm run lint` runs ESLint with the AIR ruleset (`scripts/lint-air.js`).
   `npm run lint:fix` fixes what it can.
@@ -47,6 +48,7 @@ reload scripts from the client menu. Runtime output goes to
 - [docs/SCHEDULER.md](docs/SCHEDULER.md): priority tiers, tick and queue contract.
 - [docs/analysis/HOST_INTEGRATION.md](docs/analysis/HOST_INTEGRATION.md): how the AIR client loads userscripts and which globals it provides.
 - [docs/SCENARIOS.md](docs/SCENARIOS.md): scenario runs, file format, known limits.
+- [docs/userguide/](docs/userguide/): end-user guide, kept current by the so-documenter stage.
 - [docs/TSO_API.md](docs/TSO_API.md), [docs/LOGGING.md](docs/LOGGING.md).
 
 ## Workflow

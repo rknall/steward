@@ -34,6 +34,7 @@ Steward stands on the work of others, and a big thank you goes to them:
 | explorers | Sends idle explorers to the task chosen by the precedence chain in `docs/CORE_USAGE.md`. |
 | geologists | Sends idle geologists to deposit-search tasks, up to the wanted number of deposits per type. |
 | mining | Builds, upgrades, pauses and buffs the mines and masons on the home island. |
+| production | Keeps the timed production queues of the home island busy with automatic orders and buffs, managed in its own Steward production window. |
 | updater | Checks GitHub Releases, installs a chosen release and steps down to an older one. |
 
 ## Install
@@ -43,6 +44,8 @@ The first install is manual.
 1. Download `user_steward.js` from the [latest release](https://github.com/rknall/steward/releases/latest).
 2. Put it in the TSO client's `userscripts/` folder.
 3. Reload scripts from the client menu or restart the client. The `~Steward~` menu appears in game.
+
+See the [user guide](https://rknall.github.io/steward/) for a walk-through of the UI and every module.
 
 ## Updates
 
@@ -76,6 +79,7 @@ The version comes from `git describe`; `package.json` holds the placeholder `0.0
 
 | Doc | What it covers |
 |---|---|
+| [User guide](https://rknall.github.io/steward/) (sources in `docs/userguide/`) | How to install and use steward and each module. |
 | [`docs/README.md`](docs/README.md) | Index of the documentation and a suggested reading order. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kernel / core / module layering, lifecycle, bundle order. |
 | [`docs/SCHEDULER.md`](docs/SCHEDULER.md) | Priority tiers, cooperative round-robin, tick model, queue contract. |

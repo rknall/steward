@@ -20,6 +20,12 @@ Start here if you're new to the codebase.
 | [`LOGGING.md`](LOGGING.md) | `Steward.kernel.log` contract, file rotation, configuration. |
 | [`RELEASING.md`](RELEASING.md) | Version sources, the `Bump:` commit trailer, CI and manual releases. |
 
+## User guide
+
+| Doc | What it covers |
+|---|---|
+| [`userguide/`](userguide/) | End-user HTML guide: install, the in-game UI and one page per module. `npm run guide` builds it to `build/userguide/`. |
+
 ## Planning
 
 | Doc | What it covers |
