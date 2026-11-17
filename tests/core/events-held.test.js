@@ -115,6 +115,23 @@ t.test('heldResources data path falls back to the data table', function () {
     t.assert.strictEqual(hw.amount, null);
 });
 
+t.test('a partial resource list keeps the event currency row with a null amount', function () {
+    var H = boot([
+        { name_string: 'StripedEggs', amount: 12 },
+        { amount: 3 }
+    ]);
+    var r = H.Steward.core.events.heldResources();
+    t.assert.strictEqual(r.source, 'host');
+    t.assert.strictEqual(r.partial, true);
+    var egg = r.rows.filter(function (x) { return x.resource === 'StripedEggs'; });
+    t.assert.strictEqual(egg.length, 1);
+    t.assert.strictEqual(egg[0].amount, 12);
+    var hw = r.rows.filter(function (x) { return x.resource === 'HalloweenResource'; });
+    t.assert.strictEqual(hw.length, 1);
+    t.assert.strictEqual(hw[0].amount, null);
+    t.assert.strictEqual(hw[0].code, 'HW');
+});
+
 t.test('heldResources never throws', function () {
     var H = boot([{ name_string: 'HalloweenResource', amount: 1 }]);
     H.host.game.def = function () { throw new Error('boom'); };

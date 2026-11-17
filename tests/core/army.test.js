@@ -1035,3 +1035,70 @@ t.test('raise refuses unreadable, not army unreadable, when GetArmy vanishes in 
     assert.strictEqual(r.sends, 0);
     assert.strictEqual(s.sent.messages.length, 0);
 });
+
+// ---- unreadable status, capacity and travelling ------------------------------------
+
+t.test('inventory is not ok when a general\'s status is Unknown', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 2 }, throwOn: 'GetTask' });
+    var s = setup({ free: { Rifle: 1 }, fighters: [g] });
+    assert.strictEqual(s.S.core.specialists.status(g), s.S.SpecialistStatus.Unknown);
+    var inv = s.army.inventory();
+    assert.ok(inv.byKey.g1, 'still listed');
+    assert.strictEqual(inv.byKey.g1.idle, false);
+    assert.strictEqual(inv.byKey.g1.donorOk, false);
+    assert.strictEqual(inv.listOk, false);
+    assert.strictEqual(inv.ok, false);
+});
+
+t.test('inventory is not ok when a general\'s capacity or travelling flag throws', function () {
+    var g = AC.general({ uid: 'g1', army: { Rifle: 2 } });
+    g.GetMaxMilitaryUnits = function () { throw new Error('max'); };
+    var s = setup({ free: { Rifle: 1 }, fighters: [g] });
+    var inv = s.army.inventory();
+    assert.strictEqual(inv.byKey.g1.capacity, 0);
+    assert.strictEqual(inv.listOk, false);
+
+    var g2 = AC.general({ uid: 'g2', army: { Rifle: 2 }, throwOn: 'isTravellingAway' });
+    var s2 = setup({ free: { Rifle: 1 }, fighters: [g2] });
+    var inv2 = s2.army.inventory();
+    assert.strictEqual(inv2.byKey.g2.travelling, false);
+    assert.strictEqual(inv2.byKey.g2.donorOk, false);
+    assert.strictEqual(inv2.listOk, false);
+    assert.strictEqual(s2.army.isTravelling(g2), false);
+});
+
+t.test('inventory stays ok for a general whose type lacks every capacity getter', function () {
+    var s = setup({ free: { Rifle: 1 }, fighters: [A.fighter({ uid: 'g1', army: { Rifle: 2 } })] });
+    var inv = s.army.inventory();
+    assert.strictEqual(inv.byKey.g1.capacity, 0);
+    assert.strictEqual(inv.listOk, true);
+    assert.strictEqual(inv.ok, true);
+});
+
+t.test('raise refuses with specialist unreadable on Unknown status', function () {
+    var g = AC.general({ uid: 'g1', army: {}, throwOn: 'GetTask' });
+    var s = actionSetup({ free: { Rifle: 10 }, generals: [g] });
+    var r = runDef(s, s.army.raise('g1', { Rifle: 5 }));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(s.sent.messages.length, 0);
+});
+
+t.test('raise refuses on unreadable capacity', function () {
+    var g = AC.general({ uid: 'g1', army: {} });
+    g.GetMaxMilitaryUnits = function () { throw new Error('max'); };
+    var s = actionSetup({ free: { Rifle: 10 }, generals: [g] });
+    var r = runDef(s, s.army.raise('g1', { Rifle: 5 }));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(s.sent.messages.length, 0);
+});
+
+t.test('raise refuses with specialist unreadable when the travelling flag throws', function () {
+    var g = AC.general({ uid: 'g1', army: {}, throwOn: 'isTravellingAway' });
+    var s = actionSetup({ free: { Rifle: 10 }, generals: [g] });
+    var r = runDef(s, s.army.raise('g1', { Rifle: 5 }));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, s.S.core.specialists.UNREADABLE);
+    assert.strictEqual(s.sent.messages.length, 0);
+});

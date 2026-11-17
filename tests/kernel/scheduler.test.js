@@ -379,3 +379,67 @@ t.test('a wake does not set the tick stamp', function () {
     o.timers.fire(wakeId);
     t.assert.strictEqual(K.scheduler.state.lastTickAt, stamp);
 });
+
+// ---- read pass and zone state ---------------------------------------------------
+
+t.test('plan runs inside a read pass', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var K = H.Steward.kernel;
+    var seen = null;
+    K.register({
+        id: 'p', priority: H.Steward.Priority.Normal,
+        isReady: function () { return true; },
+        plan: function () { seen = K.hostRead.inPass(); }
+    });
+    K.scheduler.state.running = true;
+    K.scheduler.tick();
+    t.assert.strictEqual(seen, true);
+    t.assert.strictEqual(K.hostRead.inPass(), false);
+});
+
+t.test('a wake\'s plan runs inside a read pass', function () {
+    var o = wakeSetup();
+    var seen = null;
+    o.onPlanA = function () { seen = o.K.hostRead.inPass(); };
+    t.assert.strictEqual(o.K.scheduler.wake('a', 1000), true);
+    o.timers.fire(o.wakeIds()[0]);
+    t.assert.strictEqual(seen, true);
+    t.assert.strictEqual(o.K.hostRead.inPass(), false);
+});
+
+t.test('isReady still runs outside the pass', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var K = H.Steward.kernel;
+    var seen = null;
+    K.register({
+        id: 'r', priority: H.Steward.Priority.Normal,
+        isReady: function () { seen = K.hostRead.inPass(); return true; },
+        plan: function () {}
+    });
+    K.scheduler.state.running = true;
+    K.scheduler.tick();
+    t.assert.strictEqual(seen, false);
+});
+
+t.test('ctx.zone.state is notReady and isHome false while the zone loads', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var K = H.Steward.kernel;
+    var gi = H.host.game.gi;
+    gi.mCurrentPlayerZone = null;            // the client is loading a zone
+    gi.mCurrentViewedZoneID = 5;
+    gi.isOnHomzone = function () { return true; };
+    var zones = [];
+    K.register({
+        id: 'z', priority: H.Steward.Priority.Normal,
+        isReady: function () { return true; },
+        plan: function (ctx) {
+            zones.push({ state: ctx.zone.state, id: ctx.zone.id, isHome: ctx.zone.isHome });
+        }
+    });
+    K.scheduler.state.running = true;
+    K.scheduler.tick();
+    t.assert.deepStrictEqual(zones[0], { state: 'notReady', id: null, isHome: false });
+    gi.mCurrentPlayerZone = {};              // loaded
+    K.scheduler.tick();
+    t.assert.deepStrictEqual(zones[1], { state: 'ok', id: 5, isHome: true });
+});

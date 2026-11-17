@@ -180,7 +180,7 @@
     }
 
     function level(b) {
-        return b ? safe(function () { return S.core.buildings.level(b); }, null) : null;
+        return b ? safe(function () { return S.core.buildings.levelOf(b); }, null) : null;
     }
 
     function isManaged(cfg) {

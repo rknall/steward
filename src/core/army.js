@@ -314,13 +314,21 @@
         return null;
     }
 
-    function isTravelling(spec) {
+    // true/false, or null when the read threw (a member that vanished
+    // mid-read included), so a caller can tell "home" from "could not look".
+    // A type without the getter is not travelling, as before.
+    function travellingRead(spec) {
         try {
             if (spec && typeof spec.isTravellingAway === 'function') return !!spec.isTravellingAway();
         } catch (e) {
             if (!S.core.specialists.memberGone(spec, 'isTravellingAway')) S.kernel.warn('army', 'isTravelling() threw:', e);
+            return null;
         }
         return false;
+    }
+
+    function isTravelling(spec) {
+        return travellingRead(spec) === true;
     }
 
     // The client's own unload conditions: an own general that is idle, home
@@ -352,6 +360,9 @@
     // empty) source.
     // listOk is false when a read in this pass lost an entry or the list could
     // not be read, so a general absent from byKey is unknown rather than gone.
+    // It is false too when a listed general's status, capacity or travelling
+    // flag could not be read: the entry stays, but not idle and not a donor,
+    // and the pass is not a basis to act on.
     // listRead still tells an unreadable list from a lossy one, for the wording
     // of the wait.
     function inventory() {
@@ -374,19 +385,26 @@
             var armyOk = readArmy !== null;
             if (!armyOk) allArmies = false;
             var grid = garrisonGrid(spec);
-            var idle = S.core.specialists.status(spec) === S.SpecialistStatus.Idle;
-            var travelling = isTravelling(spec);
+            var st = S.core.specialists.status(spec);
+            var idle = st === S.SpecialistStatus.Idle;
+            if (st === S.SpecialistStatus.Unknown) listOk = false;
+            var cap = S.core.specialists.troopCapacityOf(spec);
+            if (cap === null) listOk = false;
+            var tr = travellingRead(spec);
+            if (tr === null) listOk = false;
+            var travelling = tr === true;
             byKey[key] = {
                 key:        key,
                 name:       S.core.specialists.name(spec),
                 cls:        S.core.specialists.classify(spec),
                 army:       army,
                 armyOk:     armyOk,
-                capacity:  S.core.specialists.troopCapacity(spec),
+                capacity:   cap || 0,
                 idle:       idle,
                 grid:       grid,
                 travelling: travelling,
-                donorOk:    canUnload(spec, { own: true, army: army, grid: grid, idle: idle, travelling: travelling })
+                donorOk:    tr !== null &&
+                    canUnload(spec, { own: true, army: army, grid: grid, idle: idle, travelling: travelling })
             };
             assigned = add(assigned, army);
         }
@@ -652,14 +670,22 @@
                 var spec = f.spec;
                 var why = ownReason(spec);
                 if (why) return why;
-                if (S.core.specialists.status(spec) !== S.SpecialistStatus.Idle) return 'not idle';
+                // A status, travelling flag or capacity that could not be
+                // read is the passing specialist fault, so the run retries
+                // instead of treating the general as busy or unlimited.
+                var st = S.core.specialists.status(spec);
+                if (st === S.SpecialistStatus.Unknown) return S.core.specialists.UNREADABLE;
+                if (st !== S.SpecialistStatus.Idle) return 'not idle';
                 var garrison = hasGarrison(spec);
                 if (garrison === null) return S.core.specialists.UNREADABLE;
                 if (!garrison) return 'no garrison';
-                if (isTravelling(spec)) return 'travelling';
+                var tr = travellingRead(spec);
+                if (tr === null) return S.core.specialists.UNREADABLE;
+                if (tr) return 'travelling';
                 var cls = classOf(want);
                 if (cls === S.TroopClass.Mixed || cls === S.TroopClass.Unknown) return 'troop class ' + cls;
-                var cap = S.core.specialists.troopCapacity(spec);
+                var cap = S.core.specialists.troopCapacityOf(spec);
+                if (cap === null) return S.core.specialists.UNREADABLE;
                 if (cap > 0 && total(want) > cap) return 'over capacity (' + total(want) + ' > ' + cap + ')';
                 var have = readGeneralArmy(spec);
                 // An unreadable army is the same passing fault as an unreadable

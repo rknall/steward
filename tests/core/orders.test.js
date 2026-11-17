@@ -336,6 +336,15 @@ t.test('star is not satisfied when the army read throws', function () {
     assert.strictEqual(r.sends, 0);
 });
 
+t.test('a move precheck on an Unknown specialist refuses with specialist unreadable', function () {
+    var g = AC.general({ uid: 'g1', throwOn: 'GetTask' });
+    var s = setup({ generals: [g] });
+    var r = run(s, s.orders.move('g1', 42));
+    assert.strictEqual(r.status, s.S.ActionResult.Refused);
+    assert.strictEqual(r.reason, 'specialist unreadable');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
 t.test('star refuses a busy, missing or unreadable general', function () {
     var busy = AC.general({ uid: 'busy', inUse: true });
     var s = setup({ generals: [busy] });

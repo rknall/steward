@@ -182,7 +182,9 @@
         var act = active();
         for (var a = 0; a < act.length; a++) liveCodes[act[a].code] = true;
         var rows = [];
-        var held = S.core.resources.list();
+        var read = S.core.resources.listRead();
+        var held = S.kernel.read.has(read) ? read.value : null;
+        var partial = !!held && read.state !== 'ok';
         var source = 'host';
         var i;
         if (held) {
@@ -197,6 +199,24 @@
                     code:      code,
                     live:      !!(code && liveCodes[code])
                 });
+            }
+            // A partial list may have lost the unnamed entries, so an event
+            // currency missing from it is shown with an unknown amount rather
+            // than dropped as if the player held none.
+            if (partial) {
+                var present = {};
+                for (i = 0; i < rows.length; i++) present[rows[i].resource] = true;
+                for (i = 0; i < codes.length; i++) {
+                    var lost = eventResource(codes[i]);
+                    if (!lost || present[lost]) continue;
+                    rows.push({
+                        resource:  lost,
+                        amount:    null,
+                        eventName: null,
+                        code:      codes[i],
+                        live:      !!liveCodes[codes[i]]
+                    });
+                }
             }
         } else {
             source = 'data';
@@ -221,7 +241,9 @@
             if (d) return d;
             return x.resource < y.resource ? -1 : (x.resource > y.resource ? 1 : 0);
         });
-        return { source: source, rows: rows };
+        var result = { source: source, rows: rows };
+        if (partial) result.partial = true;
+        return result;
     }
 
     // True when the event is live but only its `_Shop` variant is in

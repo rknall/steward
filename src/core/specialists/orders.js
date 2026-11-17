@@ -206,7 +206,11 @@
         if (!f.spec) return f;
         var why = S.core.army.ownReason(f.spec);
         if (why) return { spec: null, reason: why };
-        if (S.core.specialists.status(f.spec) !== S.SpecialistStatus.Idle) return { spec: null, reason: 'not idle' };
+        var st = S.core.specialists.status(f.spec);
+        // Unknown means the task could not be read, which is a passing bridge
+        // fault and not proof that the general is busy, so the caller retries.
+        if (st === S.SpecialistStatus.Unknown) return { spec: null, reason: S.core.specialists.UNREADABLE };
+        if (st !== S.SpecialistStatus.Idle) return { spec: null, reason: 'not idle' };
         return f;
     }
 

@@ -157,7 +157,7 @@ t.test('stock and isRunning return null on an unreadable host', function () {
     gi.mCurrentPlayer.getAvailableBuffs_vector = function () { throw new Error('boom'); };
     assert.strictEqual(s.buffs.stock('GeneralSpeedBuff_A', ''), null);
     assert.strictEqual(s.buffs.entry('GeneralSpeedBuff_A', ''), null);
-    assert.deepStrictEqual(plain(s.buffs.inventory()), []);
+    assert.strictEqual(s.buffs.inventory(), null);
     delete gi.mCurrentPlayer;
     assert.strictEqual(s.buffs.stock('GeneralSpeedBuff_A', ''), null);
 });
@@ -179,6 +179,12 @@ function acting(o) {
     gi.mZoneBuffManager = { isBuffRunning: function () { return env.running; } };
     s.S.core.zone.isHome = function () { return env.home; };
     s.S.core.zone.isAdventure = function () { return env.adventure; };
+    // env.view replaces the whole zone view (a not-ok Result); otherwise the
+    // view is ok and follows env.home.
+    s.S.core.zone.view = function () {
+        if (env.view) return env.view;
+        return s.S.kernel.read.ok({ id: 1, home: env.home, adventure: env.adventure }, 1);
+    };
     s.S.core.resources.freePopulation = function () { return env.free; };
     s.S.core.adventures.own = function () { return env.own; };
     s.S.core.buildings.byGrid = function (g) { return env.buildings[g] || null; };
@@ -1434,4 +1440,54 @@ t.test('adventureBurst describe lists the buffs per grid, ? where unreadable', f
     assert.strictEqual(def.describe({ stock: 20 }), 'stock 20 -> 0; buffs 7:2,8:?');
     s.S.core.buildings.byGrid = function () { throw new Error('boom'); };
     assert.strictEqual(def.describe({ stock: 20 }), 'stock 20 -> 0; buffs 7:?,8:?');
+});
+
+// ---- unreadable star menu and zone ------------------------------------------------
+
+t.test('inventory is null when the star menu is unreadable', function () {
+    var s = setup({ buffs: INV });
+    assert.strictEqual(s.buffs.inventory().length, 3);
+    breakStock(s);
+    assert.strictEqual(s.buffs.inventory(), null);
+});
+
+t.test('speedBuffs and targetTable do not throw while the star menu is unreadable', function () {
+    var s = setup({ buffs: INV, buffDefs: { GeneralSpeedBuff_B: bdef(0, 'Bakery') } });
+    breakStock(s);
+    var list = s.buffs.speedBuffs();
+    assert.deepStrictEqual(names(list), ['GeneralSpeedBuff_B']);
+    assert.strictEqual(list[0].amount, null);
+    // The target table is read through the candidate scan, its only reader:
+    // the defined name is still listed, with an unknown amount.
+    var cands = s.buffs.buildingBuffCandidates('Bakery', false);
+    assert.deepStrictEqual(names(cands), ['GeneralSpeedBuff_B']);
+    assert.strictEqual(cands[0].amount, null);
+});
+
+t.test('map precheck refuses with zone unreadable when the zone view is not ok', function () {
+    var s = acting({ buffs: [{ type: 'Adventure', resource: 'AdvA', amount: 2 }] });
+    var R = s.S.kernel.read;
+    s.env.view = R.unreadable('boom');
+    assert.strictEqual(run(s, s.buffs.map('AdvA')).reason, s.S.core.zone.UNREADABLE);
+    s.env.view = R.notReady('zone loading');
+    assert.strictEqual(run(s, s.buffs.map('AdvA')).reason, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(R.isReadRefusal(s.S.core.zone.UNREADABLE), true);
+    s.env.view = null;
+    s.env.home = false;
+    assert.strictEqual(run(s, s.buffs.map('AdvA')).reason, 'not on the home island');
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('mapReadRefusal names zone for zone unreadable', function () {
+    var s = acting({ buffs: [] });
+    assert.strictEqual(s.buffs.mapReadRefusal(s.S.core.zone.UNREADABLE), 'zone');
+    assert.strictEqual(s.buffs.mapReadRefusal('not on the home island'), null);
+});
+
+t.test('building precheck refuses with zone unreadable', function () {
+    var s = mineActing(2);
+    s.env.view = s.S.kernel.read.unreadable('boom');
+    var res = run(s, s.buffs.building('MineBuff', 12, 'IronMine', true));
+    assert.strictEqual(res.reason, s.S.core.zone.UNREADABLE);
+    assert.strictEqual(s.sent.actions.length, 0);
 });

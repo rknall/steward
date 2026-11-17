@@ -80,6 +80,18 @@
         return result;
     }
 
+    // Result form of byType for callers that must tell "no deposits" (ok,
+    // empty) from "could not look" (unreadable, why = the error text). byType
+    // keeps throwing for the callers that rely on it.
+    function byTypeRead(typeName, opts) {
+        var R = S.kernel.read;
+        try {
+            return R.ok(byType(typeName, opts));
+        } catch (e) {
+            return R.unreadable(e && e.message ? e.message : String(e));
+        }
+    }
+
     // Built from byType over the deposit-type enum, so a failed read of any
     // type propagates instead of shrinking the list.
     function list(opts) {
@@ -132,6 +144,24 @@
         return out;
     }
 
+    // Result form of depletedManaged: the building list's own state is
+    // carried over, so a list that is loading or unreadable is never read as
+    // "nothing depleted".
+    function depletedManagedRead() {
+        var R = S.kernel.read;
+        if (!S.core.buildings) return R.ok([]);
+        var r = S.core.buildings.listRead();
+        if (!R.has(r)) return r;
+        var out = [];
+        for (var i = 0; i < r.value.length; i++) {
+            var bn = S.core.buildings.name(r.value[i]);
+            if (typeof bn === 'string' && bn.indexOf('Depleted') === 0 &&
+                    isManagedDepleted(r.value[i])) out.push(r.value[i]);
+        }
+        if (r.state === R.PARTIAL) return R.partial(out, r.lost, r.why, r.zoneId);
+        return R.ok(out, r.zoneId);
+    }
+
     // Sends the destruct command for one depleted deposit on the home zone.
     // The building is re-read from the zone by grid first and must still be a
     // managed depleted deposit, so a stale reference never destroys something
@@ -158,6 +188,8 @@
     if (!S.core.deposits) S.core.deposits = {};
     S.core.deposits.list     = list;
     S.core.deposits.byType   = byType;
+    S.core.deposits.byTypeRead = byTypeRead;
+    S.core.deposits.depletedManagedRead = depletedManagedRead;
     S.core.deposits.byGrid   = byGrid;
     S.core.deposits.depleted = depleted;
     S.core.deposits.isManagedDepleted = isManagedDepleted;

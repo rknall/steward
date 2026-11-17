@@ -74,29 +74,42 @@
 
     function plan() {
         var c = S.core.specialists;
-        var all;
-        var before = c.dropped();
-        try { all = c.explorers(); }
+        var R = S.kernel.read;
+        var r;
+        try { r = c.byTypeRead(S.SpecialistType.Explorer); }
         catch (e) {
-            S.kernel.error('explorers', 'explorers() threw:', e);
+            S.kernel.error('explorers', 'byTypeRead threw:', e);
             return;
         }
-        var complete = c.dropped() === before;
+
+        // An unreadable or not yet ready list says nothing about any explorer,
+        // so nothing is settled or sent; the module is woken to read again
+        // soon instead of waiting for the next tick. One warn per window in
+        // which the list never became readable.
+        if (!R.has(r)) {
+            if (R.wait('explorers', 'list', r) === 'expired') {
+                S.kernel.warn('explorers', 'explorer list still unreadable:', r.why);
+            }
+            return;
+        }
+        R.clearWait('explorers', 'list');
+        var all = r.value;
 
         // One read serves both the guard and the idle filter, so earlier
         // sends are judged against the same state this pass dispatches from.
-        c.sendGuard.settle('explorers', all, complete);
-        if (!all || all.length === 0) return;
+        c.sendGuard.settle('explorers', all, r.state === R.OK);
+        if (all.length === 0) return;
 
         // The reader already leaves out entries without a stable uniqueID; an
         // entry can still lose its members after that read. The queue contract
         // needs the uid for the re-find at fire time. A dropped explorer only
         // leaves fewer candidates, never a wrong count, so unlike geologists
-        // this pass does not hold on a read that dropped entries. The guard
-        // still gets the completeness flag, because a dropped entry reads Idle
-        // and must not count as a send that changed nothing.
+        // this pass does not hold on a partial list. The guard still learns
+        // the list was not complete, because a dropped entry reads Idle and
+        // must not count as a send that changed nothing.
         // Pending and held explorers are skipped: sending them again is the
-        // loop the guard exists to stop.
+        // loop the guard exists to stop. An explorer whose status is Unknown
+        // is skipped too: its task could not be read, so it may be busy.
         var idleExplorers = [];
         for (var ie = 0; ie < all.length; ie++) {
             var st;
@@ -178,8 +191,14 @@
                               '(uid', uidKey, ') — skipping');
                 return;
             }
-            if (c.status(spec) !== S.SpecialistStatus.Idle) {
-                S.kernel.log('explorers', displayName, 'no longer idle — skipping');
+            // An Unknown status is not "busy": its task could not be read, and
+            // the log must not claim the explorer was seen working.
+            var st = c.status(spec);
+            if (st !== S.SpecialistStatus.Idle) {
+                S.kernel.log('explorers', displayName,
+                    st === S.SpecialistStatus.Unknown
+                        ? 'status unknown — skipping'
+                        : 'no longer idle — skipping');
                 return;
             }
 

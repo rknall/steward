@@ -7,6 +7,10 @@
  *     and call isReady → plan on each module starting from cursor offset
  *   - drain the queue (FIFO with per-task delay)
  *
+ * Each plan() runs inside one host read pass (isReady does not), so a module
+ * plans from one consistent set of reads. ctx.zone carries the zone view's
+ * state; isHome and isAdventure are true only when that view is ok.
+ *
  * isReady/plan throws are caught and logged — never propagate to the kernel
  * tick. A misbehaving module does not stop the system.
  *
@@ -46,7 +50,17 @@
             session: {}
         };
         try {
-            if (S.core.zone && typeof S.core.zone.id === 'function') {
+            if (S.core.zone && typeof S.core.zone.view === 'function') {
+                // One readiness-aware read: while the client loads a zone the
+                // raw members may still describe the previous one, so isHome
+                // and isAdventure hold only when the view is ok.
+                var v = S.core.zone.view();
+                var ok = v.state === 'ok';
+                ctx.zone.state = v.state;
+                ctx.zone.id = v.value ? v.value.id : null;
+                ctx.zone.isHome = ok && v.value.home === true;
+                ctx.zone.isAdventure = ok && v.value.adventure === true;
+            } else if (S.core.zone && typeof S.core.zone.id === 'function') {
                 ctx.zone.id = S.core.zone.id();
                 ctx.zone.isHome = S.core.zone.isHome();
                 ctx.zone.isAdventure = typeof S.core.zone.isAdventure === 'function'
@@ -73,7 +87,9 @@
         // JS — no concurrency to worry about.
         S.kernel._currentModule = mod.id;
         try {
-            mod.plan(ctx);
+            // One read pass per plan: every host list the module reads is
+            // read once, so all its decisions see the same facts.
+            S.kernel.hostRead.pass(function () { mod.plan(ctx); });
         } catch (e) {
             S.kernel.error('scheduler', mod.id, 'plan threw:', e);
         }

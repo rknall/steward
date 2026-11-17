@@ -342,6 +342,31 @@ t.test('readAt is null before any host part was read', function () {
     assert.equal(s.types, 0);
 });
 
+t.test('an unreadable level shows as null', function () {
+    var b = countedWorld();
+    var sdm = b.H.host.game.gi.mCurrentPlayerZone.mStreetDataMap;
+    // The stub builds fresh fakes on every read, so both building readers
+    // get the throwing level.
+    function unreadable(vec) {
+        vec.forEach(function (fake) {
+            if (fake.GetBuildingName_string() !== 'ProvisionHouse') return;
+            fake.GetUpgradeLevel = function () { throw new Error('bridge'); };
+        });
+        return vec;
+    }
+    var base = sdm.GetBuildings_vector;
+    var byName = sdm.getBuildingsByName_vector;
+    sdm.GetBuildings_vector = function () { return unreadable(base()); };
+    sdm.getBuildingsByName_vector = function (name) { return unreadable(byName(name)); };
+    var rows = b.m.buildings();
+    var provision = rows.filter(function (r) { return r.name === 'ProvisionHouse'; })[0];
+    var others = rows.filter(function (r) { return r.name !== 'ProvisionHouse'; });
+    assert.ok(provision, 'ProvisionHouse row listed');
+    assert.strictEqual(provision.level, null);
+    assert.ok(others.length > 0, 'other rows listed');
+    others.forEach(function (r) { assert.strictEqual(r.level, 1, r.name); });
+});
+
 t.test('emptyStatus has the same fields as status', function () {
     var b = countedWorld();
     var e = b.m.emptyStatus();

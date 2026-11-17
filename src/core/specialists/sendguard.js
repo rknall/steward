@@ -132,6 +132,10 @@
                 var st;
                 try { st = S.core.specialists.status(list[i]); }
                 catch (e) { continue; }
+                // An unreadable status is no evidence either way: judging it
+                // would count a read failure as a miss or a verified send. The
+                // entry stays pending, and the stale drop below still ages it out.
+                if (st === S.SpecialistStatus.Unknown) continue;
                 var entry = pending[key];
                 var age = t - entry.sentAt;
                 if (st !== S.SpecialistStatus.Idle) {

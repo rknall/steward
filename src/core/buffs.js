@@ -104,10 +104,12 @@
         }
     }
 
+    // null while the star menu cannot be read, so an unreadable menu never
+    // looks like an empty stock.
     function inventory() {
         var raw = readEntries();
+        if (!raw) return null;
         var out = [];
-        if (!raw) return out;
         for (var i = 0; i < raw.length; i++) {
             var key = '';
             try { key = raw[i].uid.toKeyString(); } catch (e) { /* leave default */ }
@@ -280,7 +282,9 @@
 
     function speedBuffsNow() {
         var names = definedNames(SPEED_BUFF_PREFIX);
-        var inv = inventory();
+        // An unreadable menu still lists the defined names; amount() then
+        // reports each as null.
+        var inv = inventory() || [];
         var i;
         for (i = 0; i < inv.length; i++) {
             if (isSpeedBuff(inv[i].type) && names.indexOf(inv[i].type) === -1) names.push(inv[i].type);
@@ -447,7 +451,7 @@
 
     function targetTableNow() {
         var names = definedNames('');
-        var inv = inventory();
+        var inv = inventory() || [];
         var i;
         for (i = 0; i < inv.length; i++) {
             if (inv[i].type && names.indexOf(inv[i].type) === -1) names.push(inv[i].type);
@@ -559,6 +563,17 @@
         return typeof n === 'number' ? String(n) : 'unreadable';
     }
 
+    // Precheck of a def that only acts on the home island: the zone's own
+    // read refusal while the zone view is not ok (loading or unreadable), so a
+    // failed read is retried rather than taken for "not home"; the plain
+    // refusal when the zone is known and is not home; null when home.
+    function homeRefusal() {
+        var v = S.core.zone.view();
+        if (!S.kernel.read.isOk(v)) return S.core.zone.UNREADABLE;
+        if (!v.value || v.value.home !== true) return 'not on the home island';
+        return null;
+    }
+
     // Production buff on one building of the home island, sent to that
     // building's grid. Verified only by the building showing a running
     // production buff: a stock drop alone does not say the buff landed on this
@@ -571,7 +586,8 @@
             timeoutMs: BUFF_TIMEOUT_MS,
             retries:   0,
             precheck: function () {
-                if (S.core.zone.isHome() !== true) return 'not on the home island';
+                var off = homeRefusal();
+                if (off) return off;
                 if (!isNum(grid) || !(grid > 0)) return 'no target grid';
                 if (!buildingBuffMatch(name, buildingName, workyard)) return 'buff does not target ' + buildingName;
                 var n = stock(name, '');
@@ -875,9 +891,10 @@
     var MAP_STOCK_UNREADABLE = 'map stock unreadable';
     var ADVENTURES_UNREADABLE = 'adventures unreadable';
 
-    // The read a map-start refusal names ('map stock', 'adventure list'), or
+    // The read a map-start refusal names ('zone', 'map stock', 'adventure list'), or
     // null when the refusal is no failed read.
     function mapReadRefusal(reason) {
+        if (reason === S.core.zone.UNREADABLE) return 'zone';
         if (reason === MAP_STOCK_UNREADABLE) return 'map stock';
         if (reason === ADVENTURES_UNREADABLE) return 'adventure list';
         return null;
@@ -901,8 +918,9 @@
             category:  'buffs',
             timeoutMs: MAP_TIMEOUT_MS,
             precheck: function () {
-                if (S.core.zone.isHome() !== true) return 'not on the home island';
                 found = null;
+                var off = homeRefusal();
+                if (off) return off;
                 var raw = readEntries();
                 var n = raw ? stockIn(raw, ADVENTURE_MAP_TYPE, name) : null;
                 if (!isNum(n)) return MAP_STOCK_UNREADABLE;

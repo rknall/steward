@@ -149,6 +149,121 @@ t.test('dispatch of a key that is really absent on a clean read still warns', fu
     t.assert.ok(/could not re-find/.test(String(warns[0].args[0])), String(warns[0].args[0]));
 });
 
+// ---- Result list ---------------------------------------------------------------
+
+t.test('an unreadable list dispatches nothing and wakes the module', function () {
+    var H = harness.boot();
+    var z = mount(H, [explorer(H, { name: 'one', uid: 'e1' })]);
+    z.zone.GetSpecialists_vector = function () { throw new Error('bridge'); };
+    H.settings.write('explorers', { enabled: true, dispatchDelay: 0 });
+    var wakes = [];
+    H.Steward.kernel.scheduler.wake = function (id, ms) { wakes.push([id, ms]); return true; };
+    var settles = [];
+    var g = H.Steward.core.specialists.sendGuard;
+    var settle = g.settle;
+    g.settle = function () { settles.push(arguments); return settle.apply(g, arguments); };
+
+    H.module('explorers').plan({ zone: { isHome: true } });
+
+    t.assert.strictEqual(H.queued().length, 0);
+    t.assert.strictEqual(settles.length, 0, 'an unreadable list settles nothing');
+    t.assert.deepStrictEqual(wakes, [['explorers', H.Steward.kernel.TIMEOUTS.READ_RETRY_MS]]);
+    t.assert.strictEqual(explorerWarns(H).length, 0, 'no warn before the wait expires');
+});
+
+t.test('an unreadable list warns once when its wait expires', function () {
+    var H = harness.boot();
+    var z = mount(H, [explorer(H, { name: 'one', uid: 'e1' })]);
+    z.zone.GetSpecialists_vector = function () { return null; };
+    H.settings.write('explorers', { enabled: true, dispatchDelay: 0 });
+    H.Steward.kernel.scheduler.wake = function () { return true; };
+    var now = Date.now;
+    var T = 5000000;
+    Date.now = function () { return T; };
+    try {
+        var tries = H.Steward.kernel.LIMITS.READ_WAIT_TRIES;
+        for (var i = 0; i < tries - 1; i++) H.module('explorers').plan({ zone: { isHome: true } });
+        T += H.Steward.kernel.TIMEOUTS.READ_MAX_MS;
+        H.module('explorers').plan({ zone: { isHome: true } });
+        t.assert.strictEqual(explorerWarns(H).length, 1);
+        H.module('explorers').plan({ zone: { isHome: true } });
+        t.assert.strictEqual(explorerWarns(H).length, 1, 'expiry starts a new window');
+    } finally {
+        Date.now = now;
+    }
+    t.assert.strictEqual(H.queued().length, 0);
+});
+
+t.test('a partial list settles with complete false', function () {
+    var H = harness.boot();
+    var ghost = explorer(H, { name: 'ghost', uid: 'ghost1' });
+    H.specs.ghost(ghost);
+    mount(H, [explorer(H, { name: 'one', uid: 'e1' }), ghost]);
+    H.settings.write('explorers', { enabled: true, dispatchDelay: 0 });
+    var settles = [];
+    var g = H.Steward.core.specialists.sendGuard;
+    var settle = g.settle;
+    g.settle = function (owner, list, complete) {
+        settles.push({ owner: owner, n: list.length, complete: complete });
+        return settle.apply(g, arguments);
+    };
+
+    H.module('explorers').plan({ zone: { isHome: true } });
+
+    t.assert.deepStrictEqual(settles, [{ owner: 'explorers', n: 1, complete: false }]);
+    t.assert.deepStrictEqual(H.queued().map(function (e) { return e.params[0]; }), ['e1']);
+});
+
+t.test('a clean list settles with complete true', function () {
+    var H = harness.boot();
+    mount(H, [explorer(H, { name: 'one', uid: 'e1' })]);
+    H.settings.write('explorers', { enabled: true, dispatchDelay: 0 });
+    var settles = [];
+    var g = H.Steward.core.specialists.sendGuard;
+    var settle = g.settle;
+    g.settle = function (owner, list, complete) {
+        settles.push(complete);
+        return settle.apply(g, arguments);
+    };
+
+    H.module('explorers').plan({ zone: { isHome: true } });
+
+    t.assert.deepStrictEqual(settles, [true]);
+    t.assert.strictEqual(H.queued().length, 1);
+});
+
+t.test('an Unknown explorer is not dispatched', function () {
+    var H = harness.boot();
+    var unknown = explorer(H, { name: 'unk', uid: 'e1' });
+    unknown.GetTask = function () { throw new Error('bridge'); };
+    mount(H, [unknown, explorer(H, { name: 'two', uid: 'e2' })]);
+    H.settings.write('explorers', { enabled: true, dispatchDelay: 0 });
+    t.assert.strictEqual(H.Steward.core.specialists.status(unknown), H.Steward.SpecialistStatus.Unknown);
+
+    H.module('explorers').plan({ zone: { isHome: true } });
+
+    t.assert.deepStrictEqual(H.queued().map(function (e) { return e.params[0]; }), ['e2']);
+});
+
+t.test('dispatch of an explorer whose status turned Unknown says so and sends nothing', function () {
+    var H = harness.boot();
+    var c = H.Steward.core.specialists;
+    var sends = [];
+    c.send = function () { sends.push(arguments); return true; };
+    var e1 = explorer(H, { name: 'one', uid: 'e1' });
+    mount(H, [e1]);
+    var fire = dispatchAction(H);
+    c.status = function () { return H.Steward.SpecialistStatus.Unknown; };
+
+    fire(['e1', 'one', 'Short']);
+
+    t.assert.strictEqual(sends.length, 0);
+    var lines = H.logs().filter(function (l) {
+        return l.level === 'log' && l.category === 'explorers' && /status unknown/.test(l.args.join(' '));
+    });
+    t.assert.strictEqual(lines.length, 1);
+});
+
 // An override value pickTask would not choose for a vanilla explorer.
 function planNames(H, name, overrides) {
     mount(H, [explorer(H, { name: name, uid: 'e1' })]);

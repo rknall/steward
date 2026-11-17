@@ -255,3 +255,19 @@ t.test('a settle for one owner ignores the other owner\'s pending entries', func
     same(g.settle('geologists', [g1], true), { verified: 1, missed: 0 });
     t.assert.strictEqual(g.snapshot().pending, 0, 'g2 dropped as stale by its own owner');
 });
+
+t.test('an Unknown pending specialist is neither verified nor a miss', function () {
+    var env = setup();
+    var g = env.g;
+    var a = spec(env, 'a');
+    a.GetTask = function () { throw new Error('unreadable'); };
+    g.note('explorers', 'a', 'A', 'Short');
+    env.T += g.VERIFY_MS;
+    same(g.settle('explorers', [a], true), { verified: 0, missed: 0 });
+    t.assert.strictEqual(g.snapshot().pending, 1);
+    t.assert.strictEqual(g.snapshot().run, 0);
+    env.T += g.STALE_MS + 1;
+    same(g.settle('explorers', [a], true), { verified: 0, missed: 0 });
+    t.assert.strictEqual(g.snapshot().pending, 0);
+    t.assert.strictEqual(g.snapshot().held, 0);
+});

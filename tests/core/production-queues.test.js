@@ -171,9 +171,10 @@ function setup() {
     });
 
     var S = H.Steward;
-    S.core.buildings.list = function () {
+    S.core.buildings.listRead = function () {
         if (world.buildingsThrow) throw new Error('list failed');
-        return world.buildings;
+        if (world.buildingsUnreadable) return S.kernel.read.unreadable('building list unreadable', 1);
+        return S.kernel.read.ok(world.buildings, 1);
     };
     return { H: H, S: S, P: S.core.production, sent: sent, world: world };
 }
@@ -535,8 +536,24 @@ t.test('queueTypes groups by type, highest level first, and is [] off home', fun
 
     b.world.buildingsThrow = true;
     assert.strictEqual(b.P.queueTypes(), null);
+    b.world.buildingsThrow = false;
     b.world.home = false;
     assert.strictEqual(b.P.queueTypes().length, 0);
+});
+
+t.test('queueTypes is null when the building list is unreadable', function () {
+    var b = setup();
+    b.world.buildings = [building('Workshop', 50, 2, 30)];
+    b.world.buildingsUnreadable = true;
+    assert.strictEqual(b.P.queueTypes(), null);
+});
+
+t.test('queueTypes skips a falsy building slot', function () {
+    var b = setup();
+    b.world.buildings = [null, building('Workshop', 50, 2, 30), undefined];
+    var list = b.P.queueTypes();
+    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list[0].buildings.length, 1);
 });
 
 t.test('entries: time left, finished, and null on a throwing vector', function () {
