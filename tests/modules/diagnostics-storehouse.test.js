@@ -178,6 +178,15 @@ t.test('record sums star AddResource entries per resource', function () {
     });
 });
 
+t.test('record marks the star read unreadable for a null inventory', function () {
+    withSetup(function (s) {
+        s.H.Steward.core.buffs.inventory = function () { return null; };
+        var doc = plain(s.sh.record());
+        assert.deepStrictEqual(doc.star, { unreadable: true });
+        assert.ok(doc.held.length > 0);
+    });
+});
+
 t.test('summary lists where trader and mayor\'s house differ', function () {
     withSetup(function (s) {
         var sum = plain(s.sh.record()).summary;

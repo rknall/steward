@@ -194,6 +194,8 @@
 
     function starRead(defs, heldNames) {
         var inv = S.core.buffs.inventory();
+        // Null: the star menu is unreadable, which is not the same as empty.
+        if (inv === null) return { unreadable: true };
         var type = S.core.buffs.ADD_RESOURCE_TYPE;
         var map = {};
         var order = [];
