@@ -88,7 +88,7 @@
 <p>How a scenario run behaves:</p>
 <ul>
   <li><strong>Start from home.</strong> A scenario can only be started at home. If steward cannot read an item the scenario needs, the start is refused and nothing is stored.</li>
-  <li><strong>Production first.</strong> The run leaves home only when the items of the trip are in stock and nothing of them is still queued. It waits as long as that takes.</li>
+  <li><strong>Production first.</strong> The run leaves home only when the items of the trip are in stock and nothing of them is still queued or on its way. An order that has left the queue but not yet reached the star menu still counts as on its way; if it shows in neither for 10 minutes, steward plans it again. The run waits as long as that takes.</li>
   <li><strong>Only what a quest asks for.</strong> On the island an item is applied and an object picked up only while a running quest asks for it, so nothing is wasted on a quest that does not take it.</li>
   <li><strong>Waiting between maps.</strong> The run waits 180 seconds after the last map it saw closed before it starts the next one. The wait also holds across Stop, a new start and a client restart.</li>
   <li><strong>Your own scenario files.</strong> A scenario file with the same name as a built-in one in the <code>adventures/scenarios</code> folder of the steward data folder replaces the built-in one. A file that cannot be read is listed greyed out as a broken scenario file, so you can see why it is missing.</li>

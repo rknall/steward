@@ -1694,6 +1694,131 @@ t.test('reload mid-wait at Produce: orders nothing twice and keeps waiting', fun
     assert.notStrictEqual(stepName(w), 'Produce');
 });
 
+// The run's mark of the item's order, or undefined.
+function makeMark(w, buff) {
+    return (w.st.run().marks || {})['make:' + buff];
+}
+
+function emptyQueues(w) {
+    Object.keys(w.queues).forEach(function (id) { w.queues[id].entries = []; });
+}
+
+function orders(w, buff) {
+    return w.productionOrders.filter(function (o) { return o.unit === buff; });
+}
+
+// The run at Produce of trip 1 of TWINS, ordered, its queue entries gone and
+// no stock yet: the delivery gap.
+function twinsInGap(w) {
+    W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+    tick(w);
+    play(w, function () { return w.productionOrders.length >= 1; });
+    passesFor(w, 3 * PASS_MS);
+    emptyQueues(w);
+}
+
+t.test('Produce: an order in the delivery gap is not ordered again', function () {
+    var w = scenWorld();
+    twinsInGap(w);
+    var before = JSON.stringify(made(w));
+    var count = w.productionOrders.length;
+    passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 3 * PASS_MS);
+    assert.strictEqual(w.productionOrders.length, count, 'no new order');
+    assert.strictEqual(JSON.stringify(made(w)), before);
+    assert.ok(!logged(w, /ordering again/), logLines(w).join('\n'));
+    assert.ok(/on the way/.test(busyText(w)), busyText(w));
+    assertStep(w, 'Produce');
+    // Everything ordered arrives: yield 1, so runs * y is the need.
+    w.setStock(BRIDGE, 3);
+    w.setStock(SHEET, 3);
+    w.setStock(RESCUE, 1);
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
+    assert.ok(logged(w, /items ready/), logLines(w).join('\n'));
+    assert.strictEqual(w.productionOrders.length, count, 'total orders unchanged');
+});
+
+t.test('Produce: an order that never shows is ordered again after MAKE_LOST_MS, never paused', function () {
+    var w = scenWorld();
+    twinsInGap(w);
+    var count = w.productionOrders.length;
+    passesFor(w, w.S.modules.adventures.trips.MAKE_LOST_MS + 3 * PASS_MS);
+    assert.ok(logged(w, /not seen in the queue or the star menu .* planning it again/), logLines(w).join('\n'));
+    assert.ok(w.productionOrders.length > count, 'ordered again');
+    assert.strictEqual(w.st.run().status, w.S.RunStatus.Running);
+});
+
+t.test('reload during the delivery gap orders nothing twice', function () {
+    var w = scenWorld();
+    twinsInGap(w);
+    var count = w.productionOrders.length;
+    w = restart(w);
+    var m = makeMark(w, BRIDGE);
+    assert.ok(m, 'the mark came back');
+    assert.strictEqual(typeof m.count, 'number');
+    assert.strictEqual(typeof m.stock, 'number');
+    assert.strictEqual(typeof m.queued, 'number');
+    passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 3 * PASS_MS);
+    assert.strictEqual(w.productionOrders.length, count, 'no new order');
+});
+
+t.test('Produce: a next-trip item on its way holds the exit', function () {
+    var w = scenWorld();
+    w.setStock(BRIDGE, 3);
+    w.setStock(SHEET, 3);
+    W.startScenario(w, record(w, TWINS), { step: w.S.RunStep.Produce, trip: 1 });
+    tick(w);
+    play(w, function () { return orders(w, RESCUE).length >= 1; });
+    emptyQueues(w);
+    passesFor(w, lagOf(w) + 4 * PASS_MS);
+    assertStep(w, 'Produce');
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    w.setStock(RESCUE, 1);
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
+    assert.ok(logged(w, /items ready/), logLines(w).join('\n'));
+});
+
+// One item on two trips: ordering more while the first order is queued.
+var SAMEREC = {
+    id: 'same_test', label: 'Same (test)',
+    trips: [{},
+        { items: [{ buff: BRIDGE, grids: [11, 12, 13] }] },
+        { items: [{ buff: BRIDGE, grids: [11] }] }]
+};
+
+t.test('Produce: ordering more of an item still queued keeps the first order on its way', function () {
+    var w = scenWorld({ world: { resources: { Wood: 6 } } });
+    W.startScenario(w, record(w, SAMEREC), { step: w.S.RunStep.Produce, trip: 1 });
+    tick(w);
+    play(w, function () { return w.productionOrders.length >= 1; });
+    assert.deepStrictEqual(w.productionOrders.map(function (o) { return { unit: o.unit, amount: o.amount }; }),
+        [{ unit: BRIDGE, amount: 3 }]);
+    assert.ok(logged(w, /next trip items wait for resources: Wood 8\/6/), logLines(w).join('\n'));
+    w.resources.Wood = 1000;
+    passesFor(w, 3 * PASS_MS);
+    var bo = orders(w, BRIDGE);
+    assert.deepStrictEqual(bo.map(function (o) { return o.amount; }), [3, 1]);
+    assert.deepStrictEqual(made(w), { 'ChangeSkin_BuffAd_Bridge': 4 });
+    var m = makeMark(w, BRIDGE);
+    assert.strictEqual(m.count, 1);
+    assert.strictEqual(m.queued, 3);
+    assert.strictEqual(m.stock, 0);
+    emptyQueues(w);
+    passesFor(w, w.S.modules.adventures.loader.ORDER_WAIT_MS + 3 * PASS_MS);
+    assert.strictEqual(orders(w, BRIDGE).length, 2);
+    assert.ok(!logged(w, /planning it again/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /ordering again/), logLines(w).join('\n'));
+    assert.ok(!logged(w, /items ready/), logLines(w).join('\n'));
+    assertStep(w, 'Produce');
+    assert.ok(/ChangeSkin_BuffAd_Bridge 0\/3 on the way 4/.test(busyText(w)), busyText(w));
+    w.setStock(BRIDGE, 4);
+    passesFor(w, lagOf(w) + 2 * PASS_MS);
+    assert.notStrictEqual(stepName(w), 'Produce');
+    assert.ok(logged(w, /items ready/), logLines(w).join('\n'));
+    assert.deepStrictEqual(made(w), { 'ChangeSkin_BuffAd_Bridge': 4 });
+});
+
 // ---- reload safety ------------------------------------------------------------------
 
 t.test('reload mid-Produce: the restarted run orders nothing twice', function () {

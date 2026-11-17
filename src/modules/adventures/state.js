@@ -1136,8 +1136,11 @@
     // taken of the item so far; an apply mark `notSent` and `notSentAt`, the sends
     // that made no host call and when the last one was; a "revisit:" mark `count`;
     // a "short:" mark `text`; the map mark `stock`, the map stock read before its
-    // send, which tells a started map from a lost packet after a restart. Each is
-    // kept only when of its type, so every other line keeps its shape.
+    // send, which tells a started map from a lost packet after a restart; a make:
+    // mark `count`, `stock` and `queued`: the items its orders still owe and the
+    // star-menu stock and queued items read for the plan before its send, so a
+    // reload still counts an order on its way. Each is kept only when of its
+    // type, so every other line keeps its shape.
     function normLines(v) {
         var out = {};
         if (!isPlainObject(v)) return out;
@@ -1158,6 +1161,8 @@
             if (ct !== null) out[k].count = ct;
             var sk = num(v[k].stock);
             if (sk !== null) out[k].stock = sk;
+            var qd = num(v[k].queued);
+            if (qd !== null) out[k].queued = qd;
             if (typeof v[k].text === 'string') out[k].text = v[k].text;
         }
         return out;

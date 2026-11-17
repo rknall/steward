@@ -428,9 +428,12 @@
     // { stack, grid }; stack is the items per message of a stackable type
     // (maxProductionAmount() by default), grid the producing building (the queue's own
     // building by default). Verified once the item's queued total has grown
-    // by n over the total read just before the first send. A retry orders
-    // only what is still missing, so a late first order is never doubled; a
-    // type not confirmed live is never retried.
+    // by n over the total read just before the first send, or, for a buff
+    // ordered into a queue with none of it queued, once that growth plus the
+    // star-menu stock rise (in runs) reaches n: a fast order can reach the
+    // star menu before any poll sees it in the queue. A retry orders only
+    // what neither shows, so a late first order is never doubled; a type not
+    // confirmed live is never retried.
     function orderIn(type, item, n, opts) {
         opts = opts || {};
         var label = 'order ' + n + ' ' + item + ' (queue ' + type + ')';
@@ -446,6 +449,34 @@
             if (pr && pr.stackable) return stacks(remaining, opts.stack || maxProductionAmount());
             if (typeof remaining !== 'number' || !(remaining > 0) || remaining !== Math.floor(remaining)) return [];
             return [{ amount: remaining, count: 1 }];
+        }
+
+        // Star-menu stock of a buff, else null. Workshop and resource kinds
+        // are left out: the economy moves resource amounts, so a rise there
+        // proves nothing about this order.
+        function stockNow() {
+            if (!pr || pr.kind !== S.ProductionKind.Buffs) return null;
+            return S.core.production.stockOf(type, item);
+        }
+
+        // Runs of this order visible now, or null when the queue is
+        // unreadable. The stock rise counts only when none of the item was
+        // queued before the order: a run delivered from an older entry would
+        // raise the stock too and fake a sign of this one. A stock fall only
+        // hides a rise, so it counts as none; an unreadable stock adds
+        // nothing.
+        function shownRuns(base) {
+            var q = queuedIn(type, item);
+            if (!base || typeof q !== 'number' || typeof base.queued !== 'number') return null;
+            var runs = q - base.queued;
+            if (base.queued === 0 && typeof base.stock === 'number') {
+                var now = stockNow();
+                var y = S.core.production.yieldIn(type, item);
+                if (typeof now === 'number' && typeof y === 'number' && y > 0) {
+                    runs += Math.floor(Math.max(0, now - base.stock) / y);
+                }
+            }
+            return runs;
         }
 
         function sendShapes(q, remaining) {
@@ -490,12 +521,14 @@
                 return null;
             },
 
-            baseline: function () { return queuedIn(type, item); },
+            baseline: function () {
+                return { queued: queuedIn(type, item), stock: stockNow() };
+            },
 
             send: function (base) {
-                var now = queuedIn(type, item);
-                if (typeof now !== 'number' || typeof base !== 'number') return false;
-                var remaining = base + n - now;
+                var shown = shownRuns(base);
+                if (shown === null) return false;
+                var remaining = n - shown;
                 if (!(remaining > 0)) return false;
                 var q = S.core.production.queueOf(type);
                 if (!q) return false;
@@ -503,12 +536,16 @@
             },
 
             check: function (base) {
-                var q = queuedIn(type, item);
-                return typeof q === 'number' && typeof base === 'number' && q >= base + n;
+                var shown = shownRuns(base);
+                return shown !== null && shown >= n;
             },
 
             describe: function (base) {
-                return 'queued ' + base + ' -> ' + queuedIn(type, item);
+                var text = 'queued ' + (base ? base.queued : null) + ' -> ' + queuedIn(type, item);
+                if (base && base.stock !== null && base.stock !== undefined) {
+                    text += ', stock ' + base.stock + ' -> ' + stockNow();
+                }
+                return text;
             }
         };
         if (!pr || !pr.confirmed) def.retries = 0;

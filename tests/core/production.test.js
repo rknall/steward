@@ -394,3 +394,82 @@ t.test('order of a buff sends message 91 to its queue building in stacks of 25',
     assert.strictEqual(v.results[0].status, c.S.ActionResult.Verified);
     assert.strictEqual(c.world.queues[11].entries[0].type, 'BB_Wine');
 });
+
+// Fakes the star-menu stock of a buff over a local map; orderIn reads it
+// through core.production.stockOf at call time. A null value reads as an
+// unreadable menu.
+function fakeStock(b, map) {
+    b.S.core.buffs.stock = function (item) {
+        return item in map ? map[item] : null;
+    };
+}
+
+t.test('a buff order the queue never shows verifies on the star-menu stock rise', function () {
+    var b = setup();
+    var stock = { BB_Plank: 0 };
+    fakeStock(b, stock);
+    var r = run(b, b.P.order('BB_Plank', 2), function (n) {
+        // The entry finished before any poll saw it: 2 runs of 3 items.
+        if (n === 1) stock.BB_Plank = 6;
+    });
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(r.results[0].sends, 1);
+    var m = b.sent.messages;
+    assert.strictEqual(m.length, 1);
+    assert.strictEqual(m[0].data.amount, 2);
+    assert.strictEqual(m[0].data.stacks, 1);
+});
+
+t.test('a partial stock rise retries only the rest', function () {
+    var b = setup();
+    var stock = { BB_Plank: 0 };
+    fakeStock(b, stock);
+    var r = run(b, b.P.order('BB_Plank', 2), function (n) {
+        if (n === 1) stock.BB_Plank = 3;
+    });
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(r.results[0].sends, 2);
+    var m = b.sent.messages;
+    assert.strictEqual(m.length, 2);
+    assert.strictEqual(m[0].data.amount, 2);
+    assert.strictEqual(m[1].data.amount, 1);
+});
+
+t.test('an unreadable star menu verifies on the queue only', function () {
+    var b = setup();
+    fakeStock(b, {});
+    var r = run(b, b.P.order('BB_Plank', 2), function (n) { if (n === 1) deliver(b); });
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+
+    var c = setup();
+    fakeStock(c, {});
+    var f = run(c, c.P.order('BB_Plank', 2));
+    assert.strictEqual(f.results[0].status, c.S.ActionResult.Failed);
+});
+
+t.test('a stock rise does not count while the item was already queued', function () {
+    var b = setup();
+    var stock = { BB_Plank: 0 };
+    fakeStock(b, stock);
+    // An older entry may be the one that delivered, so the rise proves nothing.
+    b.world.queues[1].entries.push({ type: 'BB_Plank', amount: 1 });
+    var r = run(b, b.P.order('BB_Plank', 2), function (n) {
+        if (n === 1) stock.BB_Plank = 6;
+    });
+    assert.notStrictEqual(r.results[0].status, b.S.ActionResult.Verified);
+});
+
+t.test('the describe line of a buff order shows the stock, a unit order does not', function () {
+    var b = setup();
+    var stock = { BB_Plank: 0 };
+    fakeStock(b, stock);
+    var def = b.P.order('BB_Plank', 2);
+    var base = def.baseline();
+    stock.BB_Plank = 6;
+    assert.strictEqual(def.describe(base), 'queued 0 -> 0, stock 0 -> 6');
+
+    var u = b.P.order('Rifleman', 2);
+    var text = u.describe(u.baseline());
+    assert.strictEqual(text, 'queued 0 -> 0');
+    assert.ok(text.indexOf('stock') === -1);
+});

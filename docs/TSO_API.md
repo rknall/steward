@@ -370,6 +370,7 @@ Read from the client bytecode and the host scripts of one client build; re-check
 - The type id has a name in the host enum `Enums::TIMED_PRODUCTION_TYPE`. A profile is derived from the id and that name, never from a list of building names.
 - A VO's `amount` is items per stack and `stacks` is the stack count. The host's order panel bounds the amount by `defines.MAX_PRODUCTION_AMOUNT` (25) for every type; the Bookbinder sends one book per order. `Steward.core.production.maxProductionAmount()` reads the constant. A queue has no known capacity.
 - Entry fields read: `GetAmount()`, `GetProducedItems()`, `GetProductionTime()`, `GetCollectedTime()`, the time bonus, and the VO's `producedItems`. Time left for one entry is `((amount - produced) * productionTime - collectedTime) / timeBonus` in ms. In-progress counts sum `GetAmount()` without subtracting `GetProducedItems()`.
+- A finished entry can leave `mTimedProductions_vector` before its items show in `getAvailableBuffs_vector()`; the gap was seen to last minutes (#109). `orderIn` also verifies a buff ordered into an idle queue through the star-menu stock rise, and adventure Produce keeps an order on its way until the queue or the stock shows it.
 - A run of a timed item or buff yields `GetProductionAmount()` items; units and books yield 1.
 
 | Kind | Queue ids | Items from | Order shape | Entries at most |

@@ -532,6 +532,10 @@
         }
         var grid = S.core.buildings.grid(b);
         var def = S.core.production.orderIn(type, item, runs, { stack: stack, grid: grid });
+        // An order can leave the queue for the star menu before a poll sees
+        // it, and stay out of both for minutes. A retry inside this action
+        // would order it twice. The hold below is the one try-again.
+        def.retries = 0;
 
         function onDone(r) {
             var R = S.ActionResult;

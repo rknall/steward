@@ -83,8 +83,9 @@ function setup(o) {
         return out;
     };
     P.orderIn = function (type, item, n, opts) {
-        world.orders.push({ type: type, item: item, n: n, opts: opts });
-        return { label: 'order ' + n + ' ' + item + ' (queue ' + type + ')' };
+        var def = { label: 'order ' + n + ' ' + item + ' (queue ' + type + ')' };
+        world.orders.push({ type: type, item: item, n: n, opts: opts, def: def });
+        return def;
     };
     P.complete = function (type) { return { label: 'complete queue ' + type }; };
 
@@ -684,6 +685,17 @@ t.test('an unseen order holds the building for 30 min and counts a miss', functi
     assert.strictEqual(named(env.plan(), 'production.order').length, 0);
     env.T += 1800001;
     assert.strictEqual(named(env.plan(), 'production.order').length, 1);
+});
+
+t.test('an order is never retried inside the action, so a gap order is not sent twice', function () {
+    var env = setup({
+        types: [{ type: 0, buildings: BARRACKS }],
+        costs: { Rifleman: [] },
+        buildings: { Barracks: row('Rifleman', 5) }
+    });
+    var q = named(env.plan(), 'production.order');
+    env.handlers['production.order'](q[0].params);
+    assert.strictEqual(env.world.orders[0].def.retries, 0);
 });
 
 t.test('a verified order clears the hold and marks the entry placed', function () {

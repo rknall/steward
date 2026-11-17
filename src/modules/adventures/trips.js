@@ -12,11 +12,16 @@
  * what the next trip needs (all its grids), minus the stock and what is
  * already queued, so the next trip's items are made while the current one
  * runs. It leaves home only once no item of this or the next trip is in a
- * production queue (whoever queued it), the current trip's items are in the
- * star menu, and both read so again READ_LAG_MS later: stock already in the
- * star menu never counts while an item of the trips is still queued.
- * An order that fails or does not show in the queue is tried again after a
- * while and never pauses the run: only missing resources do.
+ * production queue (whoever queued it), no order of the run is still on its
+ * way, the current trip's items are in the star menu, and all of it reads so
+ * again READ_LAG_MS later: stock already in the star menu never counts while
+ * an item of the trips is still queued. A queue entry can leave minutes
+ * before its items show in the star menu, so each order is kept on its make:
+ * mark (the items it owes, and the stock and queue read before its send) and
+ * counts as on the way until the queue or a stock rise shows it. An order
+ * that shows nowhere for MAKE_LOST_MS is planned again, and an order that
+ * fails is tried again after a while; neither pauses the run: only missing
+ * resources do.
  *
  * Apply sends each item of the trip as one burst: one action sends the
  * item to all its open grids back to back, from one star-menu entry, with
@@ -96,6 +101,7 @@
 
     // Starting values, to be tuned in game.
     var PRODUCE_RETRY_MS = 60000;    // a failed item order is tried again after this
+    var MAKE_LOST_MS     = 600000;   // an order neither queued nor in the star menu this long is lost
     var APPLY_QUIET_MS   = 600000;   // quiet time a quest gets to want an item
     var TRIP_MAX_MS      = 300000;   // quiet time a trip waits for quests and objects
     var QUEST_SETTLE_MS  = 20000;    // settle after a quest read or claim on the island
@@ -107,7 +113,11 @@
 
     var CATEGORY = 'adventures';
 
-    // Mark name prefixes: one mark per item ordered, one per grid sent to,
+    // Mark name prefixes: one mark per item ordered (its count, stock and
+    // queued fields: the items its orders owe beyond what was queued, and the
+    // star-menu stock and queued items read for the plan before its send; at,
+    // memory only, the last time the order could still be in production), one
+    // per grid sent to,
     // and one per grid that took something (written seen, never sent; its
     // taken field is what the grid has taken so far, and a burst's whole take
     // goes on its first grid, so the item's part marks together hold what the
@@ -243,6 +253,60 @@
         return out;
     }
 
+    // Items a MAKE mark's orders owe that neither the queue nor the star menu
+    // shows now: everything queued at its read plus what it ordered, less what is
+    // queued now and the stock rise since the read. An entry that leaves the queue
+    // before its items reach the star menu stays counted, also an earlier order
+    // that was still queued when more of the item was ordered. null for a mark
+    // without a send record (none sent, sent by an older version, or cleared by
+    // Resume), which keeps the plain wait-then-order-again path.
+    function onTheWay(m, it) {
+        if (!m || typeof m.sentAt !== 'number') return null;
+        if (typeof m.count !== 'number' || typeof m.stock !== 'number' || typeof m.queued !== 'number') return null;
+        return Math.max(0, m.count + m.queued - it.q - Math.max(0, it.stock - m.stock));
+    }
+
+    // def with its send wrapped so the MAKE mark name gets rec (count, stock,
+    // queued) and a fresh at, saved before the packet, while the run is still
+    // r. A send that did not go out (NOT_SENT or a failed send) puts the
+    // mark's earlier fields back, so an order that never left is not counted
+    // as on its way.
+    function trackOrder(r, name, def, rec) {
+        if (!def || typeof def.send !== 'function') return def;
+        var send = def.send;
+        var runId = r.id;
+        var FIELDS = ['count', 'stock', 'queued'];
+        def.send = function (b) {
+            var cur = st().run();
+            var was = null;
+            var i;
+            if (cur && cur.id === runId) {
+                var m = ld().mark(cur, name);
+                was = {};
+                for (i = 0; i < FIELDS.length; i++) {
+                    was[FIELDS[i]] = m[FIELDS[i]];
+                    m[FIELDS[i]] = rec[FIELDS[i]];
+                }
+                m.at = now();
+                st().save();
+            }
+            var res = send(b);
+            if (was && res !== true) {
+                var c = st().run();
+                if (c && c.id === runId) {
+                    var mm = ld().mark(c, name);
+                    for (i = 0; i < FIELDS.length; i++) {
+                        if (was[FIELDS[i]] === undefined) delete mm[FIELDS[i]];
+                        else mm[FIELDS[i]] = was[FIELDS[i]];
+                    }
+                    st().save();
+                }
+            }
+            return res;
+        };
+        return def;
+    }
+
     function orderRuns(r, list, info) {
         var round = ld().startRound(r, S.RunStep.Produce, []);
         for (var i = 0; i < list.length; i++) {
@@ -250,8 +314,14 @@
             var runs = list[i].count;
             var name = MAKE + b;
             log('producing: ' + b + ' x' + (runs * info[b].y) + ' (' + runs + ' run(s))');
-            ld().attempt(round, name, ld().wrapSend(r, name, S.core.production.order(b, runs)),
-                ld().seenOnVerified(name));
+            // Ordering more while an order is on its way merges both into one
+            // record against the new read: what is still on its way plus this
+            // order, with the earlier order's entries still queued kept
+            // through queued.
+            var def = S.core.production.order(b, runs);
+            trackOrder(r, name, def, { count: info[b].way + runs * info[b].y,
+                stock: info[b].stock, queued: info[b].q });
+            ld().attempt(round, name, ld().wrapSend(r, name, def), ld().seenOnVerified(name));
         }
     }
 
@@ -280,6 +350,7 @@
             var b = buffs[k];
             var t = has(thisNeed, b) ? b + ' ' + info[b].stock + '/' + thisNeed[b] : b + ' next';
             if (info[b].q > 0) t += ' queued ' + info[b].q;
+            if (info[b].way > 0) t += ' on the way ' + info[b].way;
             out.push(t);
         }
         out.sort();
@@ -287,10 +358,13 @@
     }
 
     // Produce (home). Production runs yield y items each, so a need in items
-    // becomes ceil(items / y) runs. A queued run counts as items on the way.
-    // The run leaves only on two clear reads READ_LAG_MS apart, clear meaning
-    // nothing of either trip queued and this trip's items in stock, since the
-    // queue entry may leave before the item shows in the star menu.
+    // becomes ceil(items / y) runs. A queued run counts as items on the way,
+    // and so does an order of the run that neither the queue nor the star
+    // menu shows yet: its queue entry can leave minutes before its items show
+    // in the star menu. An order that shows nowhere for MAKE_LOST_MS is
+    // planned again, never paused on. The run leaves only on two clear reads
+    // READ_LAG_MS apart, clear meaning nothing of either trip queued or on
+    // its way and this trip's items in stock.
     function produce(r) {
         var RS = S.RunStep;
         var trips = r.trips || [];
@@ -333,6 +407,11 @@
             }
             st().dropRound(f ? 'item order failed, trying again' : 'item orders sent');
         }
+        for (k = 0; k < buffs.length; k++) {
+            b = buffs[k];
+            var way = onTheWay(ld().marked(r, MAKE + b), info[b]);
+            info[b].way = way === null ? 0 : way;
+        }
 
         var runsThis = {};
         var runsAll = {};
@@ -341,21 +420,47 @@
             var it = info[b];
             var mine = has(thisNeed, b) ? thisNeed[b] : 0;
             var next = has(nextNeed, b) ? nextNeed[b] : 0;
-            runsThis[b] = Math.ceil(Math.max(0, mine - it.stock - it.q) / it.y);
-            runsAll[b] = Math.ceil(Math.max(0, mine + next - it.stock - it.q) / it.y);
+            runsThis[b] = Math.ceil(Math.max(0, mine - it.stock - it.q - it.way) / it.y);
+            runsAll[b] = Math.ceil(Math.max(0, mine + next - it.stock - it.q - it.way) / it.y);
         }
-        // An order that reached the queue drops out of the plan, and its mark
-        // with it.
+        // A mark with a send record stays while its order is on its way and
+        // drops once nothing is queued and the stock shows it all. While any
+        // of the item is queued the order may still be in production, so its
+        // lost clock (at, memory only) restarts; a reload starts it afresh.
+        // A mark without a send record drops once its item drops out of the
+        // plan. Marks are dropped after the walk, never during it.
         var drop = [];
         for (var name in (r.marks || {})) {
             if (!has(r.marks, name) || name.indexOf(MAKE) !== 0) continue;
             var mb = name.substring(MAKE.length);
-            if (!(has(runsAll, mb) && runsAll[mb] > 0)) drop.push(name);
+            if (!has(info, mb)) {
+                drop.push(name);
+                continue;
+            }
+            var mm = r.marks[name];
+            var w = onTheWay(mm, info[mb]);
+            if (w === null) {
+                if (!(runsAll[mb] > 0)) drop.push(name);
+                continue;
+            }
+            if (w === 0 && info[mb].q === 0) {
+                drop.push(name);
+                continue;
+            }
+            if (info[mb].q > 0 || typeof mm.at !== 'number') mm.at = now();
+            if (w > 0 && now() - mm.at >= MAKE_LOST_MS) {
+                log('order of ' + mb + ' not seen in the queue or the star menu for ' +
+                    S.kernel.text.minText(MAKE_LOST_MS) + ', planning it again');
+                ld().dropMark(r, name);
+                return;
+            }
         }
         for (k = 0; k < drop.length; k++) ld().dropMark(r, drop[k]);
         var all = orderList(runsAll);
         for (k = 0; k < all.length; k++) {
             b = all[k].unit;
+            var lm = ld().marked(r, MAKE + b);
+            if (!lm || onTheWay(lm, info[b]) !== null) continue;
             var s = ld().staleMark(r, MAKE + b, 'order of ' + b, { seen: true });
             if (s === 'wait') return;
             if (s === 'stale') {
@@ -371,12 +476,13 @@
         // Any queued entry of an item holds the exit, the run's own or a
         // manual one: the queue cannot tell them apart, and leftover stock
         // must not release the run while its own order is still being made.
+        // So does an order of either trip still on its way.
         var clear = true;
         for (b in thisNeed) {
             if (has(thisNeed, b) && info[b].stock < thisNeed[b]) clear = false;
         }
         for (k = 0; k < buffs.length; k++) {
-            if (info[buffs[k]].q !== 0) clear = false;
+            if (info[buffs[k]].q !== 0 || info[buffs[k]].way > 0) clear = false;
         }
 
         var list = all;
@@ -1168,6 +1274,7 @@
 
     S.modules.adventures.trips = {
         PRODUCE_RETRY_MS: PRODUCE_RETRY_MS,
+        MAKE_LOST_MS:     MAKE_LOST_MS,
         APPLY_QUIET_MS:   APPLY_QUIET_MS,
         TRIP_MAX_MS:      TRIP_MAX_MS,
         QUEST_SETTLE_MS:  QUEST_SETTLE_MS,
