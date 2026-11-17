@@ -12,7 +12,7 @@ var DIR = 'C:/client/steward/adventures/templates';
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
 // An adventure manager with no open adventures: an own list that cannot be read
-// keeps the map count unknown (×?), so rows need a readable, empty one.
+// keeps the map count unknown (reading), so rows need a readable, empty one.
 function emptyOwn(H) {
     var prev = H.host.game.def;
     H.host.game.def = function (name) {
@@ -797,13 +797,13 @@ t.test('available is null while the map stock is unreadable and reads it once pe
     assert.strictEqual(s.run.available('BlackKnights', {}), 2);
 });
 
-t.test('a menu label shows ×? while the map stock is unreadable', function () {
+t.test('a menu label shows reading while the map stock is unreadable', function () {
     var s = setup({ buffs: [], adventureDefs: [A.adventureDef({ name: 'BlackKnights', type: 'Mission' })] });
     s.tpl.save(record({}), 1000);
     s.S.core.buffs.mapCounts = function () { return null; };
     var items = s.H.module('adventures').menu.items();
     assert.strictEqual(labelOf(items[9]), 'Missions');
-    assert.deepStrictEqual(plain(items[9].items.map(function (it) { return labelOf(it); })), ['Black Knights ×?']);
+    assert.deepStrictEqual(plain(items[9].items.map(function (it) { return labelOf(it); })), ['Black Knights (reading...)']);
 });
 
 t.test('start refuses while the map stock is unreadable', function () {

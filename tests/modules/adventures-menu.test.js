@@ -25,7 +25,7 @@ function def(name, type, campaign, requiresEvent) {
 }
 
 // An adventure manager with no open adventures: an own list that cannot be read
-// keeps the map count unknown (×?), so rows need a readable, empty one.
+// keeps the map count unknown (reading), so rows need a readable, empty one.
 function emptyOwn(H) {
     var prev = H.host.game.def;
     H.host.game.def = function (name) {
@@ -211,7 +211,7 @@ t.test('an unreadable pass keeps the last readable enabled state and a never-rea
     assert.strictEqual(enabledOf(row, {}), true);
     s.S.core.buffs.mapCounts = unreadable;
     assert.strictEqual(enabledOf(row, {}), true);
-    assert.strictEqual(labelOf(row, {}), 'Alpha ×?');
+    assert.strictEqual(labelOf(row, {}), 'Alpha (reading...)');
     s.maps.AdvA = 0;
     s.S.core.buffs.mapCounts = s.counts;
     assert.strictEqual(enabledOf(row, {}), false);
@@ -219,7 +219,7 @@ t.test('an unreadable pass keeps the last readable enabled state and a never-rea
     assert.strictEqual(enabledOf(row, {}), false);
     var fresh = s.menu.items()[FIXED].items[0];
     assert.strictEqual(enabledOf(fresh, {}), false);
-    assert.strictEqual(labelOf(fresh, {}), 'Alpha ×?');
+    assert.strictEqual(labelOf(fresh, {}), 'Alpha (reading...)');
 });
 
 t.test('label and enabled share one star-menu read per pass', function () {

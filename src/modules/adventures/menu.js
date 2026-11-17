@@ -30,8 +30,8 @@
  *
  * Every template and scenario row is labelled with the maps available for
  * its adventure and is greyed when there is none. A pass where the star menu
- * cannot be read (×?) keeps the row's last readable state, so rows do not
- * flicker grey; a row never read yet is greyed. A click on a row that is
+ * cannot be read (the label says reading, as a queue row's does) keeps the
+ * row's last readable state, so rows do not flicker grey; a row never read yet is greyed. A click on a row that is
  * still enabled from an older reading ends in run.js's own notice. A
  * disabled row per broken scenario file sits last in Scenarios so the user
  * sees why it is missing.
@@ -133,11 +133,6 @@
         return parts.join('\n');
     }
 
-    // A map count of null means the star menu could not be read.
-    function countText(n) {
-        return n === null ? '?' : String(n);
-    }
-
     function mapsOf(adventure, pass) {
         var run = S.modules.adventures.run;
         return run ? run.available(adventure, pass) : 0;
@@ -151,15 +146,15 @@
         return countRow(text, function (pass) { return mapsOf(adventure, pass); }, onSelect);
     }
 
-    // The same row for a count that countOf(pass) works out. unread, when
-    // given, gives the label suffix while the count cannot be read.
-    function countRow(text, countOf, onSelect, unread) {
+    // The same row for a count that countOf(pass) works out. While the count
+    // cannot be read the label shows the reading wording, never a count.
+    function countRow(text, countOf, onSelect) {
         var on = false;
         return {
             label: function (pass) {
                 var n = countOf(pass);
-                if (n === null && unread) return text + ' ' + unread();
-                return text + ' ×' + countText(n);
+                if (n === null) return text + ' ' + readingText();
+                return text + ' ×' + n;
             },
             enabled: function (pass) {
                 var n = countOf(pass);
@@ -186,9 +181,9 @@
         });
     }
 
-    // The shared wording of an unsettled read, for a queue row whose map
-    // count is not known yet; read at label time, since the helpers are not
-    // there while the menu file loads. '×?' only without them.
+    // The shared wording of an unsettled read, for any row whose map count is
+    // not known yet; read at label time, since the helpers are not there
+    // while the menu file loads. '×?' only without them.
     function readingText() {
         var h = S.kernel.ui && S.kernel.ui.helpers;
         return h && h.READING ? '(' + h.READING + ')' : '×?';
@@ -222,7 +217,7 @@
         }, function () {
             var run = S.modules.adventures.run;
             if (run) run.startQueue(rec.id);
-        }, readingText);
+        });
     }
 
     // One flat Queues folder; broken files last. Nothing without a queue.
