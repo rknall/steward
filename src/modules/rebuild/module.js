@@ -1,20 +1,40 @@
 /*
  * Rebuild module.
  *
- * Scans the home zone's building container for exhausted wells and fields
- * (shells named MineDepletedDepositWater / MineDepletedDepositCorn that the
- * map reports through IsADepletedDeposit) and rebuilds each with the
- * configured well or field type, using command SET_BUILDING_IN_GAME (50).
+ * Finds exhausted wells and fields on the home island (the depleted shells
+ * named in settings.js) and rebuilds each with the configured well or field
+ * type. No UI; it is switched on through settings.json ('steward.rebuild').
  *
- * One rebuild is queued per free build-queue slot; the queued action checks
- * the grid and the queue again before it sends anything.
+ * One rebuild is queued per plan. The queued action sends it through the
+ * construction rebuild def, which refuses at fire time unless the grid still
+ * holds an idle depleted shell and a build slot is free, and which verifies
+ * the send on the grid itself. The attempt keeps the module busy until it
+ * ends, so the next plan never counts a build queue that lags a send in
+ * flight.
+ *
+ * Every rebuild is guarded by the send ledger: its entry is on disk before
+ * the host call, and the grid stays blocked until the grid shows the rebuild
+ * or proves that it did not happen. So a rebuild the server answers late is
+ * never paid twice, across ticks, script reloads and client restarts. Each
+ * plan first settles the entries left over from earlier sends.
+ *
+ * Every read that leads to a decision is a Result and fails closed: a
+ * building list, build queue or shell state that does not read queues
+ * nothing and is waited on, never taken as "nothing to do" or "room left".
  */
 
 (function (S) {
 
     if (!S.modules.rebuild) S.modules.rebuild = {};
 
-    var CMD_SET_BUILDING_IN_GAME = 50;
+    var R = S.kernel.read;
+
+    var OWNER = 'rebuild';
+
+    // An unseen rebuild is only judged failed after this long, as mining
+    // holds a build: a rebuild that still lands is answered well within it,
+    // so the one new send that a proven no-effect allows cannot double one.
+    var RESOLVE_AFTER_MS = 1800000;
 
     function readSettings() {
         var stored = S.kernel.settings.read('rebuild') || {};
@@ -33,6 +53,11 @@
         return null;
     }
 
+    function entryOf(name) {
+        var m = S.modules.rebuild;
+        return find(m.wells, name) || find(m.fields, name);
+    }
+
     // The building to place on a depleted shell of the given name, or null
     // when the name is not an exhausted well or field.
     function target(depletedName, s) {
@@ -42,38 +67,33 @@
         return null;
     }
 
-    function isDepleted(b) {
-        var name = S.core.buildings.name(b);
-        if (target(name, readSettings()) === null) return false;
-        try {
-            var sdm = game.gi.mCurrentPlayerZone.mStreetDataMap;
-            if (sdm && typeof sdm.IsADepletedDeposit === 'function') {
-                return !!sdm.IsADepletedDeposit(b);
-            }
-        } catch (e) {
-            S.kernel.warn('rebuild', 'IsADepletedDeposit threw:', e);
-            return false;
-        }
-        return true;
+    // The shell a well or field entry is rebuilt on.
+    function shellOf(entry) {
+        var m = S.modules.rebuild;
+        return m.wells.indexOf(entry) !== -1 ? m.depletedWell : m.depletedField;
     }
 
-    function freeSlots() {
-        try {
-            var bq = game.gi.mCurrentPlayer.mBuildQueue;
-            var free = bq.GetTotalAvailableSlots() - bq.GetQueue_vector().length;
-            return free > 0 ? free : 0;
-        } catch (e) {
-            S.kernel.warn('rebuild', 'freeSlots threw:', e);
-            return 0;
-        }
+    function key(grid) {
+        return S.core.ledger.key('rebuild', 'home', grid);
     }
 
-    function buildingNumber(entry) {
-        try {
-            var nr = global.buildingGroup.GetNrFromName(entry.name);
-            if (nr > 0) return nr;
-        } catch (e) { /* fall back to the known id */ }
-        return entry.id;
+    function gridOfKey(k) {
+        var parts = String(k).split('|');
+        var g = Number(parts[parts.length - 1]);
+        return isFinite(g) ? g : null;
+    }
+
+    function defFor(entry, grid) {
+        return S.core.construction.rebuild(entry.id, grid, entry.name, shellOf(entry));
+    }
+
+    // True on a good read. A read that stays bad warns once per wait window.
+    function awaited(what, r, text, opts) {
+        var w = R.wait('rebuild', what, r, opts);
+        if (w === 'expired') {
+            S.kernel.warn('rebuild', text + ' unreadable: ' + (r && r.why) + '; no rebuilds until it reads');
+        }
+        return w === 'go';
     }
 
     function isReady(ctx) {
@@ -81,59 +101,83 @@
         return !!(s.enabled && ctx.zone && ctx.zone.isHome);
     }
 
+    // Settles ledger entries from earlier sends: a grid that now shows the
+    // rebuild clears its entry, and one that proves no effect frees its grid.
+    function settle() {
+        var items = S.core.ledger.snapshot(OWNER);
+        for (var i = 0; i < items.length; i++) {
+            var entry = entryOf(items[i].name);
+            var grid = gridOfKey(items[i].key);
+            if (!entry || grid === null) continue;
+            S.core.ledger.reread(items[i].key, defFor(entry, grid));
+        }
+    }
+
     function plan() {
         var s = readSettings();
-        S.core.buildings.invalidate();
-        var found = S.core.buildings.byPredicate(isDepleted);
-        if (!found.length) return;
-
-        var free = freeSlots();
-        if (free <= 0) return;
-        found.sort(function (a, b) {
-            return S.core.buildings.grid(a) - S.core.buildings.grid(b);
-        });
-
-        var queued = 0;
-        for (var i = 0; i < found.length && queued < free; i++) {
-            var grid = S.core.buildings.grid(found[i]);
-            var entry = target(S.core.buildings.name(found[i]), s);
-            var delay = (queued === 0) ? 0 : s.actionDelay;
-            S.kernel.queue.add('rebuild.place', [grid, entry.name], delay);
-            queued++;
+        if (!s.enabled) return;
+        if (!S.core.ledger.usable()) {
+            S.kernel.debug('rebuild', 'send ledger unusable, no rebuilds');
+            return;
         }
-        if (queued > 0) S.kernel.log('rebuild', 'queued', queued, 'rebuild(s)');
+
+        settle();
+
+        var list = S.core.buildings.listRead();
+        if (!awaited('list', list, 'building list', { accept: R.PARTIAL })) return;
+
+        var found = [];
+        for (var i = 0; i < list.value.length; i++) {
+            var b = list.value[i];
+            var name = S.core.buildings.name(b);
+            var entry = target(name, s);
+            if (!entry) continue;
+            var grid = S.core.buildings.grid(b);
+            var why = S.core.shells.ready(b, name);
+            if (why !== null) {
+                if (R.isReadRefusal(why)) {
+                    S.kernel.debug('rebuild', 'grid ' + grid + ' skipped: ' + why);
+                }
+                continue;
+            }
+            if (S.core.ledger.blocked(key(grid)) !== null) continue;
+            found.push({ grid: grid, entry: entry });
+        }
+        // A partial list still shows real shells, so those may be rebuilt;
+        // finding none on it only means nothing to do on this pass.
+        if (!found.length) return;
+        found.sort(function (a, c) { return a.grid - c.grid; });
+
+        var cap = S.core.construction.capacity();
+        if (!awaited('capacity', cap, 'build queue')) return;
+        if (!(cap.value.slotsTotal - cap.value.slotsUsed > 0)) {
+            S.kernel.debug('rebuild', 'build queue full, no rebuild');
+            return;
+        }
+
+        if (!S.core.ledger.admit(OWNER)) return;
+
+        var pick = found[0];
+        S.kernel.queue.add('rebuild.place', [pick.grid, pick.entry.name], 0);
+        S.kernel.log('rebuild', 'queued rebuild of ' + pick.entry.name + ' on grid ' + pick.grid);
     }
 
     function place(params) {
         var grid = params[0];
         var name = params[1];
-        var m = S.modules.rebuild;
-        var entry = find(m.wells, name) || find(m.fields, name);
-        if (!entry) return;
-
-        // Re-check: state may have drifted since plan() queued.
-        var live = S.core.buildings.byGrid(grid);
-        if (!live || !isDepleted(live)) {
-            S.kernel.log('rebuild', 'grid', grid, 'no longer depleted — skipping');
+        var entry = entryOf(name);
+        if (!entry) {
+            S.kernel.warn('rebuild', 'unknown rebuild target ' + name + ' for grid ' + grid);
             return;
         }
-        if (freeSlots() <= 0) {
-            S.kernel.log('rebuild', 'build queue full — skipping grid', grid);
-            return;
-        }
-        try {
-            var gi = game.gi;
-            gi.SendServerAction(CMD_SET_BUILDING_IN_GAME, buildingNumber(entry), grid, 0, null);
-            // Pre-place locally like the client does, or the server's answer
-            // is dropped and the queue only shows the order after a reload.
-            var sdm = gi.mCurrentPlayerZone.mStreetDataMap;
-            if (sdm && typeof sdm.SetPrePlaceBuildingGridPos === 'function') {
-                sdm.SetPrePlaceBuildingGridPos(gi.mCurrentPlayer, entry.name, grid, 0);
-            }
-            S.kernel.log('rebuild', 'rebuilding', entry.name, 'on grid', grid);
-            S.core.buildings.invalidate();
-        } catch (e) {
-            S.kernel.error('rebuild', 'rebuild of', entry.name, 'on grid', grid, 'threw:', e);
+        var ok = S.core.ledger.attempt(defFor(entry, grid), {
+            key:            key(grid),
+            owner:          OWNER,
+            name:           entry.name,
+            resolveAfterMs: RESOLVE_AFTER_MS
+        });
+        if (ok !== true) {
+            S.kernel.error('rebuild', 'rebuild of ' + entry.name + ' on grid ' + grid + ' not started');
         }
     }
 
@@ -141,6 +185,16 @@
         if (!S.kernel.settings.read('rebuild')) {
             S.kernel.settings.write('rebuild', S.modules.rebuild.defaultSettings);
         }
+        S.core.ledger.register(OWNER, {
+            category: 'rebuild',
+            breaker: {
+                label:      'rebuild breaker',
+                missText:   'rebuilds in a row were not seen on their grid',
+                pausedText: 'rebuilding is paused',
+                resumeText: 'rebuilding resumes'
+            }
+        });
+        S.core.ledger.load();
         S.kernel.queue.action('rebuild.place', place);
     }
 

@@ -10,9 +10,9 @@
 
     if (!S.modules.rebuild) S.modules.rebuild = {};
 
-    // Buildable wells and fields. id is the building number the client
-    // resolves from the name (global.buildingGroup.GetNrFromName); it is only
-    // the fallback when that lookup fails.
+    // Buildable wells and fields. id is the building number that is sent
+    // with the rebuild; the client's lookup of the number by name appears
+    // only in the rebuild's log line, as a check on this list.
     S.modules.rebuild.wells = [
         { name: 'Well',    id: 72,  label: 'Well' },
         { name: 'Well_03', id: 176, label: 'Deep Well' },
@@ -32,9 +32,7 @@
         // Off by default: it spends resources and build-queue slots.
         enabled:     false,
         wellType:    'Well',
-        fieldType:   'Farmfield',
-        // Delay between queued rebuilds, in ms.
-        actionDelay: 1000
+        fieldType:   'Farmfield'
     };
 
 }(Steward));
