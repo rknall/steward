@@ -178,7 +178,30 @@ t.test('a module directory without guide/page.html throws and names the id', fun
 t.test('a module missing from moduleTitles throws', function () {
     var fx = fixture(function (r, s, mods) { alphaSettings(mods); });
     fx.opts.moduleTitles = { alpha: 'Zeta Alpha' };
-    t.assert.throws(function () { guide.build(fx.opts); }, /module beta: no ui\.section\.title/);
+    t.assert.throws(function () { guide.build(fx.opts); }, /module beta: not registered/);
+});
+
+function ownTitleFx(frag) {
+    return fixture(function (r, s, mods) {
+        alphaSettings(mods);
+        write(path.join(mods, 'beta', 'guide', 'page.html'), frag);
+    });
+}
+
+t.test('a module with no ui section takes its title from its own h1', function () {
+    var fx = ownTitleFx('<h1>Beta Own</h1>\n' + modFrag({ settings: '<h2>Settings</h2>\n<p>None.</p>\n' }));
+    fx.opts.moduleTitles = { alpha: 'Zeta Alpha', beta: null };
+    guide.build(fx.opts);
+    var html = read(fx, 'beta');
+    t.assert.ok(html.indexOf('<p class="ug-crumb">Modules &rsaquo; Beta Own</p>\n<h1') !== -1);
+    t.assert.ok(html.indexOf('<title>Beta Own</title>') !== -1);
+    t.assert.ok(read(fx, 'alpha').indexOf('<summary>Beta Own</summary>') !== -1);
+});
+
+t.test('a module with no ui section and no h1 throws', function () {
+    var fx = ownTitleFx(modFrag({ settings: '<h2>Settings</h2>\n<p>None.</p>\n' }));
+    fx.opts.moduleTitles = { alpha: 'Zeta Alpha', beta: null };
+    t.assert.throws(function () { guide.build(fx.opts); }, /no <h1> title/);
 });
 
 t.test('heading ids and the nav levels', function () {
@@ -319,9 +342,12 @@ t.test('moduleTitles covers every module directory', function () {
     var titles = guide.moduleTitles();
     var dir = path.resolve(__dirname, '..', '..', 'src', 'modules');
     fs.readdirSync(dir, { withFileTypes: true }).forEach(function (e) {
-        if (e.isDirectory()) t.assert.ok(titles[e.name], e.name);
+        if (e.isDirectory()) {
+            t.assert.ok(Object.prototype.hasOwnProperty.call(titles, e.name), e.name);
+        }
     });
     t.assert.strictEqual(titles.collect, 'Collect Pickups');
+    t.assert.strictEqual(titles.rebuild, null);
 });
 
 t.test('slugify lowercases and trims', function () {

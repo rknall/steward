@@ -89,7 +89,9 @@ t.test('every relative href and src resolves, fragments included', function () {
 
 t.test('a module page title and nav summary equal the registered title', function () {
     modules.forEach(function (p) {
+        // A module with no ui section has no registered title; its own h1 names it.
         var title = titles[p.slug];
+        if (title === null) title = guide.titleOf(fs.readFileSync(fragmentFile(p), 'utf8'), p.slug);
         t.assert.ok(title, p.slug);
         t.assert.strictEqual(p.title, title);
         var html = page(p.slug);
