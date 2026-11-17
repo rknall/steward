@@ -159,14 +159,6 @@
         return d.types() || [];
     }
 
-    // The game's name for a deposit; the key itself when the locale lacks it.
-    function depositLabel(name) {
-        var text = null;
-        try { text = S.core.locale.res(name); }
-        catch (e) { text = null; }
-        return text ? String(text) : String(name);
-    }
-
     function pausedCount(s) {
         var types = depositTypes();
         var n = 0;
@@ -305,7 +297,7 @@
         for (var i = 0; i < types.length; i++) {
             var info = types[i];
             var count = activeCount(info);
-            var label = { text: depositLabel(info.name), title: info.name };
+            var label = { text: S.core.locale.res(info.name), title: info.name };
             var cfg = depCfg[info.name] || {};
             buffed += buffedCount(info);
             if (!info.mineName) {

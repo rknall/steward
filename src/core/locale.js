@@ -3,7 +3,8 @@
  *
  * Thin layer over the host loca.GetText. Centralises category strings
  * ('BUI', 'RES', …) so a typo doesn't ship, and provides a string formatter
- * that survives the AIR-32 ban on template literals.
+ * that survives the AIR-32 ban on template literals. `known` returns the host
+ * text or null, to tell an untranslated key apart from a translated one.
  */
 
 (function (S) {
@@ -19,6 +20,13 @@
             S.kernel.warn('locale', 'GetText threw for', category + ':' + key, ':', e);
         }
         return key;
+    }
+
+    // The host text for a key, or null when the host has none (empty key,
+    // no text, or the text is the key itself).
+    function known(category, key) {
+        var v = safeText(category, key);
+        return (v && v !== key) ? v : null;
     }
 
     function format(template, args) {
@@ -39,6 +47,7 @@
 
     S.core.locale = {
         text:   safeText,
+        known:  known,
         bui:    function (k) { return safeText('BUI', k); },
         res:    function (k) { return safeText('RES', k); },
         lab:    function (k) { return safeText('LAB', k); },

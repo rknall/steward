@@ -60,11 +60,6 @@
         }
     }
 
-    function notify(text) {
-        if (typeof text !== 'string' || !text) return;
-        S.kernel.ui.notify(text);
-    }
-
     function callDone(done) {
         if (typeof done !== 'function') return;
         try {
@@ -125,13 +120,13 @@
     function announce(cfg, running, rel) {
         var st = U().state();
         if (st.notifiedVersion !== rel.text) {
-            notify(U().text.available(rel.text));
+            S.kernel.ui.notify(U().text.available(rel.text));
             U().saveState({ notifiedVersion: rel.text });
         }
         if (!autoAllowed(cfg, running, rel)) return;
         S.kernel.log('updater', 'automatic install of', rel.text);
         U().install.run(rel, { auto: true, restore: null }, function (result) {
-            if (result && !result.ok) notify(U().text.failure(result.failure));
+            if (result && !result.ok) S.kernel.ui.notify(U().text.failure(result.failure));
             redraw();
         });
     }
@@ -227,7 +222,7 @@
         S.kernel.log('updater', 'install notice: from', notice.from, 'to', notice.to,
             loaded ? 'loaded' : 'not loaded, running ' + runningText,
             notice.restore ? (notice.restored ? 'settings restored' : 'settings not restored') : '');
-        notify(msg);
+        S.kernel.ui.notify(msg);
     }
 
     function onBoot() {

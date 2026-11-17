@@ -48,17 +48,6 @@
                ' ' + S.kernel.ui.helpers.clock(d);
     }
 
-    function resName(resource) {
-        if (!resource) return '';
-        try { return S.core.locale.res(resource); }
-        catch (e) { return resource; }
-    }
-
-    function buiName(building) {
-        try { return S.core.locale.bui(building); }
-        catch (e) { return building; }
-    }
-
     function textOrDash(v) {
         return (v === null || typeof v === 'undefined') ? '—' : String(v);
     }
@@ -142,7 +131,7 @@
             return h.card({ title: 'Explorer event items' })
                 .append(h.empty('No event with explorer items is live.'));
         }
-        var res = resName(est.resource);
+        var res = S.core.locale.res(est.resource);
         var held = heldAmount(est.code);
         var meta = (held === null ? '' : res + ' ' + held + ' held · ') +
                    'items stop ' + formatDate(est.endTime);
@@ -197,7 +186,7 @@
     }
 
     function fieldLabel(row) {
-        var label = buiName(row.building);
+        var label = S.core.locale.bui(row.building);
         if (row.grid !== null && typeof row.grid !== 'undefined') {
             label += ' (grid ' + row.grid + ')';
         } else {
@@ -340,7 +329,7 @@
         for (var i = 0; i < list.length; i++) {
             var ev = list[i];
             var held = heldAmount(ev.code);
-            var res = resName(eventResource(ev.code));
+            var res = S.core.locale.res(eventResource(ev.code));
             var lines = [eventPhase(ev).label +
                 (held === null ? '' : ' · ' + (res ? res + ' ' : '') + held + ' held')];
             if (est && est.code === ev.code) {
@@ -371,7 +360,7 @@
     function estimateText() {
         var est = safeEstimate();
         if (!est) return 'no event with explorer items is live';
-        var res = resName(est.resource);
+        var res = S.core.locale.res(est.resource);
         var text = est.name + ': ≈ ' + Math.round(est.perDay) + ' ' + res + '/day';
         if (est.untilEnd !== null && typeof est.untilEnd !== 'undefined') {
             text += ', ≈ ' + est.untilEnd + ' until ' + formatDate(est.endTime);
@@ -381,10 +370,7 @@
     }
 
     function showEstimateAlert() {
-        var text = estimateText();
-        try {
-            if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text);
-        } catch (e) { /* best effort */ }
+        S.kernel.ui.notify(estimateText());
     }
 
     S.modules.eventcalc.resetSession      = resetSession;

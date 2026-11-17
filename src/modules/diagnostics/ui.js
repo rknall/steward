@@ -10,11 +10,6 @@
 
     if (!S.modules.diagnostics) S.modules.diagnostics = {};
 
-    function notify(text) {
-        try { if (typeof showGameAlert === 'function') showGameAlert('Steward: ' + text); }
-        catch (e) { /* best effort */ }
-    }
-
     function dumpHostSnapshot() {
         var d = S.modules.diagnostics.inspect;
         S.kernel.log('diag', '--- host snapshot ---');
@@ -64,7 +59,7 @@
             }
         } catch (e) { S.kernel.error('diag', 'events dump threw:', e); }
 
-        notify('Host snapshot dumped to log.');
+        S.kernel.ui.notify('Host snapshot dumped to log.');
     }
 
     function dumpKernelState() {
@@ -83,7 +78,7 @@
             S.kernel.log('diag', 'queue total depth:', S.kernel.queue.depth());
             S.kernel.log('diag', 'queue running:', S.kernel.queue.runningModule());
         } catch (e) { S.kernel.error('diag', 'kernel state dump threw:', e); }
-        notify('Kernel state dumped to log.');
+        S.kernel.ui.notify('Kernel state dumped to log.');
     }
 
     function inspectSpecialists() {
@@ -142,7 +137,7 @@
         } catch (e) {
             S.kernel.error('diag', 'inspectSpecialists threw:', e);
         }
-        notify('Specialist inspection dumped to log.');
+        S.kernel.ui.notify('Specialist inspection dumped to log.');
     }
 
     function inspectCurrentZone() {
@@ -152,7 +147,7 @@
             var z = S.core.zone.current();
             d.logLines('diag', d.describe(z, 'mCurrentPlayerZone'));
         } catch (e) { S.kernel.error('diag', 'zone dump threw:', e); }
-        notify('Zone dumped to log.');
+        S.kernel.ui.notify('Zone dumped to log.');
     }
 
     // ---------------------------------------------------------------
@@ -402,7 +397,7 @@
     // same GetType.
     function deepInspectFamily(family) {
         var c = S.core.specialists;
-        if (!c) return notify('core.specialists not ready.');
+        if (!c) return S.kernel.ui.notify('core.specialists not ready.');
 
         var listFn, cat, label;
         if (family === 'explorer') {
@@ -410,18 +405,18 @@
         } else if (family === 'geologist') {
             listFn = c.geologists; cat = 'diag:geo'; label = 'Geologist';
         } else {
-            return notify('Unknown family: ' + family);
+            return S.kernel.ui.notify('Unknown family: ' + family);
         }
-        if (!listFn) return notify('core.specialists.' + family + 's() unavailable.');
+        if (!listFn) return S.kernel.ui.notify('core.specialists.' + family + 's() unavailable.');
 
         var specs;
         try { specs = listFn.call(c); }
         catch (e) {
             S.kernel.error(cat, family + 's() threw:', e);
-            return notify('Could not list ' + family + 's — see log.');
+            return S.kernel.ui.notify('Could not list ' + family + 's — see log.');
         }
         if (!specs || !specs.length) {
-            return notify('No ' + family + 's on the current zone.');
+            return S.kernel.ui.notify('No ' + family + 's on the current zone.');
         }
 
         // Filter to player-owned. Sort by GetType so same-type specimens
@@ -471,7 +466,7 @@
         }
 
         S.kernel.log(cat, '## end deep ' + family + ' dump');
-        notify('Deep ' + family + ' dump for ' + capped.length +
+        S.kernel.ui.notify('Deep ' + family + ' dump for ' + capped.length +
                ' specialist(s) written to log (category ' + cat + ').');
     }
 

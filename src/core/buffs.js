@@ -255,11 +255,11 @@
             var out = [];
             for (var i = 0; i < START_BUFFS.length; i++) {
                 var name = START_BUFFS[i].name;
-                var shown = S.core.locale.res(name);
+                var shown = S.core.locale.known('RES', name);
                 out.push({
                     name:   name,
                     amount: amount(name),
-                    label:  shown && shown !== name ? shown : START_BUFFS[i].label
+                    label:  shown || START_BUFFS[i].label
                 });
             }
             return out;

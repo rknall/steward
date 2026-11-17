@@ -180,6 +180,15 @@ Steward.core.locale.res('Coin');
 
 The wrapper handles missing-key fallback uniformly, and centralises the categorical strings (`'BUI'`, `'RES'`) so a typo doesn't ship.
 
+The wrapper never throws. When the host has no text for a key it returns the key itself, so call `res` and `bui` directly and skip local try/catch blocks and `|| name` fallbacks. When the caller must tell "untranslated" apart from a translated name, use `known`, which returns the host text or `null`:
+
+```js
+var shown = Steward.core.locale.known('RES', name);
+label: shown || builtInLabel;   // null means the host has no text for this key
+```
+
+Alerts go through `Steward.kernel.ui.notify(text)`, which adds the `Steward:` prefix and shows nothing for empty text. Modules never call `showGameAlert` themselves.
+
 ## Rule 5: `pickTask` and `pickDeposits` are the source of truth
 
 When choosing what an explorer or geologist should do next, ask core:

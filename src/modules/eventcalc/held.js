@@ -33,11 +33,6 @@
         }
     }
 
-    function resLabel(resource) {
-        try { return S.core.locale.res(resource) || resource; }
-        catch (e) { return resource; }
-    }
-
     function eventLabel(row) {
         var ev = S.core.events.data && S.core.events.data.events;
         var entry = ev && row.code ? ev[row.code] : null;
@@ -101,7 +96,7 @@
             var r = rows[i];
             var known = typeof r.amount === 'number' && !isNaN(r.amount);
             var zero = known && r.amount === 0;
-            var name = resLabel(r.resource);
+            var name = S.core.locale.res(r.resource);
             var $ev = $('<span>').text(eventLabel(r));
             if (r.live) $ev.append(' ').append(h.badge('ok', 'Live'));
             body.push([

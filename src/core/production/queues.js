@@ -417,15 +417,6 @@
         }
     }
 
-    function label(name) {
-        try {
-            var t = S.core.locale.res(name);
-            return (typeof t === 'string' && t) ? t : name;
-        } catch (e) {
-            return name;
-        }
-    }
-
     // Unit names that no unit base resolves, logged once each.
     var unitSkipLogged = {};
 
@@ -467,7 +458,7 @@
     function itemEntry(name, avail, page, pageLabel) {
         return {
             name:       name,
-            label:      label(name),
+            label:      S.core.locale.res(name),
             producible: avail ? avail.producible : true,
             why:        avail ? avail.why : null,
             page:       typeof page === 'string' ? page : null,

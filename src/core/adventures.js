@@ -86,12 +86,11 @@
         return null;
     }
 
-    // The host's localised campaign name; an unknown key comes back unchanged,
-    // so the raw value is split at case changes and digits instead.
+    // The host's localised campaign name; an unknown key gives null, so the
+    // raw value is split at case changes and digits instead.
     function campaignLabel(raw) {
-        var key = 'Campaign_' + raw;
-        var text = S.core.locale.lab(key);
-        if (typeof text === 'string' && text !== '' && text !== key) return text;
+        var text = S.core.locale.known('LAB', 'Campaign_' + raw);
+        if (text) return text;
         return String(raw)
             .replace(/_/g, ' ')
             .replace(/([a-z])([A-Z0-9])/g, '$1 $2')
