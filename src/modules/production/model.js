@@ -93,9 +93,7 @@
     function M() { return S.modules.production; }
     function P() { return S.core.production; }
 
-    function has(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function has(o, k) { return S.kernel.is.has(o, k); }
 
     function safe(fn, fallback) {
         try {
@@ -369,9 +367,7 @@
         };
     }
 
-    function num(v) {
-        return typeof v === 'number' && !isNaN(v);
-    }
+    function num(v) { return S.kernel.is.num(v); }
 
     // The sum of one field over a run, or null when any member's is not a
     // number: a partial sum would show a time or a count that is too low.

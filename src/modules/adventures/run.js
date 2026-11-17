@@ -77,9 +77,7 @@
         return 'Requested: ' + req.label + ' ×' + req.count + (req.ended ? ', repetition ended' : '');
     }
 
-    function trim(v) {
-        return String(v).replace(/^\s+|\s+$/g, '');
-    }
+    function trim(v) { return S.kernel.is.trim(v); }
 
     // Turns a prompt answer into a run count. Cancel stores nothing, unlike
     // autoTSO, which treats a cancelled prompt as one run.

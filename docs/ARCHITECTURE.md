@@ -128,6 +128,8 @@ The kernel UI is five files that rely on that order. `89_ui_style.js` loads firs
 
 `16_text.js` holds the host-string cleaner and has no kernel dependencies, so it sits before everything that reads names.
 
+`14_is.js` holds `Steward.kernel.is` (`has`, `array`, `plainObject`, `str`, `trim`, `num`, `finite`), the one home of the small value checks that core and modules share. It needs only the namespace and loads before `15_enums.js`, whose `enumKey` and `enumHas` use it at call time. Those two take the enum as an argument, because domain enums are filled later by core and module files, so the kernel cannot read them at load time.
+
 ## Lifecycle
 
 ```

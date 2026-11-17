@@ -775,10 +775,7 @@
     // Settings buffer and change counting
     // -----------------------------------------------------------------
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' &&
-               Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
     // Settings are JSON in storage, so a JSON round trip is a full copy.
     function deepCopy(v) {
@@ -786,9 +783,7 @@
         return JSON.parse(JSON.stringify(v));
     }
 
-    function hasOwn(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function hasOwn(o, k) { return S.kernel.is.has(o, k); }
 
     function bufferedSettings(ns) {
         if (!hasOwn(active.buffer, ns)) {

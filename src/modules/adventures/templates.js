@@ -53,17 +53,11 @@
     var FORMAT_VERSION = 1;
     var ID_RE = /^[A-Za-z0-9_-]+$/;
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function str(v) {
-        return typeof v === 'string' ? v : '';
-    }
+    function str(v) { return S.kernel.is.str(v); }
 
     function validId(id) {
         return typeof id === 'string' && ID_RE.test(id);

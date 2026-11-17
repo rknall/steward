@@ -44,9 +44,7 @@
     // selectable only selects it again.
     var CLICK_RETRIES = 1;
 
-    function hasOwn(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function hasOwn(obj, key) { return S.kernel.is.has(obj, key); }
 
     // The window is CLICK_POLLS runner polls, read at call time. The floor of
     // 1 ms matches the actions runner's pollGap(), so the window is exactly

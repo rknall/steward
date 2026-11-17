@@ -68,9 +68,7 @@
 
     var CATEGORY = 'adventures';
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
     function st() {
         return S.modules.adventures.state;

@@ -302,7 +302,7 @@
         return out;
     }
 
-    function isNum(v) { return typeof v === 'number' && !isNaN(v); }
+    function isNum(v) { return S.kernel.is.num(v); }
 
     // The host's population resource name, owned by core/resources.js.
     function populationResource() { return S.core.resources.POPULATION; }
@@ -638,9 +638,7 @@
         return '?';
     }
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
     function gridsText(grids) {
         return isArray(grids) ? grids.join(',') : String(grids);

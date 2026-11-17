@@ -39,9 +39,7 @@
     // Verify window per send for a raise or an unload.
     var ACTION_TIMEOUT_MS = 15000;
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
     // --- Pure map helpers. An army map is { unitName: amount }, amounts > 0.
 

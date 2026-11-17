@@ -77,9 +77,7 @@
         if (S.kernel.ui && S.kernel.ui.notify) S.kernel.ui.notify(text);
     }
 
-    function has(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function has(o, k) { return S.kernel.is.has(o, k); }
 
     function textEl(tag, cls, text) {
         var $e = $('<' + tag + '>');

@@ -44,9 +44,7 @@
 
     if (!S.core.events) S.core.events = {};
 
-    function isNum(n) {
-        return typeof n === 'number' && !isNaN(n);
-    }
+    function isNum(n) { return S.kernel.is.num(n); }
 
     function remainingSeconds(endMs, nowMs) {
         if (!isNum(endMs)) return null;

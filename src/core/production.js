@@ -82,9 +82,7 @@
         }
     }
 
-    function has(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function has(o, k) { return S.kernel.is.has(o, k); }
 
     // One member of a buff definition, or undefined when it is missing or
     // throws. Each member is read once, so a definition the bridge hands out

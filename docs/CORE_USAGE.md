@@ -166,6 +166,10 @@ var r = Steward.core.zone.view();
 if (!Steward.kernel.read.isOk(r)) return;   // loading or unreadable: retry later
 ```
 
+## Rule 3.9: type guards and enum walks come from the kernel
+
+Use `Steward.kernel.is.*` (`has`, `array`, `plainObject`, `str`, `trim`, `num`, `finite`) and `Steward.kernel.enumKey(E, v)` / `enumHas(E, v)` instead of a private copy. A file may keep a one-line local wrapper under its own name, as long as the body only delegates. Pick the member by its contract: `num` lets `Infinity` through and `finite` does not; `str` gives `''` for a non-string. A contract that differs from these gets its own name in the kernel, never a widened shared one.
+
 ## Rule 4: use the locale wrapper
 
 ```js

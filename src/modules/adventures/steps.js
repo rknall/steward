@@ -87,17 +87,11 @@
     var MAX_MINUTES = 120;
     var MAX_MESSAGE = 200;
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
     function st() {
         return S.modules.adventures.state;

@@ -99,9 +99,7 @@
         } catch (e) { return '[threw]'; }
     }
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
     // ---------------------------------------------------------------
     // Generals

@@ -33,9 +33,7 @@
         session = { overrides: {}, snapshot: null };
     }
 
-    function isNum(n) {
-        return typeof n === 'number' && !isNaN(n);
-    }
+    function isNum(n) { return S.kernel.is.num(n); }
 
     function pad2(n) {
         return (n < 10 ? '0' : '') + n;

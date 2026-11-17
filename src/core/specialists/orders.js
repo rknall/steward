@@ -94,10 +94,7 @@
     function taskKind(spec) {
         var raw = rawTaskType(spec);
         if (raw === null) return null;
-        for (var kind in RAW_CODES) {
-            if (Object.prototype.hasOwnProperty.call(RAW_CODES, kind) && RAW_CODES[kind] === raw) return kind;
-        }
-        return null;
+        return S.kernel.enumKey(RAW_CODES, raw);
     }
 
     // Remaining travel time of the running task, or null. The unit is assumed

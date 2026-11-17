@@ -43,21 +43,13 @@
     var FORMAT_VERSION = 1;
     var warnedFolder = false;
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function str(v) {
-        return typeof v === 'string' ? v : '';
-    }
+    function str(v) { return S.kernel.is.str(v); }
 
-    function trim(v) {
-        return str(v).replace(/^\s+|\s+$/g, '');
-    }
+    function trim(v) { return S.kernel.is.trim(str(v)); }
 
     function posInt(v) {
         return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v > 0;

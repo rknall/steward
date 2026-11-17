@@ -346,9 +346,7 @@
         }
     }
 
-    function hasOwn(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function hasOwn(obj, key) { return S.kernel.is.has(obj, key); }
 
     // True when the trigger asks for a click on a named map object.
     function isClickTrigger(t) {

@@ -29,6 +29,20 @@
         S.kernel.PRIORITY_VALID[S.kernel.PRIORITY_ORDER[i]] = true;
     }
 
+    // Enums are filled by core and module files after this one, so both helpers
+    // take the enum as an argument and read it at call time.
+    S.kernel.enumKey = function (E, v) {
+        if (!E) return null;
+        for (var k in E) {
+            if (S.kernel.is.has(E, k) && E[k] === v) return k;
+        }
+        return null;
+    };
+
+    S.kernel.enumHas = function (E, v) {
+        return S.kernel.enumKey(E, v) !== null;
+    };
+
     // Slots for domain enums populated by core files.
     if (!S.Building)            S.Building            = {};
     if (!S.SpecialistType)      S.SpecialistType      = {};

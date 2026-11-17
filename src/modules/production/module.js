@@ -117,9 +117,7 @@
     var lastPass      = { at: 0, rows: [] };
     var said          = {};   // debug lines already written this session
 
-    function has(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function has(o, k) { return S.kernel.is.has(o, k); }
 
     function debugOnce(key) {
         if (said[key]) return;

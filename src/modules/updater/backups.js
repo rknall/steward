@@ -44,6 +44,8 @@
         return typeof U().now === 'function' ? U().now() : Date.now();
     }
 
+    // Deliberately looser than Steward.kernel.is.plainObject: it checks JSON.parse
+    // output and carry state, where only arrays must be told apart from objects.
     function isPlainObject(v) {
         return !!v && typeof v === 'object' && Object.prototype.toString.call(v) !== '[object Array]';
     }

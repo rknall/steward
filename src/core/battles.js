@@ -130,13 +130,9 @@
         };
     }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function isNum(v) {
-        return typeof v === 'number' && isFinite(v);
-    }
+    function isNum(v) { return S.kernel.is.finite(v); }
 
     function copyArmy(src) {
         var out = {};

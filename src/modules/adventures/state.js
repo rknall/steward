@@ -276,21 +276,13 @@
     // clearing is logged once.
     var savedSettled = false;
 
-    function isArray(v) {
-        return Object.prototype.toString.call(v) === '[object Array]';
-    }
+    function isArray(v) { return S.kernel.is.array(v); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && Object.prototype.toString.call(v) === '[object Object]';
-    }
+    function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
-    function str(v) {
-        return typeof v === 'string' ? v : '';
-    }
+    function str(v) { return S.kernel.is.str(v); }
 
     // The non-empty strings of a list ([] for anything else).
     function strList(v) {
@@ -302,9 +294,7 @@
         return out;
     }
 
-    function num(v) {
-        return typeof v === 'number' && isFinite(v) ? v : null;
-    }
+    function num(v) { return S.kernel.is.finite(v) ? v : null; }
 
     function count(v) {
         return typeof v === 'number' && isFinite(v) && v >= 0 ? Math.floor(v) : 0;
@@ -324,21 +314,13 @@
         return st.itemAt(r);
     }
 
-    function isValue(enumObj, value) {
-        for (var k in enumObj) {
-            if (has(enumObj, k) && enumObj[k] === value) return true;
-        }
-        return false;
-    }
+    function isValue(enumObj, value) { return S.kernel.enumHas(enumObj, value); }
 
     // Display name of an enum value: its key, so no label table can drift
     // from the enum.
     function nameOf(enumObj, value) {
-        if (enumObj) {
-            for (var k in enumObj) {
-                if (has(enumObj, k) && enumObj[k] === value) return k;
-            }
-        }
+        var k = S.kernel.enumKey(enumObj, value);
+        if (k !== null) return k;
         return value === null || value === undefined ? '' : String(value);
     }
 

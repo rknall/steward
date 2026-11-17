@@ -52,30 +52,18 @@
 
     var api = {};
 
-    function has(o, k) {
-        return Object.prototype.hasOwnProperty.call(o, k);
-    }
+    function has(o, k) { return S.kernel.is.has(o, k); }
 
     function missing(v) {
         return v === null || v === undefined || v === '';
     }
 
     function isPriority(p) {
-        var all = S.ProductionPriority;
-        if (!all || typeof p !== 'number') return false;
-        for (var k in all) {
-            if (has(all, k) && all[k] === p) return true;
-        }
-        return false;
+        return typeof p === 'number' && S.kernel.enumHas(S.ProductionPriority, p);
     }
 
     function isBasis(v) {
-        var all = S.DemandBasis;
-        if (!all) return false;
-        for (var k in all) {
-            if (has(all, k) && all[k] === v) return true;
-        }
-        return false;
+        return S.kernel.enumHas(S.DemandBasis, v);
     }
 
     // null when the need is usable, else the reason it is not.

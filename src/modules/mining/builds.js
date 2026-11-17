@@ -82,9 +82,7 @@
         clock:      function () { return api.clock(); }
     });
 
-    function has(obj, key) {
-        return Object.prototype.hasOwnProperty.call(obj, key);
-    }
+    function has(obj, key) { return S.kernel.is.has(obj, key); }
 
     function isPlainObject(v) {
         return v !== null && typeof v === 'object' && !Array.isArray(v);

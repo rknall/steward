@@ -107,7 +107,7 @@
     }
 
     function num(v) {
-        return (typeof v === 'number' && !isNaN(v)) ? v : null;
+        return S.kernel.is.num(v) ? v : null;
     }
 
     // Enum names read once per type. A failed read is not kept, so a later
