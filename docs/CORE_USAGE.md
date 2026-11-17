@@ -147,6 +147,25 @@ var model = Steward.kernel.hostRead.pass(function () {
 });
 ```
 
+## Rule 3.8: a read is a Result, not a bare value
+
+`Steward.kernel.read` tells "nothing there" from "could not look". A source returns `{ state, value, lost, why, zoneId }`, never null, with `state` one of `ok`, `partial` (the value holds what was read; `lost` counts what was not), `unreadable` (value null) or `notReady` (the zone is still loading; value null). Core readers expose them next to the old ones: `zone.view()`, `buildings.listRead()`, `specialists.listRead()`, `adventures.ownRead()`, `quests.pool()` and `resources.listRead()`. All take `opts` (`{ live: true }` or `{ zone }` bypass the memo).
+
+- `has(r)` is true for `ok` and `partial`: present facts are usable.
+- `isOk(r)` is true only for `ok`. `absent(r, test)` is true only for an `ok` list with no match, because a `partial` list may have lost the entry you look for. Never conclude "not there" from `has`.
+- `num(r)` gives null and `show(r)` gives `?` for anything but `ok`.
+- Scopes: `zone` and `pass` answers are memoized per read pass (a `zone` one also per viewed zone id), `static` definitions stay for the session once read ok, `live` never. Definitions that a later decision depends on are read live, even inside a pass.
+- Never wrap an action def, a send or `actions.attempt` in a pass; their reads stay live.
+- A refusal that only means "a read failed" is registered with `readRefusal(reason)` (`Steward.core.zone.UNREADABLE`, the specialist and quest ones). Test `isReadRefusal(reason)`: it is not a real refusal, so wait and try again instead of counting a failure.
+- `wait(owner, key, r, opts)` returns `'go'`, `'wait'` (the module is woken after `TIMEOUTS.READ_RETRY_MS`) or `'expired'` once per window, after `LIMITS.READ_WAIT_TRIES` tries and `TIMEOUTS.READ_MAX_MS`. Skip your work on `'wait'`, warn on `'expired'`, and `clearWait` when you stop caring.
+- A specialist status that could not be read is `S.SpecialistStatus.Unknown`. Views show it as `reading...` (`h.unknown`), never as busy or idle, and redraw once the pass settles.
+- The legacy readers (`buildings.list`, `zone.isHome`, ...) are kept for callers that can live with an empty answer; a caller that acts on the answer uses the Result reader.
+
+```js
+var r = Steward.core.zone.view();
+if (!Steward.kernel.read.isOk(r)) return;   // loading or unreadable: retry later
+```
+
 ## Rule 4: use the locale wrapper
 
 ```js

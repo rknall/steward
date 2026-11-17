@@ -69,12 +69,13 @@ Steward.kernel.register({
 - Receives `ctx`:
   - `ctx.now` — `Date.now()` at tick start.
   - `ctx.tick` — monotonically incrementing integer.
-  - `ctx.zone` — `{ id, isHome, isAdventure, isFriend }` snapshot.
+  - `ctx.zone` — `{ id, state, isHome, isAdventure, isFriend }` snapshot. `state` is the zone view's Result state (`ok`, `partial`, `unreadable`, `notReady`); `isHome` and `isAdventure` are true only when it is `ok`.
   - `ctx.session` — module-shared session flags (read-only).
 
 ### `plan(ctx)` contract
 
 - **Side-effects allowed.** Called only when `isReady` returned true.
+- **Runs in a read pass.** Each `plan` call is wrapped in one host read pass, so its memoizing reads agree; `isReady` is not. Queued actions run later, outside it.
 - **No return value expected.** Modules enqueue work via `Steward.kernel.queue.add(...)`; the kernel doesn't read what `plan` returns.
 - **Throws are swallowed.** Logged at ERROR. The module's next tick is unaffected.
 - **Don't block.** `plan` should return quickly; the queue handles paced execution.

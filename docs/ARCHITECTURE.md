@@ -124,6 +124,8 @@ The kernel UI is five files that rely on that order. `89_ui_style.js` loads firs
 
 `36_hostread.js` holds `Steward.kernel.hostRead`: the single member read (`call`) and the read-pass memo (`pass`, `cached`, `inPass`). It sits after `35_host.js` and before `40_registry.js`, needs only the namespace, and core readers call it at run time, so no later file is needed at load time.
 
+`37_read.js` holds `Steward.kernel.read`: the Result type (`ok`, `partial`, `unreadable`, `notReady`), the source registry (`source`, `get`) and the bounded `wait`. It sits after `36_hostread.js` and before `40_registry.js`. At load it needs the namespace, `TIMEOUTS`, `LIMITS` and `hostRead`; the zone reader, the registry and the scheduler are called only at run time, so every core file can register its sources while it loads.
+
 `16_text.js` holds the host-string cleaner and has no kernel dependencies, so it sits before everything that reads names.
 
 ## Lifecycle
