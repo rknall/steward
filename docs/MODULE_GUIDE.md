@@ -331,6 +331,12 @@ file is an HTML fragment: the build adds the crumb, the sidebar and the page tit
 and the title is the module's `ui.section.title`, so the page has no `<h1>`. It is
 not bundled or linted, and the ES5 rule does not apply to it.
 
+A module that registers no `ui.section` has no other display name, so its page
+starts with one `<h1>`, and that `<h1>` is its title. The build refuses an `<h1>`
+on a module that does register a section, so each title has one source. A module
+directory that never registers fails as "not registered". Such a module's stories
+name where its settings are edited, since there is no settings screen for it.
+
 The page has this structure:
 
 - A lead, `<p class="ug-lead">`: one sentence saying what the module is for.

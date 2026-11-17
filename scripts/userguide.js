@@ -20,7 +20,9 @@
  * A general fragment is body content only and starts with one <h1>, whose
  * plain text is the page title and the sidebar label. A module fragment has no
  * <h1>: the build inserts the module's registered ui.section.title, so the
- * display name has one source. A screenshot placeholder is
+ * display name has one source. A module that registers no ui section has no
+ * registered name, so its fragment carries its own <h1> instead and the name
+ * still has one source. A screenshot placeholder is
  *   <figure class="ug-shot" data-shot="<slug>-<name>.png"> <div class="ug-shot-box">
  *   ...</div> <figcaption>...</figcaption> </figure>
  * and the box is swapped for the image when the file exists.
@@ -105,11 +107,17 @@ function moduleTitles() {
 	const H = harness.boot({ host: { mainSettings: { experimental: true } } });
 	const titles = {};
 	H.Steward.kernel.registry.list().forEach(function (m) {
-		if (m.ui && m.ui.section && m.ui.section.title) {
-			titles[m.id] = m.ui.section.title;
-		}
+		// A module with no ui section has no registered display name, so its
+		// page's <h1> names it (null here).
+		titles[m.id] = m.ui && m.ui.section && m.ui.section.title
+			? m.ui.section.title
+			: null;
 	});
 	return titles;
+}
+
+function registered(titles, id) {
+	return Object.prototype.hasOwnProperty.call(titles, id);
 }
 
 function repoUrl() {
@@ -251,12 +259,20 @@ function preparePage(file, opts) {
 	const fragment = readFragment(file);
 	let title;
 	let section;
+	let ownTitle = false;
 	if (kind.module) {
 		const titles = opts.moduleTitles || moduleTitles();
+		if (!registered(titles, kind.slug)) {
+			throw new Error("module " + kind.slug + ": not registered (" + file + ")");
+		}
 		title = titles[kind.slug];
-		if (!title) throw new Error("module " + kind.slug + ": no ui.section.title (" + file + ")");
-		if (/<h1/i.test(fragment)) {
-			throw new Error(file + ": a module fragment has no <h1>; the build adds it");
+		if (title) {
+			if (/<h1/i.test(fragment)) {
+				throw new Error(file + ": a module fragment has no <h1>; the build adds it");
+			}
+		} else {
+			title = titleOf(fragment, file);
+			ownTitle = true;
 		}
 		section = "Modules";
 	} else {
@@ -281,6 +297,7 @@ function preparePage(file, opts) {
 		title: title,
 		section: section,
 		module: kind.module,
+		ownTitle: ownTitle,
 		h2s: ids.h2s,
 		html: ids.html,
 	};
@@ -389,7 +406,7 @@ function build(opts) {
 		}
 		const file = path.join(modulesDir, id, MODULE_GUIDE);
 		if (!fs.existsSync(file)) throw new Error("module " + id + ": missing guide/page.html");
-		if (!titles[id]) throw new Error("module " + id + ": no ui.section.title");
+		if (!registered(titles, id)) throw new Error("module " + id + ": not registered");
 		found.push({ file: file, imgDir: path.join(modulesDir, id, MODULE_IMG) });
 	});
 
@@ -412,7 +429,7 @@ function build(opts) {
 		p.imgDir = f.imgDir;
 		const crumb = '<p class="ug-crumb">' + escapeHtml(p.section) + " &rsaquo; " +
 			escapeHtml(p.title) + "</p>\n";
-		if (p.module) {
+		if (p.module && !p.ownTitle) {
 			p.html = crumb + "<h1>" + escapeHtml(p.title) + "</h1>\n" + p.html;
 		} else {
 			p.html = p.html.replace(/<h1/i, function (m) { return crumb + m; });
