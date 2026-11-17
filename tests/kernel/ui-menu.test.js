@@ -999,3 +999,17 @@ t.test('the status names a queue held past the stale bound', function () {
     K.ui.status.refresh();
     t.assert.strictEqual(K.ui.status.get(), 'Active — 1 module');
 });
+
+t.test('refreshRecords runs in one read pass', function () {
+    var s = setupBeta();
+    var hr = s.H.Steward.kernel.hostRead;
+    var origPass = hr.pass;
+    var passes = 0;
+    hr.pass = function (fn) { passes++; return origPass(fn); };
+    s.beta.passes.length = 0;
+    s.H.Steward.kernel.ui.status.refresh();
+    hr.pass = origPass;
+    t.assert.strictEqual(passes >= 1, true);
+    t.assert.strictEqual(s.beta.passes.length, 1);
+    t.assert.strictEqual(hr.inPass(), false);
+});

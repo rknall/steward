@@ -70,19 +70,17 @@
                                   mainSettings.explDefTaskByType) || {}).length);
 
         var c = S.core.specialists;
-        var explorers;
-        try { explorers = c.explorers(); }
-        catch (e) {
-            S.kernel.error('explorers', 'failed to list explorers:', e);
-            return notify('Could not list explorers — see log.');
+        var read = listExplorers();
+        if (!read.has) {
+            S.kernel.log('explorers', 'explorers not readable yet:', S.kernel.read.show(read.r));
+            return notify('Explorers are still being read — try again in a moment.');
         }
+        var explorers = read.list;
 
-        var idle = 0, busy = 0;
-        for (var i = 0; i < explorers.length; i++) {
-            if (c.status(explorers[i]) === S.SpecialistStatus.Idle) idle++; else busy++;
-        }
+        var counts = tally(explorers);
         S.kernel.log('explorers', 'explorers — total:', explorers.length,
-                     '  idle:', idle, '  busy:', busy);
+                     '  idle:', counts.idle, '  busy:', counts.busy,
+                     '  unknown:', counts.unknown);
 
         // pickTask preview per explorer.
         for (var j = 0; j < explorers.length; j++) {
@@ -92,7 +90,7 @@
             try { picked = c.pickTask(spec) || '?'; } catch (e) { picked = 'threw'; }
             var override = c.namedOverride(s.overrides, name);
             S.kernel.log('explorers',
-                '  [' + (c.status(spec) === S.SpecialistStatus.Idle ? 'idle' : 'busy') + ']',
+                '  [' + statusWord(c.status(spec)) + ']',
                 name,
                 '→ pickTask:', picked,
                 override ? ('(override: ' + override + ')') : '');
@@ -146,16 +144,36 @@
             ' · ' + taskLabelFor(s.defaultTask);
     }
 
-    // Every owned explorer, alphabetical by display name (stable across
-    // renders). An unreadable list is an empty one.
+    // Log word of a status. Unknown is its own word: a status the game call
+    // failed on is neither idle nor busy.
+    function statusWord(status) {
+        if (status === S.SpecialistStatus.Idle) return 'idle';
+        if (status === S.SpecialistStatus.Unknown) return 'unknown';
+        return 'busy';
+    }
+
+    // Idle, busy and unknown explorers of a list; the three sum to its length.
+    function tally(list) {
+        var out = { idle: 0, busy: 0, unknown: 0 };
+        for (var i = 0; i < list.length; i++) {
+            out[statusWord(S.core.specialists.status(list[i]))]++;
+        }
+        return out;
+    }
+
+    // One read of the explorer list per call, memoized by the dashboard pass.
+    // { r, has, list }: `has` is false while the list is unreadable or not
+    // ready, which is not the same as having no explorers; a partial list
+    // keeps its rows (`r.state`) and the caller notes the gap. `list` is a
+    // copy sorted by display name (stable across renders), so the memoized
+    // value is never reordered.
     function listExplorers() {
         var c = S.core.specialists;
-        var list;
-        try { list = c.explorers(); }
-        catch (e) { return []; }
-        if (!list || !list.length) return [];
+        var r = c.byTypeRead(S.SpecialistType.Explorer);
+        var has = S.kernel.read.has(r);
+        var list = has ? r.value.slice() : [];
         list.sort(c.compareByName);
-        return list;
+        return { r: r, has: has, list: list };
     }
 
     function overrideCount(s) {
@@ -209,29 +227,34 @@
         function draw() {
             // A portrait the host had not decoded yet is asked for once more a second later.
             var pass = {};
-            var explorers = listExplorers();
+            var read = listExplorers();
+            var explorers = read.list;
             var overrides = (s && s.overrides) || {};
             var rows = [];
-            var busy = 0, ov = 0;
+            var busy = 0, idle = 0, ov = 0;
 
             for (var i = 0; i < explorers.length; i++) {
                 var spec = explorers[i];
                 var name = c.name(spec) || '?';
-                var isIdle = (c.status(spec) === S.SpecialistStatus.Idle);
+                var st = c.status(spec);
+                var isIdle = (st === S.SpecialistStatus.Idle);
+                var isUnknown = (st === S.SpecialistStatus.Unknown);
                 var hasOv = !!c.namedOverride(overrides, name);
-                if (!isIdle) busy++;
+                if (isIdle) idle++;
+                else if (!isUnknown) busy++;
                 if (hasOv) ov++;
-                if (filter === 'busy' && isIdle) continue;
+                if (filter === 'busy' && (isIdle || isUnknown)) continue;
                 if (filter === 'idle' && !isIdle) continue;
                 if (filter === 'ov' && !hasOv) continue;
 
                 var portrait = c.portraitTag(spec, null, pass);
                 if (portrait) portrait += ' ';
 
-                var $status = h.statusBadge(isIdle, isIdle ? null : c.orders.remaining(spec));
+                var $status = isUnknown ? h.unknown('status not readable')
+                    : h.statusBadge(isIdle, isIdle ? null : c.orders.remaining(spec));
 
                 var current = null;
-                if (!isIdle && c.currentTask) {
+                if (!isIdle && !isUnknown && c.currentTask) {
                     var ct = c.currentTask(spec);
                     if (ct) current = c.taskLabel(ct);
                 }
@@ -251,14 +274,26 @@
                 ]);
             }
 
+            if (!read.has) {
+                // Neither "none" nor a count: the list is not readable now and a
+                // redraw fills it in once it is.
+                var $card0 = h.card({ title: 'Live state', meta: 'updated ' + h.clock() });
+                var $e = h.empty('reading...', 'Retrying automatically.');
+                $e.find('.steward-empty-title').addClass('steward-muted');
+                $slot.empty().append($card0.append($e));
+                h.fit();
+                return;
+            }
             var $card = h.card({
                 title: 'Live state',
-                meta: explorers.length + ' explorers · updated ' + h.clock()
+                meta: explorers.length + ' explorers' +
+                      (read.r.state === S.kernel.read.PARTIAL ? ' (partial)' : '') +
+                      ' · updated ' + h.clock()
             });
             $card.append(h.chips([
                 { id: 'all',  label: 'All ' + explorers.length },
                 { id: 'busy', label: 'Busy ' + busy },
-                { id: 'idle', label: 'Idle ' + (explorers.length - busy) },
+                { id: 'idle', label: 'Idle ' + idle },
                 { id: 'ov',   label: 'Overrides ' + ov }
             ], filter, function (id) { filter = id; draw(); }));
             $card.append(h.table({
@@ -281,16 +316,20 @@
     }
 
     function tiles(h) {
-        var c = S.core.specialists;
-        var explorers = listExplorers();
-        var busy = 0;
-        for (var i = 0; i < explorers.length; i++) {
-            if (c.status(explorers[i]) !== S.SpecialistStatus.Idle) busy++;
-        }
+        var read = listExplorers();
         var s = h.settings('explorers');
-        var $line = $('<span>').text(explorers.length + ' explorers · ')
-            .append($('<span>', { 'class': 'steward-warn' }).text(busy + ' busy'))
-            .append(' · ' + (explorers.length - busy) + ' idle');
+        var $line;
+        if (!read.has) {
+            $line = h.unknown('explorers not readable');
+        } else {
+            var counts = tally(read.list);
+            $line = $('<span>').text(read.list.length + ' explorers · ')
+                .append($('<span>', { 'class': 'steward-warn' }).text(counts.busy + ' busy'))
+                .append(' · ' + counts.idle + ' idle');
+            if (counts.unknown) {
+                $line.append(' · ').append(h.unknown('status not readable').text(counts.unknown + ' reading...'));
+            }
+        }
         return [{
             title: 'Explorers',
             icon: '⌖',

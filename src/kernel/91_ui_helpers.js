@@ -649,18 +649,34 @@
     }
 
     // Run fn once, ms from now, to redraw a holder whose content was not ready
-    // (a portrait the host had not decoded yet). The data flag makes it one
-    // redraw per holder, and a detached holder (the tab was switched, which
-    // empties the panel) is not redrawn. True when a redraw was scheduled.
+    // (a portrait the host had not decoded yet). The data flag allows one
+    // pending redraw per holder and is cleared when it runs, so a redraw that
+    // is still not ready can ask again; the data count caps that at
+    // LIMITS.READ_REDRAWS per holder so a never-ready item cannot loop. A
+    // detached holder (the tab was switched, which empties the panel) is not
+    // redrawn. True when a redraw was scheduled.
     function redrawOnce($holder, fn, ms) {
         if (!$holder || !$holder.length) return false;
         if ($holder.data('stewardRedrawOnce')) return false;
+        var done = $holder.data('stewardRedrawCount') || 0;
+        if (done >= S.kernel.LIMITS.READ_REDRAWS) return false;
         $holder.data('stewardRedrawOnce', true);
+        $holder.data('stewardRedrawCount', done + 1);
         setTimeout(guarded('redrawOnce', function () {
+            $holder.data('stewardRedrawOnce', false);
             if ($holder.parent().length === 0) return;
             fn();
         }), ms);
         return true;
+    }
+
+    // The look of a value whose read is not settled: muted "reading..." that
+    // fills in by itself once a redraw reads it. Not a badge, so it never
+    // looks like a real status.
+    function unknown(title) {
+        var $u = $('<span>', { 'class': 'steward-muted' }).text('reading...');
+        if (title) $u.attr('title', title);
+        return $u;
     }
 
     // ---------------------------------------------------------------
@@ -692,6 +708,7 @@
         statusBadge: statusBadge,
         fit:       fit,
         redrawOnce: redrawOnce,
+        unknown:   unknown,
         set:       set,
         get:       get,
         settings:  settings,

@@ -369,3 +369,59 @@ t.test('a part that throws leaves the read pass closed', function () {
     assert.strictEqual($body.find('.steward-empty-title').text(), 'Render failed');
     assert.strictEqual(s.S.kernel.hostRead.inPass(), false);
 });
+
+// ---- Unsettled redraw -------------------------------------------------------
+
+function timedSetup() {
+    var timers = [];
+    var H = harness.boot({
+        sections: ['kernel'],
+        timers: { setTimeout: function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; } }
+    });
+    var $ = jq.install(H);
+    var rig = hostStubs.installModal(H);
+    return { H: H, $: $, rig: rig, ui: H.Steward.kernel.ui, S: H.Steward, timers: timers };
+}
+
+function drawsOf(s, unsettled) {
+    var counter = { n: 0 };
+    mod(s, 'ex', 'specialists', {
+        render: function () {
+            counter.n++;
+            if (unsettled) s.S.kernel.hostRead.markUnsettled();
+        }
+    });
+    return counter;
+}
+
+// Plays the pending redraw timers until none is left; returns how many ran.
+function runRedraws(s) {
+    var ran = 0;
+    s.timers.length = 0;
+    var d = s.S.kernel.TIMEOUTS.READ_RETRY_MS;
+    open(s, 'specialists');
+    while (ran < 20) {
+        var due = s.timers.filter(function (x) { return x.ms === d; });
+        if (!due.length) break;
+        s.timers.length = 0;
+        due[0].fn();
+        ran++;
+    }
+    return ran;
+}
+
+t.test('an unsettled draw redraws at most 3 times', function () {
+    var s = timedSetup();
+    var c = drawsOf(s, true);
+    var ran = runRedraws(s);
+    assert.strictEqual(ran, s.S.kernel.LIMITS.READ_REDRAWS);
+    assert.strictEqual(ran, 3);
+    assert.strictEqual(c.n, 1 + ran);
+});
+
+t.test('a settled draw does not redraw', function () {
+    var s = timedSetup();
+    var c = drawsOf(s, false);
+    assert.strictEqual(runRedraws(s), 0);
+    assert.strictEqual(c.n, 1);
+});

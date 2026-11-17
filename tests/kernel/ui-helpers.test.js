@@ -643,3 +643,30 @@ t.test('redrawOnce returns false without a holder', function () {
     assert.strictEqual(s.h.redrawOnce(s.$('.nothing-here'), function () {}, 1000), false);
     assert.strictEqual(s.timers.length, 0);
 });
+
+t.test('redrawOnce allows a further redraw after it ran, at most 3', function () {
+    var s = timerSetup();
+    var $root = s.$('<div></div>');
+    var $holder = s.$('<div></div>');
+    $root.append($holder);
+    var calls = 0;
+    function draw() { calls++; }
+    var limit = s.H.Steward.kernel.LIMITS.READ_REDRAWS;
+    assert.strictEqual(limit, 3);
+    for (var i = 0; i < limit; i++) {
+        assert.strictEqual(s.h.redrawOnce($holder, draw, 1000), true);
+        assert.strictEqual(s.h.redrawOnce($holder, draw, 1000), false);   // one pending at a time
+        s.timers.pop().fn();
+    }
+    assert.strictEqual(calls, limit);
+    assert.strictEqual(s.h.redrawOnce($holder, draw, 1000), false);
+    assert.strictEqual(s.timers.length, 0);
+});
+
+t.test('unknown renders the muted reading look', function () {
+    var s = setup();
+    var $u = s.h.unknown('status not readable');
+    assert.strictEqual($u.text(), 'reading...');
+    assert.ok($u.hasClass('steward-muted'));
+    assert.strictEqual($u.attr('title'), 'status not readable');
+});

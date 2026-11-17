@@ -625,11 +625,13 @@
     // fresh `pass` per refresh lets its functions share an expensive read.
     function refreshRecords(mod, recs) {
         var pass = {};
-        for (var i = 0; i < recs.length; i++) {
-            var rec = recs[i];
-            if (rec.fn) writeLabel(rec.slot, rec.item, labelText(mod, rec.fn, pass));
-            if (rec.enabledFn) writeEnabled(rec.slot, rec.item, enabledValue(mod, rec.enabledFn, pass));
-        }
+        S.kernel.hostRead.pass(function () {
+            for (var i = 0; i < recs.length; i++) {
+                var rec = recs[i];
+                if (rec.fn) writeLabel(rec.slot, rec.item, labelText(mod, rec.fn, pass));
+                if (rec.enabledFn) writeEnabled(rec.slot, rec.item, enabledValue(mod, rec.enabledFn, pass));
+            }
+        });
     }
 
     function refreshModuleLabels() {

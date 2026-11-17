@@ -65,6 +65,8 @@
     // Elements of the open dashboard that chrome() and activate() update.
     // Rebuilt on every render, dropped with the modal.
     var dom = { $body: null, $panel: null, $badge: null, $sum: null, tabs: {} };
+    // Redraws of the open tab that were scheduled because a read had not settled.
+    var readRedraws = 0;
 
     // -----------------------------------------------------------------
     // Small reads
@@ -237,6 +239,7 @@
         if (!$body || !$body.length) return;
         $body.empty();
         dom = { $body: $body, $panel: null, $badge: null, $sum: null, tabs: {} };
+        readRedraws = 0;
 
         renderHeader($body);
         renderTabs($body);
@@ -293,6 +296,7 @@
         var st = state();
         st.tab = tabId;
         st.expanded = false;
+        readRedraws = 0;
         for (var id in dom.tabs) {
             if (dom.tabs.hasOwnProperty(id)) dom.tabs[id].$a.toggleClass('active', id === tabId);
         }
@@ -305,11 +309,32 @@
         // One pass per draw: the strip, side, main column and tiles of a tab
         // share core reads, so a status never differs between two parts.
         // Handlers attached here run later, outside the pass.
+        var unsettled = false;
         S.kernel.hostRead.pass(function () {
             if (tabId === 'overview') renderOverview(dom.$panel);
             else renderModuleTab(dom.$panel, tabId);
+            // The flag only lives inside the pass, so read it before it ends.
+            unsettled = S.kernel.hostRead.unsettled();
         });
         fit();
+        if (unsettled) scheduleReadRedraw(tabId, dom.$panel);
+    }
+
+    // A draw that used partial reads is redrawn a few times so the tab fills in
+    // by itself; the counter bounds it so a read that never settles cannot
+    // loop. A redraw is skipped when the panel was replaced or the tab changed.
+    function scheduleReadRedraw(tabId, $panel) {
+        if (readRedraws >= S.kernel.LIMITS.READ_REDRAWS) return;
+        readRedraws++;
+        setTimeout(function () {
+            try {
+                if (dom.$panel !== $panel || state().tab !== tabId) return;
+                if ($panel.parent().length === 0) return;
+                drawTab();
+            } catch (e) {
+                S.kernel.error('ui', 'read redraw threw:', e);
+            }
+        }, S.kernel.TIMEOUTS.READ_RETRY_MS);
     }
 
     function chrome() {

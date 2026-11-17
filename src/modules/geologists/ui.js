@@ -55,6 +55,28 @@
         return (Math.round(n * 100) / 100).toFixed(2);
     }
 
+    // The geologists as a Result: a list that could not be read stays apart
+    // from one that is empty. Partial lists keep their rows.
+    function readGeologists() {
+        try { return S.core.specialists.byTypeRead(S.SpecialistType.Geologist); }
+        catch (e) { return S.kernel.read.unreadable('threw: ' + (e && e.message ? e.message : String(e))); }
+    }
+
+    // 'idle', 'busy' or 'unknown': a status that could not be read is
+    // neither idle nor busy.
+    function stateOf(c, spec) {
+        var st;
+        try { st = c.status(spec); }
+        catch (e) { return 'unknown'; }
+        if (st === S.SpecialistStatus.Unknown) return 'unknown';
+        return st === S.SpecialistStatus.Idle ? 'idle' : 'busy';
+    }
+
+    // The approved muted look for a value whose read is not settled.
+    function unknownCell(h, title) {
+        return { $: h.unknown(title) };
+    }
+
     // ---------------------------------------------------------------
     // Geologist kinds (host GetType numbers).
     // ---------------------------------------------------------------
@@ -129,18 +151,23 @@
         S.kernel.log('geologists', 'enabled:', !!s.enabled,
                      '  dispatchDelay:', s.dispatchDelay, 'ms');
 
-        var allGeos;
-        try { allGeos = c.geologists() || []; }
-        catch (e) {
-            S.kernel.error('geologists', 'failed to list geologists:', e);
+        var gr = readGeologists();
+        if (!S.kernel.read.has(gr)) {
+            S.kernel.error('geologists', 'failed to list geologists:', gr.why);
             return notify('Could not list geologists — see log.');
         }
-        var idle = 0, busy = 0;
+        var allGeos = gr.value;
+        var idle = 0, busy = 0, unknown = 0;
         for (var i = 0; i < allGeos.length; i++) {
-            if (c.status(allGeos[i]) === S.SpecialistStatus.Idle) idle++; else busy++;
+            var gs = stateOf(c, allGeos[i]);
+            if (gs === 'idle') idle++;
+            else if (gs === 'busy') busy++;
+            else unknown++;
         }
         S.kernel.log('geologists', 'geologists — total:', allGeos.length,
-                     '  idle:', idle, '  busy:', busy);
+                     '  idle:', idle, '  busy:', busy,
+                     unknown ? '  ' + unknown + ' reading...' : '',
+                     gr.state === S.kernel.read.PARTIAL ? '  (partial list)' : '');
 
         if (!d || !d.types) {
             S.kernel.warn('geologists', 'core.deposits.types unavailable');
@@ -159,9 +186,9 @@
             var enabled = !!cfg.enabled;
             var max = (typeof cfg.max === 'number') ? cfg.max : 0;
 
-            var onMap = 0;
-            try { onMap = d.byType(info.name).length; }
-            catch (e) { /* skip */ }
+            var onMap = onMapCount(info.name);
+            var onMapText = onMap === null ? 'reading...' : onMap;
+            if (onMap === null) onMap = 0;
 
             // Count busy geos on this deposit.
             var onTask = S.modules.geologists.busyOnDeposit(allGeos, info.index);
@@ -170,7 +197,7 @@
             S.kernel.log('geologists',
                 '  ' + info.name +
                 '  cfg: enabled=' + enabled + ' max=' + max +
-                '  on map=' + onMap + '  on task=' + onTask +
+                '  on map=' + onMapText + '  on task=' + onTask +
                 '  wanted=' + wanted);
             S.kernel.log('geologists', '  kinds: ' + kindsText(index, cfg));
 
@@ -184,8 +211,8 @@
                 var row = ranked[r];
                 if (row.capacityFactor <= 1 && row.timeFactor >= 1) break;  // out of "interesting" picks
                 var nm = c.name(row.geo) || '?';
-                var st = c.status(row.geo);
-                var stTag = (st === S.SpecialistStatus.Idle) ? '[idle]' : '[busy]';
+                var rs = stateOf(c, row.geo);
+                var stTag = rs === 'idle' ? '[idle]' : (rs === 'busy' ? '[busy]' : '[reading...]');
                 S.kernel.log('geologists',
                     '    ' + stTag +
                     ' cap×' + fmtFactor(row.capacityFactor) +
@@ -248,8 +275,10 @@
     // Live count on the home zone; null when it cannot be read, so an
     // unknown count is never shown or counted as zero.
     function onMapCount(depositName) {
-        try { return S.core.deposits.byType(depositName).length; }
+        var r;
+        try { r = S.core.deposits.byTypeRead(depositName); }
         catch (e) { return null; }
+        return S.kernel.read.isOk(r) ? r.value.length : null;
     }
 
     function resName(depositName) {
@@ -473,7 +502,8 @@
         var onMap = onMapCount(depositName);
         var base = 'deposits.' + depositName + '.';
 
-        var $onMap = $('<span>').text(onMap === null ? '?' : String(onMap));
+        var $onMap = onMap === null ? h.unknown('The deposits could not be read')
+                                    : $('<span>').text(String(onMap));
         markUnder($onMap, onMap, rowMax(row));
 
         var $search = h.toggle({
@@ -555,34 +585,33 @@
     }
 
     // Reads every geologist once per draw; `ok` is false when the list
-    // could not be read.
+    // could not be read, `partial` when only part of it was. A geologist
+    // whose status could not be read counts in `unknown`, neither idle nor busy.
     function snapshot() {
         var c = S.core.specialists;
-        var out = { ok: true, list: [], busy: 0, idle: 0, trait: 0 };
-        var geos;
-        try { geos = (c && c.geologists) ? (c.geologists() || []) : []; }
-        catch (e) {
-            S.kernel.warn('geologists', 'could not list geologists:', e);
+        var out = { ok: true, partial: false, list: [], busy: 0, idle: 0, unknown: 0, trait: 0 };
+        var r = readGeologists();
+        if (!S.kernel.read.has(r)) {
+            S.kernel.warn('geologists', 'could not list geologists:', r.why);
             out.ok = false;
             return out;
         }
+        out.partial = r.state === S.kernel.read.PARTIAL;
         var types = depositTypes();
-        geos = geos.slice();
+        var geos = r.value.slice();
         geos.sort(c.compareByName);
         for (var i = 0; i < geos.length; i++) {
             var spec = geos[i];
-            var isIdle = false;
-            try { isIdle = (c.status(spec) === S.SpecialistStatus.Idle); }
-            catch (e) { isIdle = false; }
+            var state = stateOf(c, spec);
             var best = bestDeposit(c, spec, types);
             var g = {
                 spec:  spec,
                 name:  c.name(spec) || '?',
-                idle:  isIdle,
+                state: state,
                 best:  best,
-                task:  isIdle ? null : searching(spec, types)
+                task:  state === 'busy' ? searching(spec, types) : null
             };
-            if (isIdle) out.idle++; else out.busy++;
+            out[state]++;
             if (best.trait) out.trait++;
             out.list.push(g);
         }
@@ -590,8 +619,8 @@
     }
 
     function shows(g) {
-        if (filter === 'busy')  return !g.idle;
-        if (filter === 'idle')  return g.idle;
+        if (filter === 'busy')  return g.state === 'busy';
+        if (filter === 'idle')  return g.state === 'idle';
         if (filter === 'trait') return g.best.trait;
         return true;
     }
@@ -608,7 +637,9 @@
     function liveMeta(snap) {
         var n = snap.list.length;
         var head = n + ' geologist' + (n === 1 ? '' : 's');
-        return snap.busy ? head + ' · ' + snap.busy + ' busy' : head + ' · all idle';
+        var tail = snap.partial ? ' · partial' : '';
+        if (snap.unknown) return head + ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' reading...' + tail;
+        return (snap.busy ? head + ' · ' + snap.busy + ' busy' : head + ' · all idle') + tail;
     }
 
     function liveCard(h, redraw, pass) {
@@ -621,11 +652,13 @@
             }));
         var $card = h.card({
             title:  'Live state',
-            meta:   snap.ok ? liveMeta(snap) : 'not readable',
+            meta:   snap.ok ? liveMeta(snap) : 'reading...',
             $tools: $tools
         });
         if (!snap.ok) {
-            $card.append(h.empty('Geologists could not be read', 'See the log.'));
+            var $e = h.empty('reading...', 'Retrying automatically.');
+            $e.find('.steward-empty-title').addClass('steward-muted');
+            $card.append($e);
             return $card;
         }
 
@@ -649,7 +682,8 @@
                     title: g.name,
                     cls:   'steward-who'
                 },
-                h.statusBadge(g.idle, g.idle ? null : S.core.specialists.orders.remaining(g.spec)),
+                g.state === 'unknown' ? unknownCell(h, 'The status could not be read')
+                    : h.statusBadge(g.state === 'idle', g.state === 'idle' ? null : S.core.specialists.orders.remaining(g.spec)),
                 bestCell(g),
                 g.task ? { text: resName(g.task), title: g.task } : { text: '—', cls: 'steward-muted' }
             ]);
@@ -714,13 +748,17 @@
         var snap = snapshot();
         var first;
         if (!snap.ok) {
-            first = 'Geologists could not be read';
+            first = 'reading...';
         } else {
             var n = snap.list.length;
             first = n + ' geologist' + (n === 1 ? '' : 's');
-            first += snap.busy
-                ? ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle'
-                : ' · all idle';
+            if (snap.unknown) {
+                first += ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' reading...';
+            } else {
+                first += snap.busy
+                    ? ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle'
+                    : ' · all idle';
+            }
         }
         var dc = depositCounts(h);
         return [{
