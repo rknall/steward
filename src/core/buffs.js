@@ -623,13 +623,8 @@
     // HH:MM:SS.mmm of a ms time, for the burst line: the packets of a burst
     // are ms apart, so the logger's second stamp cannot tell them apart.
     function clockMs(ms) {
-        var d = new Date(ms);
-        var m = d.getMilliseconds();
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + '.' +
-            (m < 10 ? '00' : (m < 100 ? '0' : '')) + m;
+        return S.kernel.text.clock(new Date(ms), { seconds: true, ms: true });
     }
-
-    function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
     function uidText(e) {
         try {

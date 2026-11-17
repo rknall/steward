@@ -116,7 +116,7 @@
 
     // The progress of a quiet clock against its limit, for a wait's text.
     function quietText(q, limit) {
-        return Math.floor(q.ms / 60000) + ' of ' + Math.round(limit / 60000) + ' min quiet';
+        return S.kernel.text.minutes(q.ms, { round: 'floor' }) + ' of ' + S.kernel.text.minText(limit) + ' quiet';
     }
 
     // ---- Jumps --------------------------------------------------------------
@@ -497,7 +497,7 @@
             st().noteTransit(r, p.remainder, now() + TRANSIT_MS);
             if (S.core.army.total(p.remainder) > 0) {
                 log('on the way home by themselves: ' + S.core.army.text(p.remainder) +
-                    ', counted as yours for ' + Math.round(TRANSIT_MS / 60000) + ' min');
+                    ', counted as yours for ' + S.kernel.text.minText(TRANSIT_MS));
             }
             st().go(S.RunStep.LastQuest, 'last quest finished');
             return;
@@ -532,7 +532,7 @@
         }
         ld().waitBusy(r, null, 'last quest not finished, ' + quietText(q, CLEAR_MAX_MS));
         if (!over) return;
-        var min = Math.round(CLEAR_MAX_MS / 60000);
+        var min = S.kernel.text.minutes(CLEAR_MAX_MS);
         var camps = standingText(r) || 'none';
         st().pause(S.RunPause.ClearTimeout, 'last quest not finished after ' + min + ' min; camps standing: ' + camps);
     }
@@ -560,7 +560,7 @@
         var p = pickupClock(r, objs);
         ld().waitBusy(r, null, 'quest objects left: ' + text + ', ' + quietText(p, CLEAR_PICKUP_MAX_MS));
         if (p.ms < CLEAR_PICKUP_MAX_MS) return;
-        var min = Math.round(CLEAR_PICKUP_MAX_MS / 60000);
+        var min = S.kernel.text.minutes(CLEAR_PICKUP_MAX_MS);
         st().pause(S.RunPause.ClearTimeout, 'quest objects not picked up after ' + min + ' min: ' + text);
     }
 

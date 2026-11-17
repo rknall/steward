@@ -124,8 +124,6 @@
         }
     }
 
-    function seconds(ms) { return Math.round(ms / 1000); }
-
     // A tick body throw would repeat on every tick, so it writes one line per
     // LOG_REPEAT_MS with a count of the lines held back. The limiter never
     // throws, so logging cannot stop the tick.
@@ -143,8 +141,8 @@
         state.lastTickAt = now;
         try {
             if (last !== null && now - last > S.kernel.LIMITS.TICK_GAP_FACTOR * state.tickIntervalMs) {
-                S.kernel.warn('scheduler', 'tick gap ' + seconds(now - last) + ' s (interval ' +
-                    seconds(state.tickIntervalMs) + ' s): the timer was held, e.g. by a locked or ' +
+                S.kernel.warn('scheduler', 'tick gap ' + S.kernel.text.seconds(now - last) + ' s (interval ' +
+                    S.kernel.text.seconds(state.tickIntervalMs) + ' s): the timer was held, e.g. by a locked or ' +
                     'disconnected session');
             }
         } catch (e) { /* logging never stops the tick */ }
@@ -163,7 +161,7 @@
             if (d === null) {
                 deferring = 'no';
             } else {
-                deferring = seconds(d.ms) + ' s by ' + (typeof Q.dialogList === 'function'
+                deferring = S.kernel.text.seconds(d.ms) + ' s by ' + (typeof Q.dialogList === 'function'
                     ? Q.dialogList(d.ids) : String(d.ids));
             }
         }

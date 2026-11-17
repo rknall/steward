@@ -92,12 +92,6 @@
         }
     }
 
-    function pad2(n) { return n < 10 ? '0' + n : String(n); }
-
-    function clockSec(d) {
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
-    }
-
     function labelOf(x) {
         return String(x.label || x.name);
     }
@@ -687,7 +681,7 @@
         }
         if (!state.$mid) return;
         if (state.footKind === 'live') {
-            state.$mid.text('Read ' + clockSec(state.readAt || new Date()) +
+            state.$mid.text('Read ' + S.kernel.text.clock(state.readAt || new Date(), { seconds: true }) +
                 ' · live views do not redraw on their own');
             return;
         }

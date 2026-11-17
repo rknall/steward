@@ -82,7 +82,7 @@
     function busyText(r) {
         var b = st().busyOf(r);
         if (!b) return '';
-        var n = Math.floor((st().now() - b.since) / 60000);
+        var n = S.kernel.text.minutes(st().now() - b.since, { round: 'floor' });
         return b.text + (n >= 1 ? ', ' + n + ' min' : '');
     }
 

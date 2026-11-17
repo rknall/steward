@@ -303,7 +303,7 @@
         if (breakerOpen()) {
             $main.append(h.banner('Buffing paused: ' + b.snapshot().run + ' buff applies in a row ' +
                 'were not seen on their building. One probe every ' +
-                Math.round(b.COOLDOWN_MS / 60000) + ' min; reloading scripts resets it. ' +
+                S.kernel.text.minText(b.COOLDOWN_MS) + '; reloading scripts resets it. ' +
                 'Build, upgrade and pause keep running.', { icon: '⚠' }));
         }
 

@@ -50,8 +50,8 @@
                 open = true;
                 nextProbeAt = t + cooldown;
                 S.kernel.warn(category, label + ' open: ' + run + ' ' + o.missText + '; ' +
-                    o.pausedText + ', one probe every ' + Math.round(cooldown / 60000) +
-                    ' min; reloading scripts resets it');
+                    o.pausedText + ', one probe every ' + S.kernel.text.minText(cooldown) +
+                    '; reloading scripts resets it');
             }
             return open;
         }

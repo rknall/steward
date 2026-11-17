@@ -690,7 +690,7 @@
         }
         if (q.ms > SETTLE_MAX_MS) {
             st().pause(S.RunPause.SettleTimeout, blocked.general + ': ' + blocked.reason + ' still after ' +
-                Math.round(SETTLE_MAX_MS / 60000) + ' min with no battle', { general: blocked.general, target: blocked.target });
+                S.kernel.text.minText(SETTLE_MAX_MS) + ' with no battle', { general: blocked.general, target: blocked.target });
         }
     }
 

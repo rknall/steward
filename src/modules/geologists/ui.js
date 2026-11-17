@@ -438,8 +438,8 @@
             var e = index.byKind[String(ks[i])];
             if (e) m += e.count;
         }
-        return ks.length + ' kind' + (ks.length === 1 ? '' : 's') + ' ticked · ' +
-            m + ' geologist' + (m === 1 ? '' : 's') +
+        return S.kernel.text.plural(ks.length, 'kind') + ' ticked · ' +
+            S.kernel.text.plural(m, 'geologist') +
             '. A kind covers every geologist of that kind, now and later.';
     }
 
@@ -629,7 +629,7 @@
     // (full): one formula so the two cannot drift apart.
     function countLine(snap, brief) {
         var n = snap.list.length;
-        var head = n + ' geologist' + (n === 1 ? '' : 's');
+        var head = S.kernel.text.plural(n, 'geologist');
         if (snap.unknown) {
             return head + ' · ' + snap.busy + ' busy · ' + snap.idle + ' idle · ' + snap.unknown + ' ' + readingWord();
         }
@@ -738,7 +738,7 @@
 
     function summary(h) {
         var n = depositCounts(h).searched;
-        return delayOf(h) + ' ms · ' + n + ' deposit type' + (n === 1 ? '' : 's');
+        return delayOf(h) + ' ms · ' + S.kernel.text.plural(n, 'deposit type');
     }
 
     function tiles(h) {
@@ -755,7 +755,7 @@
             icon:  '⛏',
             lines: [
                 first,
-                dc.searched + ' deposit type' + (dc.searched === 1 ? '' : 's') +
+                S.kernel.text.plural(dc.searched, 'deposit type') +
                     ' searched, ' + dc.below + ' below max'
             ]
         }];

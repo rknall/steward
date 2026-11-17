@@ -744,3 +744,12 @@ t.test('limited: an unknown level writes at log, and a throwing sink returns fal
     s.K.error = function () { throw new Error('boom'); };
     assert.strictEqual(note('error', 'c', 'y'), false);
 });
+
+// ---- Line shape --------------------------------------------------------------
+
+t.test('a log line is [LEVEL] [YYYY-MM-DD HH:MM:SS] [category] text', function () {
+    var s = setup({ now: at(15, 9, 4, 7) });
+    s.K.log.raw('cat', 'msg');
+    var line = s.read('console.log').split(/\r?\n/)[0];
+    assert.strictEqual(line, '[' + s.H.Steward.LogLevel.Log + '] [2030-01-15 09:04:07] [cat] msg');
+});

@@ -80,10 +80,6 @@
         return $e.text(text);
     }
 
-    function plural(n, word) {
-        return n + ' ' + word + (n === 1 ? '' : 's');
-    }
-
     function startDir() {
         return T().lastDir() || S.kernel.host.battleTemplateDir() || '';
     }
@@ -541,7 +537,7 @@
         var $card = h.card({
             icon:   '⚔',
             title:  'Run templates',
-            meta:   plural(recs.length, 'template') + ' · start one from ~Steward~ › Adventures',
+            meta:   S.kernel.text.plural(recs.length, 'template') + ' · start one from ~Steward~ › Adventures',
             $tools: folder ? btn('New template', act(newTemplate)) : null
         });
         $card.append(h.table({
@@ -617,8 +613,8 @@
             generals++;
             units = S.core.army.add(units, l.army);
         }
-        return plural(generals, 'general line') + ' · ' + S.core.army.text(units) + ' · ' +
-            plural(ld.problems.length, 'problem');
+        return S.kernel.text.plural(generals, 'general line') + ' · ' + S.core.army.text(units) + ' · ' +
+            S.kernel.text.plural(ld.problems.length, 'problem');
     }
 
     function pickLoadout() {
@@ -672,7 +668,7 @@
             if (ld.lines[i].kind === S.BattleLine.Attack) attack++;
             else if (ld.lines[i].kind === S.BattleLine.Move) move++;
         }
-        return plural(attack, 'attack') + ' · ' + plural(move, 'move');
+        return S.kernel.text.plural(attack, 'attack') + ' · ' + S.kernel.text.plural(move, 'move');
     }
 
     // Number and arrow states of every row from its current position in
@@ -918,7 +914,7 @@
         var h = H();
         var waves = waveTotal(draft.waves);
         var steps = draft.waves.length - waves;
-        var meta = plural(waves, 'wave') + (steps ? ' · ' + plural(steps, 'step') : '') + ' · in the order they run';
+        var meta = S.kernel.text.plural(waves, 'wave') + (steps ? ' · ' + S.kernel.text.plural(steps, 'step') : '') + ' · in the order they run';
         var $card = h.card({ title: 'Waves and steps', meta: meta });
         if (!draft.waves.length) {
             $card.append(h.empty('No waves yet.', 'Add the wave files of this adventure, in the order they run.'));

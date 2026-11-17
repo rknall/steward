@@ -95,7 +95,7 @@
         var lines = list && q.lines ? q.lines : null;
         var meta = !list ? 'unreadable'
             : !list.length ? 'empty'
-            : list.length + (list.length === 1 ? ' entry' : ' entries') +
+            : S.kernel.text.plural(list.length, 'entry', 'entries') +
                 (isNum(q.doneAt) ? SEP + 'done ' + at(h, q.doneAt) : '');
         var $card = h.card({ title: queueTitle(h, q, now), meta: meta });
 

@@ -108,7 +108,7 @@
     }
 
     function typesText(n) {
-        return n + ' collectible type' + (n === 1 ? '' : 's');
+        return S.kernel.text.plural(n, 'collectible type');
     }
 
     // Gem pit rows with their rate per 12 h, or null when none is readable:
@@ -133,7 +133,7 @@
     }
 
     function pitsText(n) {
-        return n + ' gem pit' + (n === 1 ? '' : 's');
+        return S.kernel.text.plural(n, 'gem pit');
     }
 
     // The host's resource name for gems and the stock the pits are counted towards.
@@ -141,14 +141,6 @@
     var GEM_TARGET = 20000;
 
     // Days, hours and minutes, e.g. "2d 3h 05m".
-    function daysHoursMinutes(ms) {
-        var total = Math.ceil(ms / 60000);
-        var d = Math.floor(total / 1440);
-        var hh = Math.floor((total % 1440) / 60);
-        var m = total % 60;
-        return (d ? d + 'd ' : '') + hh + 'h ' + (m < 10 ? '0' + m : m) + 'm';
-    }
-
     // Time until the storehouse holds GEM_TARGET gems at the total rate (buffed
     // while a buff is active); null when the stock or the rate is unknown.
     function gemTargetText(res) {
@@ -160,7 +152,7 @@
         var rate = (typeof res.totalRate12hBuffed === 'number') ? res.totalRate12hBuffed : res.totalRate12h;
         if (typeof rate !== 'number' || !(rate > 0)) return null;
         var ms = (GEM_TARGET - have) / rate * 12 * 3600000;
-        return GEM_TARGET + ' Gems in ' + daysHoursMinutes(ms) + ' (now ' + have + ')';
+        return GEM_TARGET + ' Gems in ' + S.kernel.text.hoursMinutes(ms, { round: 'ceil', days: true }) + ' (now ' + have + ')';
     }
 
     function gemPitCard(h, res) {
@@ -219,7 +211,7 @@
     }
 
     function itemsText(n) {
-        return n + ' item' + (n === 1 ? '' : 's');
+        return S.kernel.text.plural(n, 'item');
     }
 
     function mayorCard(h, items) {

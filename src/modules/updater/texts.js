@@ -31,28 +31,23 @@
         return 'v' + text;
     }
 
-    function pad2(n) {
-        return n < 10 ? '0' + n : String(n);
-    }
-
     // Local date, the way a person reads it next to a release; '' for a
     // missing or non-positive time.
     function dateText(ms) {
         if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return '';
-        var d = new Date(ms);
-        return String(d.getFullYear()) + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        return S.kernel.text.date(new Date(ms));
     }
 
     function dateTimeText(ms) {
         var day = dateText(ms);
         if (day === '') return '';
-        return day + ' ' + S.kernel.ui.helpers.clock(new Date(ms));
+        return day + ' ' + S.kernel.text.clock(new Date(ms), { invalid: '' });
     }
 
     // The check interval as a phrase: "an hour", "every 3 hours", "a minute",
     // "every 20 minutes".
     function every() {
-        var minutes = Math.max(1, Math.round(U().REPO.checkMinIntervalMs / 60000));
+        var minutes = S.kernel.text.minutes(U().REPO.checkMinIntervalMs, { min: 1 });
         if (minutes % 60 === 0) {
             var hours = minutes / 60;
             return hours === 1 ? 'an hour' : 'every ' + hours + ' hours';
@@ -107,8 +102,8 @@
         if (which === I.Backup)   return 'Saving a settings backup…';
         if (which === I.Write)    return 'Writing the new Steward file…';
         if (which === I.Reload) {
-            var seconds = Math.max(1, Math.round(U().REPO.reloadDelayMs / 1000));
-            return 'Reloading scripts in ' + seconds + (seconds === 1 ? ' second' : ' seconds') + '…';
+            var seconds = Math.max(1, S.kernel.text.seconds(U().REPO.reloadDelayMs));
+            return 'Reloading scripts in ' + S.kernel.text.plural(seconds, 'second') + '…';
         }
         return 'Working on the update (' + String(which) + ')…';
     }

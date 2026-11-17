@@ -48,15 +48,11 @@
         return !!v && typeof v === 'object' && Object.prototype.toString.call(v) !== '[object Array]';
     }
 
-    function pad2(n) {
-        return n < 10 ? '0' + n : String(n);
-    }
-
     // Local time, because the user reads the name in a file browser.
     function stamp(ms) {
         var d = new Date(ms);
-        return String(d.getFullYear()) + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' +
-               pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+        return S.kernel.text.date(d, '') + '-' +
+               S.kernel.text.clock(d, { seconds: true, sep: '' });
     }
 
     // Keeps the version readable in the file name but never lets it add a

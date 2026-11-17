@@ -619,10 +619,7 @@
                 return loca.FormatDuration(ms, 1);
             }
         } catch (e) { /* fall through to the plain format */ }
-        var totalMinutes = Math.round(ms / 60000);
-        var hours = Math.floor(totalMinutes / 60);
-        var minutes = totalMinutes % 60;
-        return hours + 'h ' + (minutes < 10 ? '0' + minutes : minutes) + 'm';
+        return S.kernel.text.hoursMinutes(ms);
     }
 
     // Busy/idle status as a badge. The busy label carries the remaining time
@@ -633,14 +630,10 @@
         return badge('busy', d ? 'Busy ' + d : 'Busy');
     }
 
-    function pad2(n) { return n < 10 ? '0' + n : String(n); }
-
     // Local time of day as HH:MM, of now when no date is given; '' for an
     // invalid date so a caller never prints "NaN:NaN".
     function clock(date) {
-        var d = date || new Date();
-        if (isNaN(d.getTime())) return '';
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        return S.kernel.text.clock(date || new Date(), { invalid: '' });
     }
 
     // Re-size the fill areas after a module redrew part of its tab.

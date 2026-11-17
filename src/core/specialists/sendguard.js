@@ -80,10 +80,6 @@
         return guard.clock();
     }
 
-    function seconds(ms) {
-        return Math.round(ms / 1000);
-    }
-
     function holdMs(misses) {
         return Math.min(HOLD_BASE_MS * Math.pow(2, misses - 1), HOLD_MAX_MS);
     }
@@ -98,7 +94,7 @@
         delete pending[item.key];
         delete holds[item.key];
         S.kernel.log(e.owner, 'verified ' + e.label + ' (uid ' + item.key + ') after ' +
-            seconds(t - e.sentAt) + ' s');
+            S.kernel.text.seconds(t - e.sentAt) + ' s');
         breaker.verify(e.label);
     }
 
@@ -111,7 +107,7 @@
         h.until = t + ms;
         holds[item.key] = h;
         S.kernel.log(e.owner, e.label + ' (uid ' + item.key + ') did not leave Idle after ' +
-            seconds(t - e.sentAt) + ' s - held ' + Math.round(ms / 60000) + ' min');
+            S.kernel.text.seconds(t - e.sentAt) + ' s - held ' + S.kernel.text.minText(ms));
         breaker.miss();
     }
 
@@ -153,7 +149,7 @@
             if (p.owner !== owner || t - p.sentAt <= STALE_MS) continue;
             delete pending[k];
             S.kernel.debug(owner, 'send to ' + p.label + ' (uid ' + k + ') not judged after ' +
-                seconds(t - p.sentAt) + ' s - dropped');
+                S.kernel.text.seconds(t - p.sentAt) + ' s - dropped');
         }
         judged.sort(function (a, b) { return a.entry.sentAt - b.entry.sentAt; });
         for (i = 0; i < judged.length; i++) {

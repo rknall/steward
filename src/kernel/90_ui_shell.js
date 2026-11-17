@@ -173,7 +173,7 @@
             var d = q.deferral();
             if (!d || typeof d.ms !== 'number') return '';
             if (d.ms < S.kernel.TIMEOUTS.QUEUE_MODAL_STALE_MS) return '';
-            return ' — queue held ' + Math.floor(d.ms / 60000) + ' min';
+            return ' — queue held ' + S.kernel.text.minText(d.ms, { round: 'floor' });
         } catch (e) {
             return '';
         }
@@ -182,7 +182,7 @@
     function statusLabel() {
         var n = 0;
         try { n = S.kernel.registry.count(); } catch (e) { /* ignore */ }
-        return (paused ? 'Paused' : 'Active') + ' — ' + n + ' module' + (n === 1 ? '' : 's')
+        return (paused ? 'Paused' : 'Active') + ' — ' + S.kernel.text.plural(n, 'module')
             + heldSuffix();
     }
 
@@ -1237,7 +1237,7 @@
         if (c.count > 0) {
             active.saveBtn.addClass('steward-primary');
             active.$note.removeClass('steward-foot-note').addClass('steward-foot-dirty')
-                .text(c.count + ' unsaved change' + (c.count === 1 ? '' : 's') + ' · ' + c.names.join(', '));
+                .text(S.kernel.text.plural(c.count, 'unsaved change') + ' · ' + c.names.join(', '));
         } else {
             active.saveBtn.removeClass('steward-primary');
             active.$note.removeClass('steward-foot-dirty').addClass('steward-foot-note')

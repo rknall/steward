@@ -32,6 +32,17 @@ t.test('duration is null unless the time is a positive number', function () {
     assert.ok(s.h.duration(65000).length > 0);
 });
 
+t.test('duration falls back to Hh MMm without a host formatter or when it throws', function () {
+    var s = setup();
+    delete s.H.ctx.loca.FormatDuration;
+    assert.strictEqual(s.h.duration(65 * 60000), '1h 05m');
+    assert.strictEqual(s.h.duration(30000), '0h 01m');
+    assert.strictEqual(s.h.duration(0), null);
+    var thrower = setup();
+    thrower.H.ctx.loca.FormatDuration = function () { throw new Error('host failure'); };
+    assert.strictEqual(thrower.h.duration(65 * 60000), '1h 05m');
+});
+
 t.test('clock formats local HH:MM and gives empty for an invalid date', function () {
     var s = setup();
     assert.strictEqual(s.h.clock(new Date(2024, 0, 2, 7, 5)), '07:05');

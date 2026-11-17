@@ -193,7 +193,7 @@
             icon:  '⚔',
             lines: [
                 PHASE_LINES[phase],
-                n + ' run template' + (n === 1 ? '' : 's') + ' · progress in the ~Adventures~ menu'
+                S.kernel.text.plural(n, 'run template') + ' · progress in the ~Adventures~ menu'
             ],
             badge: badge,
             links: [

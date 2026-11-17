@@ -188,7 +188,7 @@
         var spec = key ? S.core.specialists.lookup(key).spec : null;
         var rem = spec ? S.core.specialists.orders.remaining(spec) : null;
         S.kernel.log(CATEGORY, st().label() + ': ' + text + ', waited ' +
-            Math.round((t - b.since) / 60000) + ' min' +
+            S.kernel.text.minText(t - b.since) +
             (typeof rem === 'number' ? ', remaining ' + rem + ' (raw)' : '') +
             (spec ? ', task ' + taskText(spec) : ''));
     }
@@ -884,7 +884,7 @@
             if (opts && opts.waitQueued && shortQueued(p.shortAfter, transit)) {
                 if (now() - r.since > opts.waitMaxMs) {
                     st().pause(S.RunPause.TroopsShort, 'troops short: ' + shortText + ' (still in production after ' +
-                        Math.round(opts.waitMaxMs / 60000) + ' min)');
+                        S.kernel.text.minText(opts.waitMaxMs) + ')');
                     return;
                 }
                 var reason = WAIT_PREFIX + shortText + (!S.core.army.isEmpty(transit) ? ' (part on the way home)' : '');

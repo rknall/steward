@@ -54,12 +54,8 @@
         consoleSink:    null
     };
 
-    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
-
     function timestamp() {
-        var d = new Date();
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-               ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+        return S.kernel.text.dateTime(new Date(), { seconds: true });
     }
 
     function joinArgs(args, fromIdx) {

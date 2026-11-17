@@ -332,7 +332,7 @@
         var rec = ld().marked(r, WAIT_PREFIX + idx);
         var left = item.minutes * 60000;
         if (rec && typeof rec.sentAt === 'number') left -= now - rec.sentAt;
-        return Math.max(1, Math.ceil(left / 60000)) + ' min left';
+        return S.kernel.text.minText(left, { round: 'ceil', min: 1 }) + ' left';
     }
 
     // Wait: the mark's sentAt is the start of the wait. Resume clears an

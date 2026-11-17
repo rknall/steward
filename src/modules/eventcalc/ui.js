@@ -37,15 +37,9 @@
         return typeof n === 'number' && !isNaN(n);
     }
 
-    function pad2(n) {
-        return (n < 10 ? '0' : '') + n;
-    }
-
     function formatDate(ms) {
         if (!isNum(ms)) return '—';
-        var d = new Date(ms);
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-               ' ' + S.kernel.ui.helpers.clock(d);
+        return S.kernel.text.dateTime(new Date(ms), { invalid: '' });
     }
 
     function textOrDash(v) {

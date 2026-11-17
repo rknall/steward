@@ -137,8 +137,6 @@
         return parts.join(', ');
     }
 
-    function seconds(ms) { return Math.round(ms / 1000); }
-
     // Logs the start of a deferral, a repeat at most once per LOG_REPEAT_MS
     // and one stale warning. Nothing is written per poll, and a logging fault
     // never reaches runOne, so it cannot skip the next poll.
@@ -155,14 +153,14 @@
             if (now - deferral.loggedAt >= S.kernel.TIMEOUTS.LOG_REPEAT_MS) {
                 deferral.loggedAt = now;
                 S.kernel.log('queue', 'still deferring ' + depthNow + ' action(s) after ' +
-                    seconds(now - deferral.since) + ' s: dialog visible: ' + dialogList(ids));
+                    S.kernel.text.seconds(now - deferral.since) + ' s: dialog visible: ' + dialogList(ids));
             }
             // A wedged stage can keep a steward modal shown behind the game,
             // where the user cannot see it, so a long hold says where to look.
             if (!deferral.warned && now - deferral.since >= S.kernel.TIMEOUTS.QUEUE_MODAL_STALE_MS) {
                 deferral.warned = true;
-                S.kernel.warn('queue', 'held ' + Math.floor((now - deferral.since) / 60000) +
-                    ' min by dialog ' + dialogList(ids) +
+                S.kernel.warn('queue', 'held ' + S.kernel.text.minText(now - deferral.since, { round: 'floor' }) +
+                    ' by dialog ' + dialogList(ids) +
                     '; if no steward window is on screen the game may be covering it: restart the client');
             }
         } catch (e) { /* logging never stops the queue */ }
@@ -173,7 +171,7 @@
     function noteDeferralEnd(kind) {
         try {
             if (deferral === null) return;
-            var s = seconds(Date.now() - deferral.since);
+            var s = S.kernel.text.seconds(Date.now() - deferral.since);
             if (kind === 'resumed') {
                 S.kernel.log('queue', 'resumed after ' + s + ' s');
             } else if (kind === 'empty') {

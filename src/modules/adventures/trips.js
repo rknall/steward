@@ -364,7 +364,7 @@
                 // The queue limits of a production building are not known, so
                 // an order that never showed is planned again, never paused on.
                 log('order of ' + b + ' not seen in the queue after ' +
-                    Math.round(ld().ORDER_WAIT_MS / 60000) + ' min, ordering again');
+                    S.kernel.text.minText(ld().ORDER_WAIT_MS) + ', ordering again');
                 ld().dropMark(r, MAKE + b);
                 return;
             }
@@ -932,7 +932,7 @@
                 'waiting for quest ' + wq + ' for ' + waitItem.buff + ', ' + qt :
                 'waiting for a quest that wants ' + waitItem.buff + ', ' + qt);
             if (q.ms < APPLY_QUIET_MS) return;
-            var mins = Math.round(APPLY_QUIET_MS / 60000);
+            var mins = S.kernel.text.minutes(APPLY_QUIET_MS);
             st().pause(S.RunPause.NotObserved, wq ?
                 'quest ' + wq + ' does not want ' + waitItem.buff + ' after ' + mins +
                     ' min; check the quest book, then Resume' :
@@ -1073,7 +1073,7 @@
         ld().markSeen(r, name);
         ld().marked(r, name).count = k;
         st().save();
-        log(text + ' after ' + Math.round(lim / 60000) + ' min; next trip short of ' + short +
+        log(text + ' after ' + S.kernel.text.minText(lim) + '; next trip short of ' + short +
             '; going home and back to reload the island (' + k + '/' + TRIP_REVISITS + ')');
         newLeg(r);
         st().go(S.RunStep.JumpHome, 're-visit ' + k + '/' + TRIP_REVISITS);

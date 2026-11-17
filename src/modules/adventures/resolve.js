@@ -86,7 +86,7 @@
         if (S.core.packets.sendMessage(REFRESH_MSG, null) !== true) return false;
         var rs = st().current();
         rs.stuckClock = { since: r.since, last: now(), ms: Math.max(0, limit - REFRESH_WAIT_MS) };
-        log(st().stepName(r.step) + ' waited ' + Math.round(ms / 60000) + ' min (' + what +
+        log(st().stepName(r.step) + ' waited ' + S.kernel.text.minText(ms) + ' (' + what +
             '); zone refresh sent before any trip');
         return true;
     }
@@ -96,7 +96,7 @@
     function fire(r, ms) {
         var b = st().busyOf(r);
         var what = b ? b.text : 'waiting';
-        var mins = Math.round(ms / 60000);
+        var mins = S.kernel.text.minutes(ms);
         if (!st().sameStuck(r, r.step)) r.stuck = { step: r.step, wave: r.waveIndex, trips: 0, refreshed: false };
         if (!r.stuck.refreshed) {
             r.stuck.refreshed = true;

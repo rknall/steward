@@ -33,7 +33,7 @@
                 for (var i = 0; i < keys.length; i++) {
                     var v = settings.settings[keys[i]];
                     var n = (v && typeof v === 'object') ? Object.keys(v).length : 0;
-                    S.kernel.log('diag', '  ' + keys[i] + '  (' + n + ' field' + (n === 1 ? '' : 's') + ')');
+                    S.kernel.log('diag', '  ' + keys[i] + '  (' + S.kernel.text.plural(n, 'field') + ')');
                 }
             }
         } catch (e) { S.kernel.error('diag', 'settings dump threw:', e); }
@@ -481,14 +481,14 @@
     var lastRun = '';
 
     function clock(ms) {
-        var total = Math.max(0, Math.round(ms / 1000));
+        var total = Math.max(0, S.kernel.text.seconds(ms));
         var sec = total % 60;
-        return Math.floor(total / 60) + ':' + (sec < 10 ? '0' : '') + sec;
+        return Math.floor(total / 60) + ':' + S.kernel.text.pad2(sec);
     }
 
     // Span text for the sampler help, derived from the sampler's own plan.
     function spanText(ms) {
-        var total = Math.round(ms / 1000);
+        var total = S.kernel.text.seconds(ms);
         if (total < 60) return total + ' s';
         if (total % 60 === 0) return (total / 60) + ' min';
         return clock(ms);
