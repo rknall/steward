@@ -188,6 +188,23 @@
         return lines;
     }
 
+    // One failed read becomes a value in the document, never an abort.
+    function guard(fn) {
+        try { return fn(); }
+        catch (e) { return { error: String(e) }; }
+    }
+
+    // Records by numeric grid; one without a numeric grid goes last, so an
+    // unreadable record never sorts ahead of a readable one.
+    function gridOrder(a, b) {
+        var ag = (typeof a.grid === 'number');
+        var bg = (typeof b.grid === 'number');
+        if (ag && bg) return a.grid - b.grid;
+        if (ag) return -1;
+        if (bg) return 1;
+        return 0;
+    }
+
     function logLines(category, lines) {
         for (var i = 0; i < lines.length; i++) S.kernel.log(category, lines[i]);
     }
@@ -196,6 +213,8 @@
         TASK_GETTERS: TASK_GETTERS,
         callerOf: callerOf,
         describe: describe,
+        gridOrder: gridOrder,
+        guard: guard,
         logLines: logLines,
         shortValue: shortValue
     };

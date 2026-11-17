@@ -263,13 +263,6 @@
         return (typeof row.max === 'number') ? row.max : 0;
     }
 
-    function depositTypes() {
-        var d = S.core.deposits;
-        if (!d || typeof d.types !== 'function') return [];
-        try { return d.types() || []; }
-        catch (e) { return []; }
-    }
-
     // Live count on the home zone; null when it cannot be read, so an
     // unknown count is never shown or counted as zero.
     function onMapCount(depositName) {
@@ -378,7 +371,7 @@
     }
 
     function depositRows(h, index, redraw) {
-        var types = depositTypes();
+        var types = S.core.deposits.types();
         var rows = [];
         for (var i = 0; i < types.length; i++) {
             var name = types[i].name;
@@ -588,7 +581,7 @@
             return out;
         }
         out.partial = r.state === S.kernel.read.PARTIAL;
-        var types = depositTypes();
+        var types = S.core.deposits.types();
         var geos = r.value.slice();
         geos.sort(c.compareByName);
         for (var i = 0; i < geos.length; i++) {
@@ -724,7 +717,7 @@
     // Deposit rows the dispatcher searches, and how many of them have
     // fewer on the map than their Max.
     function depositCounts(h) {
-        var types = depositTypes();
+        var types = S.core.deposits.types();
         var out = { searched: 0, below: 0 };
         for (var i = 0; i < types.length; i++) {
             var row = depositRow(h, types[i].name);

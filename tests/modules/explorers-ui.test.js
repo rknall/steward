@@ -98,3 +98,27 @@ t.test('one list read per draw', function () {
     tile(H);
     t.assert.strictEqual(calls, 1);
 });
+
+t.test('the Default task picker offers Auto and the unskilled tasks in order', function () {
+    var H = boot();
+    var S = H.Steward;
+    var h = S.kernel.ui.helpers;
+    var realDropdown = h.dropdown;
+    var captured = null;
+    h.dropdown = function (options, opts) {
+        if (opts && opts.path === 'defaultTask') captured = options;
+        return realDropdown.apply(h, arguments);
+    };
+    try {
+        S.modules.explorers.side(H.ctx.$('<div>'), h);
+    } finally {
+        h.dropdown = realDropdown;
+    }
+    var E = S.ExplorerTask;
+    t.assert.ok(captured, 'the Default task dropdown was rendered');
+    var values = [];
+    for (var i = 0; i < captured.length; i++) values.push(captured[i].value);
+    t.assert.deepStrictEqual(values, ['', E.Short, E.Medium, E.Long, E.EvenLonger, E.Prolonged,
+        E.AdventureZoneShort, E.AdventureZoneMedium, E.AdventureZoneLong, E.AdventureZoneVeryLong]);
+    t.assert.strictEqual(captured[0].label, 'Auto (Prolonged baseline)');
+});

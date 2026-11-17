@@ -41,19 +41,9 @@
 
     function fmt(v) { return insp().shortValue(v); }
 
-    // Host vectors: toArray when the host offers it, else an index walk.
+    // Host vector as a plain array, [] when absent.
     function list(vec) {
-        var out = [];
-        if (!vec) return out;
-        try {
-            if (typeof vec.toArray === 'function') {
-                var arr = vec.toArray();
-                if (arr && typeof arr.length === 'number') vec = arr;
-            }
-        } catch (e) { /* fall back to the index walk */ }
-        var n = (typeof vec.length === 'number') ? vec.length : 0;
-        for (var i = 0; i < n; i++) out.push(vec[i]);
-        return out;
+        return S.kernel.hostRead.list(vec) || [];
     }
 
     // "name=value" for each getter the object has; absent getters are left out.
@@ -422,12 +412,7 @@
         var bn = (b.name === null || b.name === undefined) ? '' : String(b.name);
         if (an < bn) return -1;
         if (an > bn) return 1;
-        var ag = (typeof a.grid === 'number');
-        var bg = (typeof b.grid === 'number');
-        if (ag && bg) return a.grid - b.grid;
-        if (ag) return -1;
-        if (bg) return 1;
-        return 0;
+        return insp().gridOrder(a, b);
     }
 
     function buildingRecord(b, x) {

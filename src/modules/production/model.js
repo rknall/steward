@@ -566,6 +566,8 @@
     }
 
     S.modules.production.model = {
+        // Shared by the views and the window so each try-with-fallback has one home.
+        safe:         safe,
         buildings:    buildings,
         queues:       queues,
         isManaged:    isManaged,

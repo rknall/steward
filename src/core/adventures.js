@@ -208,14 +208,8 @@
         var lost = 0;
         var mgr = manager();
         if (!mgr) return R.unreadable('no adventure manager');
-        var advs = mgr.getAdventures();
-        try {
-            if (advs && typeof advs.toArray === 'function') {
-                var arr = advs.toArray();
-                if (arr && typeof arr.length === 'number') advs = arr;
-            }
-        } catch (e1) { /* fall back to the index walk */ }
-        if (!advs || typeof advs.length !== 'number') return R.unreadable('no adventure list');
+        var advs = S.kernel.hostRead.list(mgr.getAdventures());
+        if (!advs) return R.unreadable('no adventure list');
         for (var i = 0; i < advs.length; i++) {
             var adv = advs[i];
             if (!mgr.isMyAdventure(adv)) continue;

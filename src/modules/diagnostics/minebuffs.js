@@ -25,8 +25,7 @@
 
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
-        try { return fn(); }
-        catch (e) { return { error: String(e) }; }
+        return S.modules.diagnostics.inspect.guard(fn);
     }
 
     // Reads through the mining module's own settings reader so the dump shows
@@ -75,15 +74,6 @@
         };
     }
 
-    function gridOrder(a, b) {
-        var ag = (typeof a.grid === 'number');
-        var bg = (typeof b.grid === 'number');
-        if (ag && bg) return a.grid - b.grid;
-        if (ag) return -1;
-        if (bg) return 1;
-        return 0;
-    }
-
     function buildingsRecord(name) {
         var all = S.core.buildings.byName(name);
         var out = [];
@@ -91,7 +81,7 @@
             var x = all[i];
             out.push(guard(function () { return buildingRecord(x); }));
         }
-        out.sort(gridOrder);
+        out.sort(S.modules.diagnostics.inspect.gridOrder);
         return out;
     }
 

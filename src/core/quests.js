@@ -118,19 +118,9 @@
     var CLICK_TRIGGER_TYPE = 1;
     var CLICK_TRIGGER_CONDITION = 9;
 
-    // A plain array copy of a host vector, or null when it is missing or has
-    // no length. toArray is preferred where the host offers it; otherwise the
-    // vector is walked by index. A throw reaches the caller.
+    // A plain array copy of a host vector, or null (see hostRead.list).
     function toList(vec) {
-        if (!vec) return null;
-        if (typeof vec.toArray === 'function') {
-            var arr = vec.toArray();
-            if (arr && typeof arr.length === 'number') vec = arr;
-        }
-        if (typeof vec.length !== 'number') return null;
-        var out = [];
-        for (var i = 0; i < vec.length; i++) out.push(vec[i]);
-        return out;
+        return S.kernel.hostRead.list(vec);
     }
 
     // The live quest objects of the pool, or null when the game, the pool or

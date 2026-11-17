@@ -57,17 +57,19 @@
     // The previous shape merged 1,4 / 1,5 with the adventure family, which
     // was wrong: 1,4 (FindTreasureTravellingErudite) and 1,5
     // (FindTreasureBeanACollada) are skill-locked TREASURE searches.
-    S.ExplorerTask.Short                 = 'TaskExplorerShort';                // 1,0
-    S.ExplorerTask.Medium                = 'TaskExplorerMedium';               // 1,1
-    S.ExplorerTask.Long                  = 'TaskExplorerLong';                 // 1,2
-    S.ExplorerTask.EvenLonger            = 'TaskExplorerEvenLonger';           // 1,3
-    S.ExplorerTask.TravellingErudite     = 'TaskExplorerTravellingErudite';    // 1,4 — skill 39
-    S.ExplorerTask.BeanACollada          = 'TaskExplorerBeanACollada';         // 1,5 — skill 40
-    S.ExplorerTask.Prolonged             = 'TaskExplorerProlonged';            // 1,6
-    S.ExplorerTask.AdventureZoneShort    = 'TaskExplorerAdvZoneShort';         // 2,0
-    S.ExplorerTask.AdventureZoneMedium   = 'TaskExplorerAdvZoneMedium';        // 2,1
-    S.ExplorerTask.AdventureZoneLong     = 'TaskExplorerAdvZoneLong';          // 2,2
-    S.ExplorerTask.AdventureZoneVeryLong = 'TaskExplorerAdvZoneVeryLong';      // 2,3
+    //
+    // The (taskId, subTaskId) pair of each task is in EXPLORER_TASK_PACKET below.
+    S.ExplorerTask.Short                 = 'TaskExplorerShort';
+    S.ExplorerTask.Medium                = 'TaskExplorerMedium';
+    S.ExplorerTask.Long                  = 'TaskExplorerLong';
+    S.ExplorerTask.EvenLonger            = 'TaskExplorerEvenLonger';
+    S.ExplorerTask.TravellingErudite     = 'TaskExplorerTravellingErudite';    // skill 39
+    S.ExplorerTask.BeanACollada          = 'TaskExplorerBeanACollada';         // skill 40
+    S.ExplorerTask.Prolonged             = 'TaskExplorerProlonged';
+    S.ExplorerTask.AdventureZoneShort    = 'TaskExplorerAdvZoneShort';
+    S.ExplorerTask.AdventureZoneMedium   = 'TaskExplorerAdvZoneMedium';
+    S.ExplorerTask.AdventureZoneLong     = 'TaskExplorerAdvZoneLong';
+    S.ExplorerTask.AdventureZoneVeryLong = 'TaskExplorerAdvZoneVeryLong';
 
     S.GeologistTask.Search = 'TaskGeologistSearch';                 // raw 0
 
@@ -100,24 +102,15 @@
     // Inverse: (taskId, subTaskId) → ExplorerTask enum. Used by currentTask
     // to decode a busy explorer's GetTask().GetType()/.GetSubType() pair, and
     // by callers that read host settings (treasure-only context — pass 1 as
-    // taskId).
-    var RAW_TO_EXPLORER_TASK = {
-        1: {
-            0: S.ExplorerTask.Short,
-            1: S.ExplorerTask.Medium,
-            2: S.ExplorerTask.Long,
-            3: S.ExplorerTask.EvenLonger,
-            4: S.ExplorerTask.TravellingErudite,
-            5: S.ExplorerTask.BeanACollada,
-            6: S.ExplorerTask.Prolonged
-        },
-        2: {
-            0: S.ExplorerTask.AdventureZoneShort,
-            1: S.ExplorerTask.AdventureZoneMedium,
-            2: S.ExplorerTask.AdventureZoneLong,
-            3: S.ExplorerTask.AdventureZoneVeryLong
-        }
-    };
+    // taskId). Built from EXPLORER_TASK_PACKET above, so it is that table
+    // inverted and cannot drift from it.
+    var RAW_TO_EXPLORER_TASK = {};
+    for (var packetKey in EXPLORER_TASK_PACKET) {
+        if (!Object.prototype.hasOwnProperty.call(EXPLORER_TASK_PACKET, packetKey)) continue;
+        var packet = EXPLORER_TASK_PACKET[packetKey];
+        if (!RAW_TO_EXPLORER_TASK[packet.taskId]) RAW_TO_EXPLORER_TASK[packet.taskId] = {};
+        RAW_TO_EXPLORER_TASK[packet.taskId][packet.subTaskId] = packetKey;
+    }
 
     var GEOLOGIST_TASK_PACKET = {};
     // Geologists: taskId=0, subTaskId is the deposit-type index supplied
@@ -1115,6 +1108,17 @@
         return 0;
     }
 
+    // The tasks that need no explorer skill, in the host dropdown order (the
+    // order of TASK_REQUIREMENTS); the settings picker lists these.
+    function unskilledTasks() {
+        var out = [];
+        for (var i = 0; i < TASK_REQUIREMENTS.length; i++) {
+            var r = TASK_REQUIREMENTS[i];
+            if (!r[1] && !r[2]) out.push(r[0]);
+        }
+        return out;
+    }
+
     // List of ExplorerTask enums this explorer is eligible for, mirroring
     // the host's createExplorerDropdown filter exactly. A task qualifies if:
     //   - it requires Erudite and the explorer has Erudite, OR
@@ -1145,6 +1149,8 @@
     // EXPLORER_TASK_PACKET, GEOLOGIST_TASK_PACKET, RAW_TO_EXPLORER_TASK and
     // rawToExplorerTask stay in this file because they're dispatch-level
     // enum↔packet mappings consumed by send() and currentTask().
+    // RAW_TO_EXPLORER_TASK is derived from EXPLORER_TASK_PACKET at load, so
+    // the packet table is the only place a pair is written down.
     // rawToExplorerTask is exposed on the public namespace so the per-
     // family files can reach it.
 
@@ -1248,6 +1254,7 @@
     S.core.specialists.knownTask        = knownTask;
     S.core.specialists.rawToExplorerTask = rawToExplorerTask;
     S.core.specialists.availableTasks   = availableTasks;
+    S.core.specialists.unskilledTasks   = unskilledTasks;
     // pickTask / biasFromTrait / familyFromBias / bestTaskForEvent /
     // taskFamilyOf are exported from core/specialists/explorers.js.
     // pickDeposits is exported from core/specialists/geologists.js.

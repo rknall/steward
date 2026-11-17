@@ -8,6 +8,11 @@
  * the check and the call see the same value. call() never catches: callers
  * keep their own try, because only they know what an unreadable member means.
  *
+ * list(vec) copies a host vector into a plain array, or returns null when it
+ * is not array-like. It is the one read here that catches, and only a throwing
+ * toArray, because the index walk is a complete fallback; an index read that
+ * throws still reaches the caller.
+ *
  * A read pass is one synchronous, read-only stretch of work (a view model, a
  * window render, a module's planning pass) in which the same host lists would
  * otherwise be read many times. pass(fn) opens a memo for the length of fn;
@@ -44,6 +49,26 @@
         if (!o) return undefined;
         var f = o[m];
         return typeof f === 'function' ? f.call(o) : undefined;
+    }
+
+    // Plain array copy of a host vector, or null when it is not array-like.
+    // toArray() is tried first; a throwing toArray is swallowed because the
+    // index walk below reads the same vector completely. An index read that
+    // throws is not caught and reaches the caller.
+    function list(vec) {
+        if (!vec) return null;
+        if (typeof vec.toArray === 'function') {
+            try {
+                var arr = vec.toArray();
+                if (arr && typeof arr.length === 'number') vec = arr;
+            } catch (e) {
+                // The index walk below still reads the vector.
+            }
+        }
+        if (typeof vec.length !== 'number') return null;
+        var out = [];
+        for (var i = 0; i < vec.length; i++) out.push(vec[i]);
+        return out;
     }
 
     // A nested pass joins the open one, so an inner view model shares the
@@ -98,6 +123,7 @@
 
     S.kernel.hostRead = {
         call: call,
+        list: list,
         pass: pass,
         cached: cached,
         inPass: inPass,

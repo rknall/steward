@@ -133,6 +133,7 @@ if (Steward.core.specialists.dropped() !== before) return; // count is not relia
 A host member can read as a function and then as undefined, and a view that walks many rows reads the same host lists again and again. `Steward.kernel.hostRead` covers both:
 
 - `hostRead.call(o, m)` reads the member into a local and invokes it on its owner. Use it instead of `o.M ? o.M() : x`. It never catches, so keep your own try.
+- `hostRead.list(vec)` copies a host vector into a plain array. It uses `vec.toArray()` when offered, otherwise walks the indexes, and returns null when the value is not array-like. Only a throwing `toArray` is caught, because the index walk still reads the vector; an index read that throws reaches the caller. Never write a local walk.
 - `hostRead.pass(fn)` opens a read pass around a view model, a window render, a dashboard tab draw or a module's planning pass. Inside it the memoizing readers answer from one memo; outside a pass they read fresh, exactly as before. A nested pass joins the open one. A module status that must agree across the parts of one draw memoizes it with `hostRead.cached`.
 - Never wrap an action def, a send or `actions.attempt` in a pass. They run later from the kernel queue and their verification reads must stay live.
 - A cached value is shared by every reader in the pass, so treat it as read-only.

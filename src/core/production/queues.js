@@ -95,10 +95,7 @@
 
     // A host vector as a plain array, or null when it is not array-like.
     function toArray(vec) {
-        if (!vec || typeof vec.length !== 'number') return null;
-        var out = [];
-        for (var i = 0; i < vec.length; i++) out.push(vec[i]);
-        return out;
+        return S.kernel.hostRead.list(vec);
     }
 
     function hostGlobal() {
@@ -917,5 +914,7 @@
     P0.stockOf     = stockOf;
     P0.capacity    = capacity;
     P0.complete    = complete;
+    // The host enum that names a timed production type; the diagnostics dump reads it from here.
+    P0.ENUM_TYPES  = ENUM_TYPES;
 
 }(Steward));

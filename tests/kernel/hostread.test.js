@@ -211,3 +211,47 @@ t.test('unsettled resets on a new outer pass', function () {
     }, /boom/);
     R.pass(function () { t.assert.strictEqual(R.unsettled(), false); });
 });
+
+// The kernel runs in its own realm: copy into a local array to compare.
+function plain(a) { return Array.prototype.slice.call(a); }
+
+t.test('hostRead.list copies the result of toArray when there is one', function () {
+    var R = hostRead();
+    var vec = { length: 1, 0: 'index', toArray: function () { return ['via', 'toArray']; } };
+    t.assert.deepStrictEqual(plain(R.list(vec)), ['via', 'toArray']);
+});
+
+t.test('hostRead.list walks the indexes of a vector without toArray', function () {
+    var R = hostRead();
+    var out = R.list({ length: 3, 0: 'a', 1: 'b', 2: 'c' });
+    t.assert.ok(Array.isArray(out));
+    t.assert.deepStrictEqual(plain(out), ['a', 'b', 'c']);
+});
+
+t.test('hostRead.list falls back to the index walk when toArray throws', function () {
+    var R = hostRead();
+    var vec = { length: 2, 0: 'a', 1: 'b', toArray: function () { throw new Error('bridge'); } };
+    t.assert.deepStrictEqual(plain(R.list(vec)), ['a', 'b']);
+});
+
+t.test('hostRead.list falls back to the index walk when toArray returns a non-array', function () {
+    var R = hostRead();
+    var vec = { length: 2, 0: 'a', 1: 'b', toArray: function () { return null; } };
+    t.assert.deepStrictEqual(plain(R.list(vec)), ['a', 'b']);
+    vec.toArray = function () { return {}; };
+    t.assert.deepStrictEqual(plain(R.list(vec)), ['a', 'b']);
+});
+
+t.test('hostRead.list is null for a missing vector or one without a length', function () {
+    var R = hostRead();
+    t.assert.strictEqual(R.list(null), null);
+    t.assert.strictEqual(R.list(undefined), null);
+    t.assert.strictEqual(R.list({}), null);
+});
+
+t.test('hostRead.list does not catch a throwing index read', function () {
+    var R = hostRead();
+    var vec = { length: 1 };
+    Object.defineProperty(vec, '0', { get: function () { throw new Error('index'); } });
+    t.assert.throws(function () { R.list(vec); }, /index/);
+});

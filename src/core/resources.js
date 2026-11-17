@@ -32,6 +32,10 @@
     // and the population star buff read it from here at call time.
     var POPULATION = 'Population';
 
+    // The host's resource name for gems. It is the only copy: the gem pit card
+    // reads the stock through it at call time.
+    var GEMS = 'HardCurrency';
+
     // The UI status updater reads resource amounts on every refresh, so a
     // persistent host throw would flood the log. The first throw per load is
     // logged; a reload re-runs this file and resets the flag.
@@ -195,6 +199,7 @@
     S.core.resources.amount         = amount;
     S.core.resources.freePopulation = freePopulation;
     S.core.resources.POPULATION     = POPULATION;
+    S.core.resources.GEMS           = GEMS;
     S.core.resources.list           = list;
     S.core.resources.listRead       = listRead;
     S.core.resources.eventName      = eventName;

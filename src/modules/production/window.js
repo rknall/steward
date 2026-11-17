@@ -82,12 +82,7 @@
     }
 
     function safe(fn, fallback) {
-        try {
-            var v = fn();
-            return v === undefined ? fallback : v;
-        } catch (e) {
-            return fallback;
-        }
+        return S.modules.production.model.safe(fn, fallback);
     }
 
     function labelOf(x) {

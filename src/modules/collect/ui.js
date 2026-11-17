@@ -136,15 +136,14 @@
         return S.kernel.text.plural(n, 'gem pit');
     }
 
-    // The host's resource name for gems and the stock the pits are counted towards.
-    var GEM_RESOURCE = 'HardCurrency';
+    // The gem stock the pits are counted towards.
     var GEM_TARGET = 20000;
 
     // Time until the storehouse holds GEM_TARGET gems at the total rate (buffed
     // while a buff is active); null when the stock or the rate is unknown.
     function gemTargetText(res) {
         var have = null;
-        try { have = S.core.resources.amount(GEM_RESOURCE); }
+        try { have = S.core.resources.amount(S.core.resources.GEMS); }
         catch (e) { have = null; }
         if (typeof have !== 'number') return null;
         if (have >= GEM_TARGET) return GEM_TARGET + ' Gems reached';

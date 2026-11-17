@@ -33,8 +33,7 @@
 
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
-        try { return fn(); }
-        catch (e) { return { error: String(e) }; }
+        return S.modules.diagnostics.inspect.guard(fn);
     }
 
     // A missing field stays null and is never turned into '', so the dump tells

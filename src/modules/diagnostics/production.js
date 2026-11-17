@@ -35,8 +35,7 @@
 
     // One failed read becomes a value in the document, never an abort.
     function guard(fn) {
-        try { return fn(); }
-        catch (e) { return { error: String(e) }; }
+        return S.modules.diagnostics.inspect.guard(fn);
     }
 
     // The host definition that holds the item vectors (timedProductions_vector,
@@ -47,12 +46,10 @@
         return g;
     }
 
-    // A host vector as a plain array; an unreadable one throws into guard.
+    // A host vector as a plain array, [] when absent; a throwing index read
+    // reaches guard.
     function toArray(vec) {
-        var out = [];
-        if (!vec) return out;
-        for (var i = 0; i < vec.length; i++) out.push(vec[i]);
-        return out;
+        return S.kernel.hostRead.list(vec) || [];
     }
 
     // Kernel single read: the member is read once, so a getter that the host
@@ -63,7 +60,7 @@
 
     function enumName(type) {
         return guard(function () {
-            return swmmo.getDefinitionByName('Enums::TIMED_PRODUCTION_TYPE').toString(type);
+            return swmmo.getDefinitionByName(S.core.production.ENUM_TYPES).toString(type);
         });
     }
 

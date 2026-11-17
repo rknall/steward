@@ -100,23 +100,14 @@
     // Empty value = "use Steward's longest-available baseline (Prolonged)".
     // Skill-locked variants (Erudite/BeanACollada) are intentionally
     // omitted — they only apply to explorers who learned the skill, and
-    // pickTask routes those automatically.
+    // pickTask routes those automatically. The list is core's unskilled
+    // tasks, so the core requirement table decides which rows appear.
     function defaultTaskOptions() {
         var opts = [
             { value: '', label: 'Auto (Prolonged baseline)' }
         ];
         var c = S.core.specialists;
-        var enums = [
-            S.ExplorerTask.Short,
-            S.ExplorerTask.Medium,
-            S.ExplorerTask.Long,
-            S.ExplorerTask.EvenLonger,
-            S.ExplorerTask.Prolonged,
-            S.ExplorerTask.AdventureZoneShort,
-            S.ExplorerTask.AdventureZoneMedium,
-            S.ExplorerTask.AdventureZoneLong,
-            S.ExplorerTask.AdventureZoneVeryLong
-        ];
+        var enums = c.unskilledTasks();
         for (var i = 0; i < enums.length; i++) {
             var label = (c && c.taskLabel) ? c.taskLabel(enums[i]) : enums[i];
             opts.push({ value: enums[i], label: label });
