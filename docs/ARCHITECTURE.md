@@ -47,9 +47,10 @@ Steward
 │   ├── adventures      ← adventure definitions, own adventures, close action
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
-│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, production orders and buffs)
+│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, mining builds, production orders and buffs)
 │   ├── buffing         ← shared building-buff engine: verified apply, per-grid hold, breaker; one instance per owner (mining, production)
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
+│   ├── construction    ← building placement and upgrade action defs, verified on the grid
 │   ├── production      ← queue profiles and entries per type, generic order, complete, on/off, planner, demand ledger
 │   ├── quests          ← quest pool and claim action
 │   ├── resources       ← resource amount and free population reads

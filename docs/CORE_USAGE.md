@@ -23,6 +23,7 @@
 | `Steward.core.pickups`     | Clickable quest objects and collectibles of the viewed zone, and the click action. |
 | `Steward.core.production`  | Queue profiles and entries per production type, item info, generic order and complete actions, the on/off action, the planner and the demand ledger. |
 | `Steward.core.buffing`     | Shared building-buff engine: verified apply, per-grid hold after an unseen apply, one breaker per owner. |
+| `Steward.core.construction` | Place and upgrade action defs for one grid, verified by observation, never retried. |
 | `Steward.core.resources`   | Resource amount and free population reads.            |
 
 Write actions are defs (plain objects with `precheck`, `send`, `check` and so on) built by the core that owns the action, for example `S.core.army.raise`, `S.core.quests.claim`, `S.core.pickups.click` and `S.core.production.order`. They run through `S.core.actions.attempt(def, onDone)`, which verifies by positive observation: a failed read or a missing object never counts as success. Which action to run and when stays with the module; the cores stay policy-free. Readers that defs rely on report a failed read as `null`, never as zero or an empty list. A def may add `observable()`: while it returns false no check runs and the wait does not use up the verify window, up to a fixed cap (`S.core.actions.HOLD_MAX_MS`).
@@ -203,7 +204,7 @@ The breaker part of the guard is `Steward.core.breaker`: a factory that makes na
 with their own run counter, open state and probe cooldown. The send guard holds one instance
 for explorers and geologists. Mining buffs hold a separate instance, so a failing buff never
 pauses specialist dispatch, and a specialist failure never pauses buffing. Each instance logs
-its open and close transitions once. Production orders and production buffs hold two more instances, and the buff side runs through `Steward.core.buffing.create()`, which mining shares, so each owner pauses only itself. `buffing.create().eligible(b, assigned)` answers one `Steward.BuffVerdict`: `Ok` to buff now, `Skip` to try the next building, `Stop` when the breaker is open and no probe is due.
+its open and close transitions once. Production orders and production buffs hold two more instances, and the buff side runs through `Steward.core.buffing.create()`, which mining shares, so each owner pauses only itself. `buffing.create().eligible(b, assigned)` answers one `Steward.BuffVerdict`: `Ok` to buff now, `Skip` to try the next building, `Stop` when the breaker is open and no probe is due. Mining build and upgrade sends hold their own breaker instance and a 30 min per-grid hold persisted in `steward/mining/holds.json`, so a reload does not resend a build that the grid has not shown yet.
 
 ## Rule 6.5: the production demand ledger
 

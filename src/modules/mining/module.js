@@ -8,6 +8,15 @@
  *            subject to build-queue slots, building licenses and
  *            per-mine affordability.
  *   upgrade  raises mines below the configured target level.
+ *
+ *            Each build and upgrade of a grid goes out once, through
+ *            S.core.construction and S.core.actions with no retry, and
+ *            counts only once it is seen on the grid. A grid whose send
+ *            was not seen stays held for 30 min in
+ *            steward/mining/holds.json; the hold is written before the
+ *            send, so a script reload keeps it. 5 unseen sends in a row
+ *            open the build breaker (memory only), which pauses build and
+ *            upgrade except one probe every 5 min. See builds.js.
  *   pause    stops producing mines whose deposit fell below the global
  *            pause threshold, verified through S.core.production.setActive
  *            so the pause counts only once the mine reads paused.
@@ -159,6 +168,7 @@
             buffs:              0,      // buff applies queued this pass
             buffStock:          {},     // buff name -> stock left this pass
             buffsCurrent:       buffSettingsCurrent(),
+            buildStop:          false,  // build breaker open, no probe left this pass
             actionDelay:       (typeof s.actionDelay === 'number') ? s.actionDelay : 1500
         };
     }
@@ -181,6 +191,8 @@
         if (!cfg.build) return;
         if (ctx.slotsRemaining <= 0 || ctx.licensesRemaining <= 0) return;
         if (!info.mineId || !info.mineName) return;
+        if (ctx.buildStop) return;
+        var builds = S.modules.mining.builds;
 
         var onMapDepos;
         try { onMapDepos = S.core.deposits.byType(info.name); }
@@ -201,10 +213,24 @@
             // this grid means the deposit is already covered. Depleted
             // shells resolve naturally on the next tick: a geo finds a
             // new deposit, the shell goes away, byGrid returns null,
-            // and we queue the build then.
-            if (S.core.buildings.byGrid(grid)) continue;
+            // and we queue the build then. Our own mine seen there clears
+            // the grid's build hold.
+            var key = builds.buildKey(grid);
+            var bld = S.core.buildings.byGrid(grid);
+            if (bld) {
+                if (S.core.buildings.name(bld) === info.mineName) {
+                    builds.seen(key, info.mineName + ' grid ' + grid);
+                }
+                continue;
+            }
+            // A build sent earlier may still land unseen.
+            if (builds.held(key)) continue;
 
             if (!canAffordMine(info.mineName)) continue;
+            if (!builds.admit()) {
+                ctx.buildStop = true;
+                return;
+            }
 
             ctx.assigned[grid] = true;
             ctx.slotsRemaining--;
@@ -225,6 +251,8 @@
         if (!info.mineName) return;
         var target = (typeof cfg.targetLevel === 'number') ? cfg.targetLevel : 0;
         if (target <= 0) return;
+        if (ctx.buildStop) return;
+        var builds = S.modules.mining.builds;
 
         var onMapDepos;
         try { onMapDepos = S.core.deposits.byType(info.name); }
@@ -243,11 +271,29 @@
             var bld = S.core.buildings.byGrid(grid);
             if (!bld) continue;                                              // no mine to upgrade
             if (S.core.buildings.name(bld) !== info.mineName) continue;      // wrong building (depleted shell, etc.)
-            if (S.core.buildings.level(bld) >= target) continue;             // already at or above target
+
+            // The level read now proves any upgrade to it landed.
+            var lvl = S.core.buildings.level(bld);
+            builds.seen(builds.upgradeKey(grid, lvl),
+                info.mineName + ' grid ' + grid + ' level ' + lvl);
+            if (lvl >= target) continue;                                     // already at or above target
+
+            var nextLevel = lvl + 1;
+            var ukey = builds.upgradeKey(grid, nextLevel);
+            var busy = S.core.construction.upgrading(bld) === true;
+            if (builds.held(ukey)) {
+                if (busy) builds.seen(ukey, info.mineName + ' grid ' + grid + ' level ' + nextLevel);
+                continue;
+            }
+            // Already upgrading: a new attempt would only end satisfied
+            // and hold a slot every pass.
+            if (busy) continue;
             if (typeof bld.IsUpgradeAllowed === 'function' &&
                 !bld.IsUpgradeAllowed(true)) continue;                       // host says no
-
-            var nextLevel = S.core.buildings.level(bld) + 1;
+            if (!builds.admit()) {
+                ctx.buildStop = true;
+                return;
+            }
 
             ctx.assigned[grid] = true;
             ctx.slotsRemaining--;
@@ -442,6 +488,8 @@
             S.kernel.settings.write('mining', S.modules.mining.defaultSettings);
         }
         migrateBuffSettings();
+        // Reads the build holds back (and logs them) before the first plan.
+        S.modules.mining.builds.load();
 
         S.kernel.queue.action('mining.buildMine', function (params) {
             var mineId   = params[0];
@@ -458,13 +506,8 @@
                 S.kernel.log('mining', 'no longer affordable — skipping', mineName);
                 return;
             }
-            try {
-                game.gi.SendServerAction(50, mineId, grid, 0, null);
-                S.kernel.log('mining', 'placed', mineName, 'on grid', grid,
-                             '(' + depoName + ')');
-                S.core.buildings.invalidate();
-            } catch (e) {
-                S.kernel.error('mining', 'SendServerAction(50) threw for', mineName, ':', e);
+            if (!S.modules.mining.builds.build(mineId, grid, depoName, mineName)) {
+                S.kernel.error('mining', 'could not start build of', mineName, 'on grid', grid);
             }
         });
 
@@ -492,14 +535,8 @@
                              'no longer upgradable — skipping');
                 return;
             }
-            try {
-                game.zone.UpgradeBuildingOnGridPosition(grid);
-                S.kernel.log('mining', 'upgrading', mineName, 'on grid', grid,
-                             'to level', nextLvl);
-                S.core.buildings.invalidate();
-            } catch (e) {
-                S.kernel.error('mining',
-                               'UpgradeBuildingOnGridPosition threw for', mineName, ':', e);
+            if (!S.modules.mining.builds.upgrade(grid, mineName, nextLvl)) {
+                S.kernel.error('mining', 'could not start upgrade of', mineName, 'on grid', grid);
             }
         });
 
