@@ -291,6 +291,19 @@ function checkFragment(file, opts) {
 	return { slug: p.slug, title: p.title, section: p.section, h2s: p.h2s };
 }
 
+// The pages of one section in nav order: the listed slugs, or the module pages
+// by display name. Shared by the sidebar and the build order.
+function sectionPages(section, pages) {
+	if (section.modules) {
+		return pages
+			.filter(function (p) { return p.module; })
+			.sort(function (a, b) { return a.title.localeCompare(b.title); });
+	}
+	return section.pages.map(function (slug) {
+		return pages.filter(function (p) { return p.slug === slug; })[0];
+	}).filter(Boolean);
+}
+
 // The sidebar: SECTIONS > pages > a module page's h2s. A section is open when
 // it holds the current page; Modules is always open.
 function navHtml(pages, current) {
@@ -311,16 +324,7 @@ function navHtml(pages, current) {
 			'</summary><ul class="l3">' + links.join("") + "</ul></details></li>";
 	}
 	return SECTIONS.map(function (s) {
-		let list;
-		if (s.modules) {
-			list = pages
-				.filter(function (p) { return p.module; })
-				.sort(function (a, b) { return a.title.localeCompare(b.title); });
-		} else {
-			list = s.pages.map(function (slug) {
-				return pages.filter(function (p) { return p.slug === slug; })[0];
-			}).filter(Boolean);
-		}
+		const list = sectionPages(s, pages);
 		const holds = list.some(function (p) { return p.slug === current; });
 		const open = s.modules || holds ? " open" : "";
 		return '<details class="l1"' + open + "><summary>" + escapeHtml(s.title) +
@@ -421,18 +425,9 @@ function build(opts) {
 	});
 
 	// Nav order: SECTIONS order, modules by display name.
-	const ordered = [];
-	SECTIONS.forEach(function (s) {
-		if (s.modules) {
-			pages.filter(function (p) { return p.module; })
-				.sort(function (a, b) { return a.title.localeCompare(b.title); })
-				.forEach(function (p) { ordered.push(p); });
-		} else {
-			s.pages.forEach(function (slug) {
-				ordered.push(pages.filter(function (p) { return p.slug === slug; })[0]);
-			});
-		}
-	});
+	const ordered = SECTIONS.reduce(function (acc, s) {
+		return acc.concat(sectionPages(s, pages));
+	}, []);
 
 	const rendered = ordered.map(function (p) {
 		const html = stamp(layout, {
