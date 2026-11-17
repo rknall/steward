@@ -396,3 +396,96 @@ t.test('needs names a bad Pause x min row by its minutes', function () {
     assert.ok(plain(s.dialog.needs(draft, [])).indexOf('a fix in row 2 (Pause 121 min)') > -1,
         JSON.stringify(s.dialog.needs(draft, [])));
 });
+
+// ---- Queues views -----------------------------------------------------------
+
+function clickTab(s, label) {
+    var hit = null;
+    body(s).find('a').each(function () {
+        if (!hit && s.$(this).text() === label) hit = s.$(this);
+    });
+    assert.ok(hit, 'tab "' + label + '" exists');
+    hit.trigger('click');
+}
+
+t.test('the Queues tab shows the queue list and Templates returns to the template list', function () {
+    var s = setup();
+    s.dialog.open();
+    s.rig.visible = true;
+    clickTab(s, 'Queues');
+    assert.ok(body(s).find('.steward-card-h').eq(0).text().indexOf('Run queues') > -1);
+    clickTab(s, 'Templates');
+    assert.ok(body(s).find('.steward-card-h').eq(0).text().indexOf('Run templates') > -1);
+});
+
+t.test('New queue opens the queue editor, and a changed queue draft blocks a close', function () {
+    var s = setup();
+    s.dialog.open();
+    s.rig.visible = true;
+    clickTab(s, 'Queues');
+    click(body(s), s.$, 'New queue');
+    assert.strictEqual(body(s).find('.steward-crumb').length, 1);
+    assert.strictEqual(s.dialog.hasEdits(), false);
+    body(s).find('input').eq(0).val('Changed').trigger('input');
+    assert.strictEqual(s.dialog.hasEdits(), true);
+    click(footer(s), s.$, 'Close');
+    assert.deepStrictEqual(s.alerts, ['Steward: Queue changes discarded']);
+    assert.strictEqual(s.H.Steward.modules.adventures.queueview.isDirty(), false);
+});
+
+t.test('opening the window again drops a queue draft left behind', function () {
+    var s = setup();
+    s.dialog.open();
+    s.rig.visible = true;
+    clickTab(s, 'Queues');
+    click(body(s), s.$, 'New queue');
+    body(s).find('input').eq(0).val('Changed').trigger('input');
+    s.rig.visible = false;
+    s.dialog.open();
+    assert.strictEqual(s.H.Steward.modules.adventures.queueview.isDirty(), false);
+    assert.ok(body(s).find('.steward-card-h').eq(0).text().indexOf('Run templates') > -1);
+});
+
+t.test('a failed queue Edit stays on the list and shows why', function () {
+    var s = setup();
+    var tr = s.tpl.save({
+        label: 'Long map', adventure: 'Adv_Long', loadout: 'C:/b/l.json',
+        waves: ['C:/b/w1.json'], speedBuff: 'SpeedBuffDefault'
+    }, 1000);
+    assert.ok(tr.ok, JSON.stringify(tr.problems));
+    var qr = s.S.modules.adventures.queues.save({
+        label: 'Gone', entries: [{ kind: 'template', id: tr.id, count: 1 }]
+    }, 5000);
+    assert.ok(qr.ok, JSON.stringify(qr.problems));
+    s.dialog.open();
+    s.rig.visible = true;
+    clickTab(s, 'Queues');
+    delete s.fs.disk[s.S.modules.adventures.queues.pathOf(qr.id)];
+    click(body(s), s.$, 'Edit');
+    assert.strictEqual(body(s).find('.steward-crumb').length, 0);
+    assert.ok(body(s).text().indexOf('Could not open ' + qr.id) > -1, body(s).text());
+    assert.strictEqual(body(s).text().indexOf('New queue') > -1, true);
+    assert.strictEqual(s.H.Steward.modules.adventures.queueview.editing(), false);
+});
+
+t.test('Edit on a queue opens that queue, and Back to list returns to the queue list', function () {
+    var s = setup();
+    var tr = s.tpl.save({
+        label: 'Long map', adventure: 'Adv_Long', loadout: 'C:/b/l.json',
+        waves: ['C:/b/w1.json'], speedBuff: 'SpeedBuffDefault'
+    }, 1000);
+    var qr = s.S.modules.adventures.queues.save({
+        label: 'Mine', entries: [{ kind: 'template', id: tr.id, count: 1 }]
+    }, 5000);
+    s.dialog.open();
+    s.rig.visible = true;
+    clickTab(s, 'Queues');
+    click(body(s), s.$, 'Edit');
+    assert.ok(body(s).find('.steward-crumb').text().indexOf('Mine') > -1);
+    var back = null;
+    body(s).find('a').each(function () { if (!back && s.$(this).text() === 'Back to list') back = s.$(this); });
+    back.trigger('click');
+    assert.strictEqual(body(s).find('.steward-crumb').length, 0);
+    assert.ok(body(s).find('.steward-card-h').eq(0).text().indexOf('Run queues') > -1);
+    assert.ok(qr.ok);
+});
