@@ -184,7 +184,7 @@ The wrapper never throws. When the host has no text for a key it returns the key
 
 ```js
 var shown = Steward.core.locale.known('RES', name);
-label: shown || builtInLabel;   // null means the host has no text for this key
+var label = shown || builtInLabel;   // null means the host has no text for this key
 ```
 
 Alerts go through `Steward.kernel.ui.notify(text)`, which adds the `Steward:` prefix and shows nothing for empty text. Modules never call `showGameAlert` themselves.

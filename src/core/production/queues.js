@@ -622,11 +622,10 @@
         return availability(type, def.name_string, function () { return checkTimed(def, levelOf); });
     }
 
-    // A page title from LAB, or 'Group <page>' when the host has none (the
-    // locale wrapper returns the key on a miss).
+    // A page title from LAB, or 'Group <page>' when the host has none (`known`
+    // gives null when the host has no text).
     function pageTitle(key, page) {
-        var t = key ? S.core.locale.lab(key) : '';
-        return (typeof t === 'string' && t && t !== key) ? t : 'Group ' + page;
+        return S.core.locale.known('LAB', key) || 'Group ' + page;
     }
 
     function timedPage(def) {
