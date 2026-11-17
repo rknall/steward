@@ -238,9 +238,10 @@
     // Time left before the game takes another map start: GAP_MS from the
     // later of the last map seen closed and the last start of a run that is
     // gone, both from the persisted map record, so Stop, a new start and a
-    // client restart keep it. 0 when the record holds neither.
+    // client restart keep it. 0 when the record holds neither. A time after
+    // now is moved back to now first, so the wait is never longer than GAP_MS.
     function gapLeft() {
-        var m = st().maps();
+        var m = st().clampMaps();
         var last = null;
         if (m && typeof m.closedAt === 'number') last = m.closedAt;
         if (m && typeof m.sentAt === 'number' && (last === null || m.sentAt > last)) last = m.sentAt;

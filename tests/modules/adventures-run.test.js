@@ -756,6 +756,32 @@ t.test('StartMap gap: the close time survives a client restart', function () {
     assert.ok(mapStarts(w2)[0].t >= closed + gapOf(w2), 'start at ' + mapStarts(w2)[0].t);
 });
 
+t.test('StartMap gap: a close time a day ahead waits GAP_MS from now, not a day (#111)', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap });
+    var t0 = w.t;
+    w.st.maps().closedAt = t0 + 24 * 3600 * 1000;
+    drive(w, { until: at('Depart') });
+    assertStep(w, 'Depart');
+    assert.strictEqual(mapStarts(w).length, 1);
+    var at0 = mapStarts(w)[0].t;
+    assert.ok(at0 >= t0 + gapOf(w), 'start at ' + at0 + ', clamped at ' + t0);
+    assert.ok(at0 < t0 + 2 * gapOf(w), 'start at ' + at0 + ' waited past the gap');
+    assert.ok(w.st.maps().closedAt <= at0, 'the record was moved back to now');
+    assert.ok(JSON.parse(w.fs.disk[runPath(w)]).maps.closedAt <= at0, 'and saved');
+});
+
+t.test('StartMap gap: a start time ahead of now is clamped the same way (#111)', function () {
+    var w = homeWorld();
+    series(w, { step: w.S.RunStep.StartMap });
+    var t0 = w.t;
+    w.st.maps().sentAt = t0 + 24 * 3600 * 1000;
+    drive(w, { until: at('Depart') });
+    assert.strictEqual(mapStarts(w).length, 1);
+    assert.ok(mapStarts(w)[0].t >= t0 + gapOf(w));
+    assert.ok(mapStarts(w)[0].t < t0 + 2 * gapOf(w));
+});
+
 t.test('StartMap gap: a settled series keeps the close time in the file', function () {
     var w = homeWorld();
     onIsland(w);

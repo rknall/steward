@@ -952,6 +952,31 @@
         return current().maps;
     }
 
+    // A map time later than now (a clock set back, a hand-edited file) would
+    // hold map starts until that time plus the gap. It is moved back to now
+    // and saved, so the next start waits the full gap from here and never
+    // longer. Saves only on a change, and never over a file that could not
+    // be read.
+    function clampMaps() {
+        var rs = current();
+        var m = rs.maps;
+        var t = clock();
+        var fixed = false;
+        if (num(m.closedAt) !== null && m.closedAt > t) {
+            m.closedAt = t;
+            fixed = true;
+        }
+        if (num(m.sentAt) !== null && m.sentAt > t) {
+            m.sentAt = t;
+            fixed = true;
+        }
+        if (!fixed) return m;
+        S.kernel.warn('adventures', 'map record held a time after now; the next map start waits ' +
+            gapSeconds() + ' s from now');
+        if (rs.fileUnread !== true) save();
+        return m;
+    }
+
     // The later of two times; a missing one gives way to the other.
     function later(a, b) {
         if (num(a) === null) return num(b);
@@ -1752,6 +1777,7 @@
         BUSY_FAST_MS:  BUSY_FAST_MS,
         MAP_MARK:      MAP_MARK,
         maps:          maps,
+        clampMaps:     clampMaps,
         seeOwn:        seeOwn,
         ownRead:       ownRead,
         mapClosed:     mapClosed,
