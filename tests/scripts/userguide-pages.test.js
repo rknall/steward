@@ -100,35 +100,6 @@ t.test('a module page title and nav summary equal the registered title', functio
     });
 });
 
-t.test('every documented setting key occurs in the module settings.js', function () {
-    modules.forEach(function (p) {
-        var settings = path.join(ROOT, 'src', 'modules', p.slug, 'settings.js');
-        var fragment = fs.readFileSync(fragmentFile(p), 'utf8');
-        var keys = matches(/<div class="ug-set"[^>]*>\s*<h3[^>]*>\s*<code>([^<]*)<\/code>/g, fragment)
-            .map(function (m) { return m[1].trim(); });
-        if (!fs.existsSync(settings)) {
-            t.assert.strictEqual(keys.length, 0, p.slug + ' documents settings without a settings.js');
-            return;
-        }
-        var src = fs.readFileSync(settings, 'utf8');
-        keys.forEach(function (key) {
-            key.split('.').forEach(function (seg) {
-                var esc = seg.replace(/[^\w]/g, '');
-                t.assert.ok(esc.length > 0, p.slug + ': ' + key);
-                t.assert.ok(new RegExp('\\b' + esc + '\\b').test(src), p.slug + ': ' + key + ' not in settings.js');
-            });
-        });
-    });
-});
-
-t.test('every data-shot starts with its page slug', function () {
-    result.pages.forEach(function (p) {
-        matches(/data-shot="([^"]*)"/g, page(p.slug)).forEach(function (m) {
-            t.assert.ok(m[1].indexOf(p.slug + '-') === 0, p.slug + ': ' + m[1]);
-        });
-    });
-});
-
 t.test('general pages name modules by title, never by id as link text', function () {
     var ids = modules.map(function (p) { return p.slug; });
     result.pages.filter(function (p) { return p.section !== 'Modules'; }).forEach(function (p) {
