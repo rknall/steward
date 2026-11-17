@@ -1,32 +1,37 @@
 /*
  * Verified building placement and upgrade for one grid.
  *
- * Builds the action defs that place a building on an empty grid or upgrade
- * the building on a grid by one level, so a caller can send each exactly
- * once and know whether the host took it. Run the defs with
+ * Builds the action defs that place a building on an empty grid, upgrade
+ * the building on a grid by one level, or rebuild a well or field on the
+ * depleted shell it left behind, so a caller can send each exactly once and
+ * know whether the host took it. Run the defs with
  * S.core.actions.attempt. Which building goes where, and how often a caller
  * may try again, stays with the caller.
  *
  * Host facts, kept here only:
  *   - action 50 is SET_BUILDING_IN_GAME: SendServerAction(50, buildingId,
- *     grid, 0, null) places a building of that id on that grid
+ *     grid, 0, null) places a building of that id on that grid; on a
+ *     depleted shell's grid the same call starts its rebuild
  *   - an upgrade is started with zone.UpgradeBuildingOnGridPosition(grid)
  *     (docs/TSO_API.md, "Zones and buildings")
  *   - the build queue: game.gi.mCurrentPlayer.mBuildQueue.GetTotalAvailableSlots()
  *     and .GetQueue_vector().length, and the licences GetMaxBuildingCount()
  *     and mCurrentBuildingsCountAll on the same player
  * The upgrade state, level and permission of a building are read through
- * S.core.buildings (upgrading, levelOf, isUpgradable).
+ * S.core.buildings (upgrading, levelOf, isUpgradable). Whether a grid holds
+ * an idle shell, and whether a rebuild reached it, is judged by
+ * S.core.shells; the caller passes the shell name in.
  *
  * Failure contract: only positive reads count. A missing or unreadable
  * building never verifies a send and never clears the way for one: placing
  * needs a grid that reads empty while the building list is readable, and
  * upgrading needs a building whose level, upgrade state and permission all
  * read. Every home check reads S.core.zone.view(), so a loading or unreadable
- * zone never counts as home. A refusal that only means "a read failed" is a
+ * zone never counts as home. A rebuild is verified on the grid itself, never
+ * on the build queue, whose count lags the grid. A refusal that only means "a read failed" is a
  * registered read refusal, so a caller can tell "try again" from a decision.
- * Both defs default to no retry, since a resend of an unseen build or upgrade
- * can go out twice.
+ * Every def defaults to no retry, since a resend of an unseen build, upgrade
+ * or rebuild can go out twice.
  *
  * Bundle slot: core, loads after buildings.js and core/buildings/ and before
  * deposits.js (core files load in name order). Other cores are used at call
@@ -47,6 +52,9 @@
     // callers can treat them as "try again", not as a decision.
     // An unreadable list looks empty everywhere, so no grid counts as empty.
     var BUILDINGS_UNREADABLE = R.readRefusal('buildings unreadable');
+    // The build queue or licence counts could not be read, so a free slot
+    // cannot be told from a full queue.
+    var CAPACITY_UNREADABLE = R.readRefusal('build queue unreadable');
     // Whether the building is upgrading could not be read.
     var UPGRADE_STATE_UNREADABLE = R.readRefusal('upgrade state unreadable');
     // GetUpgradeLevel could not be read; a guessed level 0 would aim too low.
@@ -62,13 +70,12 @@
         return R.isOk(v) && v.value.home === true;
     }
 
-    // Why a send may not go out because of the zone, or null when the viewed
-    // zone reads as home. Not home is a real answer; an unread zone is not.
-    function homeRefusal() {
-        var v = homeView();
-        if (!R.isOk(v)) return S.core.zone.UNREADABLE;
-        if (v.value.home !== true) return 'not on the home island';
-        return null;
+    // Action 50 for buildingId on grid. The list is dropped afterwards so the
+    // check reads the grid again instead of this pass's copy.
+    function sendSet(buildingId, grid) {
+        var ok = S.core.packets.sendAction(ACTION_SET_BUILDING, buildingId, grid, 0, null);
+        S.core.buildings.invalidate();
+        return ok;
     }
 
     function onHomeWith(grid, buildingName) {
@@ -91,7 +98,7 @@
             },
             precheck: function () {
                 if (typeof buildingId !== 'number' || !(buildingId > 0)) return 'unknown building id';
-                var home = homeRefusal();
+                var home = S.core.zone.homeRefusal();
                 if (home) return home;
                 S.core.buildings.invalidate();
                 if (S.core.buildings.byGrid(grid)) return 'grid occupied';
@@ -101,9 +108,7 @@
                 return null;
             },
             send: function () {
-                var ok = S.core.packets.sendAction(ACTION_SET_BUILDING, buildingId, grid, 0, null);
-                S.core.buildings.invalidate();
-                return ok;
+                return sendSet(buildingId, grid);
             },
             check: function () {
                 return onHomeWith(grid, buildingName);
@@ -130,7 +135,7 @@
                 return onHome(homeView()) && reached(S.core.buildings.byGrid(grid));
             },
             precheck: function () {
-                var home = homeRefusal();
+                var home = S.core.zone.homeRefusal();
                 if (home) return home;
                 S.core.buildings.invalidate();
                 var b = S.core.buildings.byGrid(grid);
@@ -207,11 +212,78 @@
         return R.get('construction.capacity', undefined, opts);
     }
 
+    // Free build-queue slots from a capacity value, as every caller of
+    // capacity() counts them.
+    function freeSlots(c) {
+        return c.slotsTotal - c.slotsUsed;
+    }
+
+    // Rebuild of buildingName on the grid where its depleted shell shellName
+    // stands. Only buildingId is sent; buildingName feeds the label and the
+    // log line's id lookup.
+    function rebuild(buildingId, grid, buildingName, shellName) {
+        function seen() {
+            return onHome(homeView()) &&
+                S.core.shells.changed(S.core.buildings.byGrid(grid), shellName);
+        }
+        // Grid facts and the queue count for the log line; never decides.
+        function facts() {
+            var f = S.core.shells.snapshot(grid, buildingName);
+            var q = '?';
+            try {
+                var c = capacity({ live: true });
+                if (R.isOk(c)) q = c.value.slotsUsed + '/' + c.value.slotsTotal;
+            } catch (e) { q = '?'; }
+            f.q = q;
+            return f;
+        }
+        return {
+            label:     'rebuild ' + buildingName + ' ' + grid,
+            category:  'construction',
+            timeoutMs: TIMEOUT_MS,
+            retries:   0,
+            satisfied: seen,
+            precheck: function () {
+                var home = S.core.zone.homeRefusal();
+                if (home) return home;
+                if (typeof buildingId !== 'number' || !(buildingId > 0)) return 'unknown building id';
+                S.core.buildings.invalidate();
+                if (!R.isOk(S.core.buildings.listRead({ live: true }))) return BUILDINGS_UNREADABLE;
+                var shell = S.core.shells.ready(S.core.buildings.byGrid(grid), shellName);
+                if (shell) return shell;
+                var c = capacity({ live: true });
+                if (!R.isOk(c)) return CAPACITY_UNREADABLE;
+                if (!(freeSlots(c.value) > 0)) return 'build queue full';
+                return null;
+            },
+            baseline: facts,
+            send: function () {
+                return sendSet(buildingId, grid);
+            },
+            check: seen,
+            observable: homeObservable,
+            describe: function (base) {
+                var now = facts();
+                var q0 = (base && base.q !== undefined) ? base.q : '?';
+                return S.core.shells.describe(base, now) + ', queue ' + q0 + ' -> ' + now.q +
+                    ', id ' + buildingId;
+            },
+            // A positive proof that the send had no effect: the home grid
+            // still shows the idle shell. Any unread state gives no proof.
+            failedProof: function () {
+                if (!onHome(homeView())) return null;
+                if (!S.core.shells.unchanged(S.core.buildings.byGrid(grid), shellName)) return null;
+                return 'grid ' + grid + ' still shows ' + shellName + ', not under construction';
+            }
+        };
+    }
+
     S.core.construction = {
         ACTION_SET_BUILDING: ACTION_SET_BUILDING,
         TIMEOUT_MS:          TIMEOUT_MS,
         place:               place,
         upgrade:             upgrade,
+        rebuild:             rebuild,
         capacity:            capacity
     };
 
