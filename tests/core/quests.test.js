@@ -10,10 +10,12 @@ var AC = require('../stubs/actions');
 // mQuestMode (left undefined when absent) and SetQuestMode changes it, so a
 // mode set by a send is observable. active (default true) feeds IsActive;
 // noIsActive drops IsActive so the fallback to IsQuestActive can be tested.
-// The pool can be made unreadable through world.broken.
+// The pool can be made unreadable through world.broken. empty: true yields a
+// null slot; noKey: true yields a quest whose GetUniqueId returns null.
 function world(H, quests) {
     var w = { quests: quests, broken: false, modes: [] };
     function fake(q) {
+        if (q.empty === true) return null;
         if (q.half === true) {
             return {
                 GetUniqueId: function () {
@@ -24,6 +26,7 @@ function world(H, quests) {
         var obj = {
             GetUniqueId:       function () {
                 if (q.throwOn === 'uid') throw new Error('uid failed');
+                if (q.noKey === true) return null;
                 return { toKeyString: function () { return q.key; } };
             },
             getQuestName_string: function () { return q.name || q.key; },
@@ -324,6 +327,120 @@ t.test('claim refuses a key whose only entry is not a quest', function () {
     t.assert.strictEqual(r.reason, 'quest not found');
     t.assert.strictEqual(b.sent.messages.length, 0);
     t.assert.strictEqual(b.w.modes.length, 0);
+});
+
+// ---- pool readiness -----------------------------------------------------------
+
+function poolRead(b) {
+    return b.S.kernel.read.get('quests.pool');
+}
+
+t.test('a non-quest pool entry keeps the pool ok', function () {
+    var b = boot([{ key: 'h', half: true }]);
+    var r = poolRead(b);
+    t.assert.strictEqual(r.state, 'ok');
+    t.assert.strictEqual(r.lost, 0);
+    t.assert.strictEqual(r.zoneId, 5);
+    t.assert.strictEqual(b.Q.list().length, 0);
+
+    b = boot([{ key: 'h', half: true }, { key: 'b', finished: true }]);
+    t.assert.strictEqual(poolRead(b).state, 'ok');
+    t.assert.strictEqual(keys(b.Q.list()), 'b');
+});
+
+t.test('a quest whose key reads null makes the pool partial', function () {
+    var b = boot([{ key: 'a', noKey: true }, { key: 'b', finished: true }]);
+    var r = poolRead(b);
+    t.assert.strictEqual(r.state, 'partial');
+    t.assert.strictEqual(r.lost, 1);
+    t.assert.strictEqual(keys(r.value), 'b');
+
+    // An empty slot and an entry whose read throws are lost the same way.
+    b = boot([{ empty: true }, { key: 'x', throwOn: 'finished' }, { key: 'b' }]);
+    r = poolRead(b);
+    t.assert.strictEqual(r.state, 'partial');
+    t.assert.strictEqual(r.lost, 2);
+});
+
+t.test('list stays an array on partial, null when unreadable', function () {
+    var b = boot([{ key: 'a', noKey: true }, { key: 'b', finished: true }]);
+    t.assert.strictEqual(keys(b.Q.list()), 'b');
+    t.assert.strictEqual(keys(b.Q.finished()), 'b');
+    b.w.broken = true;
+    t.assert.strictEqual(poolRead(b).state, 'unreadable');
+    t.assert.strictEqual(b.Q.list(), null);
+    t.assert.strictEqual(b.Q.unread(), null);
+});
+
+t.test('claim on a partial pool refuses with quests unreadable', function () {
+    var b = boot([{ key: 'a', noKey: true, finished: true }, { key: 'b', finished: true }]);
+    var r = run(b, b.Q.claim('a'));
+    t.assert.strictEqual(r.status, b.S.ActionResult.Refused);
+    t.assert.strictEqual(r.reason, 'quests unreadable');
+    t.assert.strictEqual(r.reason, b.Q.UNREADABLE);
+    t.assert.strictEqual(b.S.kernel.read.isReadRefusal(r.reason), true);
+    t.assert.strictEqual(b.sent.messages.length, 0);
+
+    // The same holds for a read def; a key present in the partial pool is
+    // still found.
+    r = run(b, b.Q.read('a'));
+    t.assert.strictEqual(r.reason, 'quests unreadable');
+    t.assert.strictEqual(b.Q.claim('b').precheck(), null);
+});
+
+t.test('claim check is not verified when the pool is partial', function () {
+    var b = boot([{ key: 'a', finished: true }, { key: 'b', finished: true }]);
+    var r = run(b, b.Q.claim('a'), function () {
+        if (b.sent.messages.length !== 1) return;
+        // The quest leaves the pool, but another entry turns unreadable.
+        drop(b, 'a');
+        b.w.quests[0].noKey = true;
+    });
+    t.assert.notStrictEqual(r.status, b.S.ActionResult.Verified);
+    t.assert.strictEqual(b.sent.messages.length, 1);
+
+    var c = boot([{ key: 'a', finished: true }, { key: 'b', noKey: true }]);
+    var d = c.Q.claim('a');
+    var base = d.baseline();
+    drop(c, 'a');
+    t.assert.strictEqual(d.check(base), false);
+});
+
+t.test('claim check verifies by absence on an ok pool', function () {
+    var b = boot([{ key: 'a', finished: true }, { key: 'h', half: true }]);
+    var d = b.Q.claim('a');
+    var base = d.baseline();
+    t.assert.strictEqual(d.check(base), false);
+    drop(b, 'a');
+    t.assert.strictEqual(d.check(base), true);
+});
+
+t.test('read baseline keys are null on a partial pool', function () {
+    var b = boot([{ key: 'a', mode: 2 }, { key: 'x', noKey: true }]);
+    var d = b.Q.read('a');
+    var base = d.baseline();
+    t.assert.strictEqual(base.keys, null);
+    // A key lost from the baseline that reads again is not taken as new.
+    b.w.quests[1].noKey = false;
+    t.assert.strictEqual(d.check(base), false);
+
+    b = boot([{ key: 'a', mode: 2 }]);
+    base = b.Q.read('a').baseline();
+    t.assert.strictEqual(JSON.stringify(base.keys), JSON.stringify({ a: true }));
+});
+
+t.test('defs read the pool live inside a read pass', function () {
+    var b = boot([{ key: 'a', finished: true }]);
+    var d = b.Q.claim('a');
+    var base = d.baseline();
+    var seen = b.S.kernel.hostRead.pass(function () {
+        t.assert.strictEqual(keys(b.Q.list()), 'a');
+        drop(b, 'a');
+        // list() keeps the pass's answer; the def's check reads anew.
+        return { list: keys(b.Q.list()), check: d.check(base) };
+    });
+    t.assert.strictEqual(seen.list, 'a');
+    t.assert.strictEqual(seen.check, true);
 });
 
 // ---- unread and read ----------------------------------------------------------

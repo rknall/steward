@@ -478,3 +478,173 @@ t.test('productionBuffInfo reads a flaky GetBuffDefinition once and returns the 
     t.assert.strictEqual(info.name, 'Buff1');
     t.assert.strictEqual(f.count(), 1);
 });
+
+// ---- building list source -------------------------------------------------------
+
+// A zone whose GetBuildings_vector counts its reads and returns what vec() gives.
+function vectorZone(H, counter, vec) {
+    var z = H.zone.zone();
+    H.installZone(z);
+    z.zone.mStreetDataMap.GetBuildings_vector = function () { counter.n++; return vec(); };
+    return z;
+}
+
+t.test('falsy vector slots are skipped and the list stays ok', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var a = H.zone.building({ name: 'A', grid: 1 });
+    var b = H.zone.building({ name: 'B', grid: 2 });
+    vectorZone(H, { n: 0 }, function () { return [a, null, undefined, b]; });
+    var r = B.listRead();
+    t.assert.strictEqual(r.state, 'ok');
+    t.assert.strictEqual(r.lost, 0);
+    t.assert.strictEqual(r.value.length, 2);
+    t.assert.strictEqual(B.list().length, 2);
+    t.assert.strictEqual(B.readable(), true);
+});
+
+t.test('a vector without a numeric length is unreadable', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    vectorZone(H, { n: 0 }, function () { return { 0: H.zone.building({ name: 'A' }) }; });
+    t.assert.strictEqual(B.listRead().state, 'unreadable');
+    t.assert.strictEqual(B.list().length, 0);
+    t.assert.strictEqual(B.readable(), false);
+});
+
+t.test('listRead is notReady without a zone and unreadable without a street map', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    H.host.game.gi.mCurrentPlayerZone = null;
+    t.assert.strictEqual(B.listRead().state, 'notReady');
+    H.host.game.gi.mCurrentPlayerZone = {};
+    t.assert.strictEqual(B.listRead().state, 'unreadable');
+});
+
+t.test('no stale list after a zone switch', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var za = H.zone.zone().building(H.zone.building({ name: 'A', grid: 1 }));
+    H.installZone(za);
+    t.assert.deepEqual(gridsOf(B.list()), [1]);
+    var zb = H.zone.zone().building(H.zone.building({ name: 'B', grid: 2 }));
+    H.host.game.gi.mCurrentPlayerZone = zb.zone;
+    t.assert.deepEqual(gridsOf(B.list()), [2]);
+});
+
+t.test('a failed read is not cached as empty', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var fail = true;
+    var a = H.zone.building({ name: 'A', grid: 1 });
+    vectorZone(H, { n: 0 }, function () {
+        if (fail) throw new Error('bridge');
+        return [a];
+    });
+    t.assert.strictEqual(B.list().length, 0);
+    t.assert.strictEqual(B.listRead().state, 'unreadable');
+    fail = false;
+    t.assert.strictEqual(B.list().length, 1);
+    t.assert.strictEqual(B.readable(), true);
+});
+
+t.test('inside a pass list reads once per zone', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var counter = { n: 0 };
+    var a = H.zone.building({ name: 'IronMine', grid: 1 });
+    vectorZone(H, counter, function () { return [a]; });
+    H.host.game.gi.mCurrentViewedZoneID = 7;
+    H.Steward.kernel.hostRead.pass(function () {
+        B.list();
+        B.byPredicate(function () { return true; });
+        B.listMines();
+        B.readable();
+        t.assert.strictEqual(counter.n, 1);
+        H.host.game.gi.mCurrentViewedZoneID = 8;
+        B.list();
+        t.assert.strictEqual(counter.n, 2);
+    });
+    B.list();
+    t.assert.strictEqual(counter.n, 3);
+});
+
+t.test('the memoized list is not changed by a caller of list', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var a = H.zone.building({ name: 'A', grid: 1 });
+    vectorZone(H, { n: 0 }, function () { return [a]; });
+    H.Steward.kernel.hostRead.pass(function () {
+        B.list().push({});
+        t.assert.strictEqual(B.list().length, 1);
+    });
+});
+
+t.test('invalidate inside a pass drops the memo', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var counter = { n: 0 };
+    var a = H.zone.building({ name: 'A', grid: 1 });
+    vectorZone(H, counter, function () { return [a]; });
+    H.Steward.kernel.hostRead.pass(function () {
+        B.list();
+        B.list();
+        t.assert.strictEqual(counter.n, 1);
+        B.invalidate();
+        B.list();
+        t.assert.strictEqual(counter.n, 2);
+    });
+    B.invalidate();   // outside a pass: nothing to drop, no throw
+});
+
+t.test('invalidate inside a pass drops the name index', function () {
+    var H = harness.boot();
+    var counter = { n: 0 };
+    nameIndexZone(H, counter);
+    var B = H.Steward.core.buildings;
+    H.Steward.kernel.hostRead.pass(function () {
+        B.byName('A');
+        B.byName('B');
+        t.assert.strictEqual(counter.n, 1);
+        B.invalidate();
+        B.byName('A');
+        t.assert.strictEqual(counter.n, 2);
+    });
+});
+
+t.test('byGrid returns null for unreadable and empty alike', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    t.assert.strictEqual(B.byGrid(5, { zone: {} }), null);
+    t.assert.strictEqual(B.byGrid(5, { zone: H.zone.zone().zone }), null);
+    var withOne = H.zone.zone().building(H.zone.building({ name: 'A', grid: 5 })).zone;
+    t.assert.strictEqual(B.byGrid(5, { zone: withOne }).GetGrid(), 5);
+});
+
+t.test('byName logs a throwing name index once per error text', function () {
+    var H = harness.boot();
+    var z = H.zone.zone().building(H.zone.building({ name: 'A', grid: 1 }));
+    H.installZone(z);
+    z.zone.mStreetDataMap.getBuildingsByName_vector = function () { throw new Error('gone'); };
+    var B = H.Steward.core.buildings;
+    H.clearLogs();
+    t.assert.strictEqual(B.byName('A').length, 1);
+    t.assert.strictEqual(B.byName('A').length, 1);
+    var hits = 0;
+    var logs = H.logs();
+    for (var i = 0; i < logs.length; i++) {
+        if (JSON.stringify(logs[i]).indexOf('name index threw') !== -1) hits++;
+    }
+    t.assert.strictEqual(hits, 1);
+});
+
+t.test('levelOf is null when GetUpgradeLevel throws, level is 0', function () {
+    var H = harness.boot();
+    var B = H.Steward.core.buildings;
+    var bad = { GetUpgradeLevel: function () { throw new Error('boom'); } };
+    t.assert.strictEqual(B.levelOf(bad), null);
+    t.assert.strictEqual(B.level(bad), 0);
+    t.assert.strictEqual(B.levelOf({}), null);
+    t.assert.strictEqual(B.levelOf(null), null);
+    t.assert.strictEqual(B.levelOf(H.zone.building({ level: 4 })), 4);
+});

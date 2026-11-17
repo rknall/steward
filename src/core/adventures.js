@@ -195,18 +195,21 @@
         }
     }
 
-    // The player's own open adventures as [{ name, zoneId }]. [] means the
-    // manager read fine and none is open; null means it could not be read, so
-    // callers never mistake an unreadable manager for "nothing open". This
-    // assumes the manager gives an empty vector when nothing is open, so a list
-    // with no length is a failed read. A bad entry fails the whole read too: a
-    // skipped entry could be the very adventure the caller looks for, and would
-    // read as closed. Runs on the menu's status tick, so it never logs.
-    function own() {
+    // The player's own open adventures as a Result of [{ name, zoneId }].
+    // ok with [] means the manager read fine and none is open; a missing
+    // manager, a list with no length or a throw is unreadable. This assumes
+    // the manager gives an empty vector when nothing is open, so a list with
+    // no length is a failed read. An own entry without a non-empty name or a
+    // numeric zone id is lost rather than kept under a made-up name, which
+    // makes the read partial: the lost entry could be the very adventure a
+    // caller looks for. Runs on the menu's status tick, so it never logs.
+    function readOwn() {
+        var R = S.kernel.read;
         var out = [];
+        var lost = 0;
         try {
             var mgr = manager();
-            if (!mgr) return null;
+            if (!mgr) return R.unreadable('no adventure manager');
             var advs = mgr.getAdventures();
             try {
                 if (advs && typeof advs.toArray === 'function') {
@@ -214,15 +217,37 @@
                     if (arr && typeof arr.length === 'number') advs = arr;
                 }
             } catch (e1) { /* fall back to the index walk */ }
-            if (!advs || typeof advs.length !== 'number') return null;
+            if (!advs || typeof advs.length !== 'number') return R.unreadable('no adventure list');
             for (var i = 0; i < advs.length; i++) {
                 var adv = advs[i];
-                if (mgr.isMyAdventure(adv)) out.push({ name: String(adv.adventureName), zoneId: adv.zoneID });
+                if (!mgr.isMyAdventure(adv)) continue;
+                var name = adv.adventureName;
+                var zoneId = adv.zoneID;
+                if (typeof name !== 'string' || name === '' || typeof zoneId !== 'number') {
+                    lost++;
+                    continue;
+                }
+                out.push({ name: name, zoneId: zoneId });
             }
         } catch (e) {
-            return null;
+            return R.unreadable('threw: ' + ((e && e.message) ? e.message : String(e)));
         }
-        return out;
+        return lost ? R.partial(out, lost, 'own adventure without name or zone id') : R.ok(out);
+    }
+
+    // Pass scope: one manager read per pass, whichever island is viewed.
+    S.kernel.read.source('adventures.own', { read: readOwn, scope: 'pass' });
+
+    // The own list read as a Result; opts as for S.kernel.read.get.
+    function ownRead(opts) {
+        return S.kernel.read.get('adventures.own', undefined, opts);
+    }
+
+    // The own list only when it was read completely, else null, so callers
+    // never mistake an unreadable manager or a lost entry for "not open".
+    function own() {
+        var r = ownRead();
+        return S.kernel.read.isOk(r) ? r.value : null;
     }
 
     // Names of the own open adventures; an unreadable manager means "none".
@@ -276,7 +301,10 @@
                 return true;
             },
             check: function (base) {
-                var list = own();
+                // Live and complete only: a partial list may have lost the
+                // adventure, and its absence would prove nothing.
+                var r = ownRead({ live: true });
+                var list = S.kernel.read.isOk(r) ? r.value : null;
                 // Without a numeric baseline zone id nothing was sent and
                 // absence proves nothing.
                 if (!list || !base || typeof base.zoneId !== 'number') return false;
@@ -305,6 +333,7 @@
         label:        label,
         manager:      manager,
         own:          own,
+        ownRead:      ownRead,
         ownOpen:      ownOpen,
         entryOf:      entryOf,
         zoneIdOf:     zoneIdOf,

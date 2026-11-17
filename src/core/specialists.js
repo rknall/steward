@@ -10,9 +10,21 @@
  *
  * Modules consult these helpers and never compare against bare strings —
  * always use Steward.SpecialistType.* / Steward.SpecialistStatus.* enums.
+ *
+ * Two kinds of list reader live here. The legacy ones (all, byType, explorers,
+ * geologists, fighterList, listReadable, listComplete, lookup) read the host
+ * live on every call and keep their old contracts, so a caller's dropped()
+ * before/after check still sees its own read. The Result readers (listRead,
+ * byTypeRead) go through Steward.kernel.read: memoized per read pass and zone,
+ * and they say whether the list was complete, partial (entries dropped or not
+ * classifiable), unreadable or not ready, so "absent" is never read from a
+ * lossy list. status() is Unknown, not Idle, when the task or in-use flag
+ * cannot be read, and troopCapacityOf() is null when a getter throws.
  */
 
 (function (S) {
+
+    var R = S.kernel.read;
 
     // --- Enums populated here so they're available the moment this file runs.
     S.SpecialistType.General        = 'SpecialistGeneral';
@@ -27,6 +39,9 @@
     S.SpecialistStatus.Traveling   = 'StatusTraveling';
     S.SpecialistStatus.Returning   = 'StatusReturning';
     S.SpecialistStatus.Unavailable = 'StatusUnavailable';
+    // The task or in-use flag could not be read: neither idle nor busy, so
+    // no caller sends it and no caller counts it as working.
+    S.SpecialistStatus.Unknown     = 'StatusUnknown';
 
     S.SkillModifier.SearchTime = 'ModifierSearchTime';
     S.SkillModifier.LootRolls  = 'ModifierLootRolls';
@@ -158,33 +173,44 @@
     var BASE_EXPLORER  = 1;
     var BASE_GEOLOGIST = 2;
 
-    var armySpecTypeEnum = null;            // cached host enum (Enums::SPECIALIST_TYPE)
-    var cSpecialistClass = null;            // cached host class (Specialists::cSpecialist)
-
-    function getArmySpecTypeEnum() {
-        if (armySpecTypeEnum !== null) return armySpecTypeEnum;
-        try {
-            if (typeof swmmo !== 'undefined' && swmmo && typeof swmmo.getDefinitionByName === 'function') {
-                armySpecTypeEnum = swmmo.getDefinitionByName('Enums::SPECIALIST_TYPE') || false;
-            } else if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
-                armySpecTypeEnum = game.def('Enums::SPECIALIST_TYPE') || false;
-            } else {
-                armySpecTypeEnum = false;
-            }
-        } catch (e) { armySpecTypeEnum = false; }
-        return armySpecTypeEnum || null;
+    // Host definitions never change once read, so a found one is kept for the
+    // session. A missing or throwing read is kept only for the read pass: the
+    // definitions are not there early in boot, and a miss then must not stick.
+    function definition(def) {
+        return def ? R.ok(def) : R.unreadable('no definition');
     }
 
-    function getCSpecialist() {
-        if (cSpecialistClass !== null) return cSpecialistClass;
-        try {
-            if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
-                cSpecialistClass = game.def('Specialists::cSpecialist') || false;
-            } else {
-                cSpecialistClass = false;
+    R.source('specialists.typeEnum', {
+        scope: 'static',
+        read: function () {
+            if (typeof swmmo !== 'undefined' && swmmo && typeof swmmo.getDefinitionByName === 'function') {
+                return definition(swmmo.getDefinitionByName('Enums::SPECIALIST_TYPE'));
             }
-        } catch (e) { cSpecialistClass = false; }
-        return cSpecialistClass || null;
+            if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
+                return definition(game.def('Enums::SPECIALIST_TYPE'));
+            }
+            return R.unreadable('no host');
+        }
+    });
+
+    R.source('specialists.cSpecialist', {
+        scope: 'static',
+        read: function () {
+            if (typeof game !== 'undefined' && game && typeof game.def === 'function') {
+                return definition(game.def('Specialists::cSpecialist'));
+            }
+            return R.unreadable('no host');
+        }
+    });
+
+    // The host enum (Enums::SPECIALIST_TYPE), or null while it cannot be read.
+    function getArmySpecTypeEnum() {
+        return R.get('specialists.typeEnum').value;
+    }
+
+    // The host class (Specialists::cSpecialist), or null while it cannot be read.
+    function getCSpecialist() {
+        return R.get('specialists.cSpecialist').value;
     }
 
     function rawType(spec) {
@@ -195,22 +221,35 @@
         return null;
     }
 
-    function specDescription(spec) {
+    // Marks a fact that a host getter threw on, so it can be told from a
+    // getter that simply does not exist on this specialist type.
+    var THREW = {};
+
+    // The specialist's description; null when there is none; THREW when the
+    // instance getter threw and the static class had no description either.
+    function descriptionRead(spec) {
         if (!spec) return null;
+        var threw = false;
         try {
             if (typeof spec.GetSpecialistDescription === 'function') {
                 return spec.GetSpecialistDescription();
             }
-        } catch (e) { /* fall through */ }
+        } catch (e) { threw = true; }
         // Fallback: look up via the static class given the type id.
         try {
             var cls = getCSpecialist();
             var rt = rawType(spec);
             if (cls && rt !== null && typeof cls.GetSpecialistDescriptionForType === 'function') {
-                return cls.GetSpecialistDescriptionForType(rt);
+                var d = cls.GetSpecialistDescriptionForType(rt);
+                if (d || !threw) return d;
             }
         } catch (e2) { /* fall through */ }
-        return null;
+        return threw ? THREW : null;
+    }
+
+    function specDescription(spec) {
+        var d = descriptionRead(spec);
+        return d === THREW ? null : d;
     }
 
     function baseTypeOf(typeNum) {
@@ -230,13 +269,23 @@
         return null;
     }
 
-    function isCarrierByDescription(spec) {
-        var desc = specDescription(spec);
+    // true/false from the description's isTransportGeneral(). false when the
+    // type has no description or no such member, as for every non-combat type.
+    // null only when a getter threw, so the flag is unknown for this read.
+    function carrierFlag(spec) {
+        var desc = descriptionRead(spec);
+        if (desc === THREW) return null;
         if (!desc) return false;
         try {
-            if (typeof desc.isTransportGeneral === 'function') return !!desc.isTransportGeneral();
-        } catch (e) { /* fall through */ }
-        return false;
+            if (typeof desc.isTransportGeneral !== 'function') return false;
+            return !!desc.isTransportGeneral();
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function isCarrierByDescription(spec) {
+        return carrierFlag(spec) === true;
     }
 
     // The host exposes two related predicates we rely on:
@@ -290,45 +339,83 @@
         return !isCarrierByDescription(spec);
     }
 
-    function troopCapacity(spec) {
+    // A getter's answer as a capacity: a number stays, anything else is 0.
+    function capacityValue(v) {
+        return (typeof v === 'number' && isFinite(v)) ? v : 0;
+    }
+
+    // Troop capacity, or null when a getter threw and nothing else answered,
+    // so a caller can tell "cannot carry troops" from "could not look". A type
+    // that simply lacks every getter is 0, as before, and never null.
+    function troopCapacityOf(spec) {
         // The instance getter GetMaxMilitaryUnits() is what autoTSO reads for
         // a general's troop limit, so it comes first. The description
         // getters stay as fallbacks for specialist types that lack it.
         if (!spec) return 0;
+        var threw = false;
         try {
             if (typeof spec.GetMaxMilitaryUnits === 'function') {
                 var max = spec.GetMaxMilitaryUnits();
                 if (typeof max === 'number' && max > 0) return max;
             }
-        } catch (e0) { /* fall through to the description */ }
-        var desc = specDescription(spec);
+        } catch (e0) { threw = true; }
+        var desc = descriptionRead(spec);
+        if (desc === THREW) return null;
         if (desc) {
             try {
-                if (typeof desc.getMaxTroopCount === 'function') return desc.getMaxTroopCount();
-                if (typeof desc.GetMaxTroopCount === 'function') return desc.GetMaxTroopCount();
-                if (typeof desc.maxTroops_int    === 'number')   return desc.maxTroops_int;
-            } catch (e) { /* fall through */ }
+                if (typeof desc.getMaxTroopCount === 'function') return capacityValue(desc.getMaxTroopCount());
+                if (typeof desc.GetMaxTroopCount === 'function') return capacityValue(desc.GetMaxTroopCount());
+                if (typeof desc.maxTroops_int    === 'number')   return capacityValue(desc.maxTroops_int);
+            } catch (e) {
+                return null;
+            }
         }
-        return 0;
+        return threw ? null : 0;
     }
 
-    function classify(spec) {
+    function troopCapacity(spec) {
+        return troopCapacityOf(spec) || 0;
+    }
+
+    // Why classifyEntry could not name a type, beside the plain null of a type
+    // that is really none of ours: FACT_LOST when the entry's own type or
+    // carrier flag threw, DEFS_LOST when the host definitions that name an
+    // unusual type number could not be read.
+    var FACT_LOST = {};
+    var DEFS_LOST = {};
+
+    function classifyEntry(spec) {
         var rt = rawType(spec);
-        if (rt === null) return null;
+        if (rt === null) return FACT_LOST;
 
         var base = baseTypeOf(rt);
         if (base === BASE_EXPLORER)  return S.SpecialistType.Explorer;
         if (base === BASE_GEOLOGIST) return S.SpecialistType.Geologist;
 
-        // Two combat-class families, each with attacker / carrier flavour.
-        var transport = isCarrierByDescription(spec);
+        // Two combat-class families, each with attacker / carrier flavour. A
+        // carrier flag that threw names neither flavour: calling it a General
+        // could send a carrier into battle.
+        var transport;
         if (isInGeneralFamily(spec)) {
+            transport = carrierFlag(spec);
+            if (transport === null) return FACT_LOST;
             return transport ? S.SpecialistType.Carrier : S.SpecialistType.General;
         }
         if (isInAdmiralFamily(spec)) {
+            transport = carrierFlag(spec);
+            if (transport === null) return FACT_LOST;
             return transport ? S.SpecialistType.AdmiralCarrier : S.SpecialistType.Admiral;
         }
+        if (rt !== BASE_GENERAL && rt !== BASE_EXPLORER && rt !== BASE_GEOLOGIST &&
+                (getCSpecialist() === null || getArmySpecTypeEnum() === null)) {
+            return DEFS_LOST;
+        }
         return null;
+    }
+
+    function classify(spec) {
+        var c = classifyEntry(spec);
+        return (c === FACT_LOST || c === DEFS_LOST) ? null : c;
     }
 
     function isGeneral(spec)        { return classify(spec) === S.SpecialistType.General; }
@@ -505,15 +592,38 @@
         return false;
     }
 
+    // The task object, null when idle, or THREW when GetTask cannot be read
+    // right now (gone on the bridge or throwing): an unread task is not idle.
+    function taskRead(spec) {
+        if (memberGone(spec, 'GetTask')) return THREW;
+        try { return spec.GetTask() || null; }
+        catch (e) { return THREW; }
+    }
+
+    // true/false from IsInUse(); false when the type has no IsInUse, as
+    // before; THREW when reading it throws.
+    function inUseRead(spec) {
+        try {
+            if (typeof spec.IsInUse !== 'function') return false;
+            return !!spec.IsInUse();
+        } catch (e) {
+            return THREW;
+        }
+    }
+
     function status(spec) {
         if (!spec) return S.SpecialistStatus.Unavailable;
-        // Idle: no task AND not in use.
-        if (!hasTask(spec) && !isInUse(spec)) return S.SpecialistStatus.Idle;
         // The spike showed Working specs all collapse to one bucket from
         // these getters — GetTask().GetType / GetSubType give activity
         // shape but not Working/Traveling/Returning distinctions reliably.
         // Refine when we have a returning specialist to inspect.
-        return S.SpecialistStatus.Working;
+        var task = taskRead(spec);
+        if (task && task !== THREW) return S.SpecialistStatus.Working;
+        var inUse = inUseRead(spec);
+        if (inUse === true) return S.SpecialistStatus.Working;
+        // Idle needs both reads to say so; a throw in either is Unknown.
+        if (task === THREW || inUse === THREW) return S.SpecialistStatus.Unknown;
+        return S.SpecialistStatus.Idle;
     }
 
     // Map ExplorerTask enum → host loca key. Sourced from
@@ -592,7 +702,9 @@
     function isExploring(spec)   { return isExplorer(spec)  && status(spec) === S.SpecialistStatus.Working; }
     function isProspecting(spec) { return isGeologist(spec) && status(spec) === S.SpecialistStatus.Working; }
 
-    var UNREADABLE = 'specialist unreadable';
+    // Registered as a read refusal: a send refused with it only means the list
+    // could not be read, and nothing went out.
+    var UNREADABLE = R.readRefusal('specialist unreadable');
 
     // Every one of these is declared on cSpecialist itself, so a live object
     // has them. An entry that reads one as undefined is a passing fault of the
@@ -661,10 +773,9 @@
     // An empty (falsy) slot counts as dropped too, since it may hold the entry
     // a caller is looking for. There is no retry here: the next tick is the retry.
     //
-    // Returns the specialist array, or null when the list could not be read
-    // (no zone, no getter, falsy vector, or a throw). Callers that must tell
-    // "empty" from "unreadable" use this; readVector flattens null to [].
-    function readSpecialists(zone) {
+    // Returns { list, lost } (lost = entries left out of list), or null when
+    // the list could not be read (no zone, no getter, falsy vector, or a throw).
+    function readCounted(zone) {
         if (!zone) return null;
         try {
             if (typeof zone.GetSpecialists_vector !== 'function') return null;
@@ -695,11 +806,59 @@
                 droppedTotal += lost;
                 noteDropped(lost, len, counts, sample);
             }
-            return out;
+            return { list: out, lost: lost };
         } catch (e) {
             S.kernel.warn('specialists', 'readVector threw:', e);
             return null;
         }
+    }
+
+    // The specialist array of readCounted, or null when unreadable. Callers
+    // that must tell "empty" from "unreadable" use this; readVector flattens
+    // null to [].
+    function readSpecialists(zone) {
+        var r = readCounted(zone);
+        return r === null ? null : r.list;
+    }
+
+    // One read of the viewed zone's list per read pass and zone id (or of
+    // opts.zone, live). Partial when the reader left entries out, since the
+    // one a caller looks for may be among them.
+    R.source('specialists.list', {
+        scope: 'zone',
+        read: function (arg, ctx) {
+            var zone = ctx.zone || S.core.zone.current();
+            if (!zone) return R.notReady('no zone', ctx.zoneId);
+            var r = readCounted(zone);
+            if (r === null) return R.unreadable('list unreadable', ctx.zoneId);
+            if (r.lost > 0) return R.partial(r.list, r.lost, 'dropped ' + r.lost, ctx.zoneId);
+            return R.ok(r.list, ctx.zoneId);
+        }
+    });
+
+    // Result of the specialist list; opts.zone reads that zone live and
+    // opts.live skips the pass memo.
+    function listRead(opts) {
+        return R.get('specialists.list', undefined, opts);
+    }
+
+    // Result of the specialists of one SpecialistType. Same state as listRead,
+    // except that an ok list with an entry that could not be classified (its
+    // type or carrier flag threw, or the definitions were unreadable) is
+    // partial: that entry may be of the type asked for.
+    function byTypeRead(type, opts) {
+        var r = listRead(opts);
+        if (!R.has(r)) return r;
+        var out = [];
+        var unsure = 0;
+        for (var i = 0; i < r.value.length; i++) {
+            var c = classifyEntry(r.value[i]);
+            if (c === type) out.push(r.value[i]);
+            else if (c === FACT_LOST || c === DEFS_LOST) unsure++;
+        }
+        if (r.state === R.PARTIAL) return R.partial(out, r.lost + unsure, r.why, r.zoneId);
+        if (unsure > 0) return R.partial(out, unsure, 'unclassified ' + unsure, r.zoneId);
+        return R.ok(out, r.zoneId);
     }
 
     // Monotonic count of entries the reader has left out. A caller compares it
@@ -746,8 +905,20 @@
     // listed" takes LOOKUP_CLEAN_MISSES clean misses in a row, read back to back
     // in this call; a hit costs one read, a lossy or null read ends the call at
     // once with ok:false.
+    //
+    // Inside a read pass a hit in the pass's list read is taken at once: a
+    // planner that already read the list pays no further vector read. A miss
+    // there proves nothing, so it still takes the live clean reads below.
     function lookup(key, opts) {
         opts = opts || {};
+        if (S.kernel.hostRead.inPass() && !opts.zone && typeof key === 'string' && key) {
+            var memo = listRead();
+            if (R.has(memo)) {
+                for (var m = 0; m < memo.value.length; m++) {
+                    if (uniqueIdKey(memo.value[m]) === key) return { ok: true, spec: memo.value[m] };
+                }
+            }
+        }
         var zone = opts.zone || S.core.zone.current();
         for (var n = 1; n <= LOOKUP_CLEAN_MISSES; n++) {
             var before = droppedTotal;
@@ -801,12 +972,12 @@
         var complete = src !== null;
         src = src || [];
         for (var i = 0; i < src.length; i++) {
-            var c = classify(src[i]);
+            var c = classifyEntry(src[i]);
             if (c === S.SpecialistType.General || c === S.SpecialistType.Carrier) {
                 out.push(src[i]);
-            } else if (c === null) {
-                var rt = rawType(src[i]);
-                if (rt === null || rt === undefined) complete = false;
+            } else if (c === FACT_LOST) {
+                // Its type or carrier flag threw: it may be a general or a carrier.
+                complete = false;
             }
         }
         return { list: out, complete: complete && droppedTotal === before };
@@ -841,8 +1012,10 @@
     function busy(type, opts) {
         var src = byType(type, opts);
         var out = [];
+        // Unknown is neither idle nor busy: its task could not be read.
         for (var i = 0; i < src.length; i++) {
-            if (status(src[i]) !== S.SpecialistStatus.Idle) out.push(src[i]);
+            var st = status(src[i]);
+            if (st !== S.SpecialistStatus.Idle && st !== S.SpecialistStatus.Unknown) out.push(src[i]);
         }
         return out;
     }
@@ -1058,6 +1231,8 @@
     S.core.specialists.all              = all;
     S.core.specialists.listReadable     = listReadable;
     S.core.specialists.listComplete     = listComplete;
+    S.core.specialists.listRead         = listRead;
+    S.core.specialists.byTypeRead       = byTypeRead;
     S.core.specialists.dropped          = dropped;
     S.core.specialists.UNREADABLE       = UNREADABLE;
     S.core.specialists.memberGone       = memberGone;
@@ -1077,6 +1252,7 @@
     S.core.specialists.classify         = classify;
     S.core.specialists.canAttack        = canAttack;
     S.core.specialists.troopCapacity    = troopCapacity;
+    S.core.specialists.troopCapacityOf  = troopCapacityOf;
     S.core.specialists.isGeneral        = isGeneral;
     S.core.specialists.isCarrier        = isCarrier;
     S.core.specialists.isAdmiral        = isAdmiral;

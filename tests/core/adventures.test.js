@@ -184,9 +184,9 @@ function withManager(s, mgr) {
 t.test('ownOpen lists only own adventures', function () {
     var s = setup();
     var advs = [
-        { adventureName: 'AdvA', mine: true },
-        { adventureName: 'AdvB', mine: false },
-        { adventureName: 'AdvC', mine: true }
+        { adventureName: 'AdvA', zoneID: 11, mine: true },
+        { adventureName: 'AdvB', zoneID: 12, mine: false },
+        { adventureName: 'AdvC', zoneID: 13, mine: true }
     ];
     withManager(s, {
         getAdventures: function () { return advs; },
@@ -287,7 +287,8 @@ t.test('close refuses when the zone id is unreadable and never verifies', functi
     st.advs = [{ adventureName: 'AdvA' }];
     var res = run(s, s.adv.close('AdvA'));
     assert.strictEqual(res.status, s.S.ActionResult.Refused);
-    assert.strictEqual(res.reason, 'adventure zone id unreadable');
+    // An entry without a zone id is lost, so the whole list is unreadable.
+    assert.strictEqual(res.reason, 'adventures unreadable');
     assert.strictEqual(st.removed.length, 0);
 });
 
@@ -350,6 +351,84 @@ t.test('own is an empty list for an empty vector', function () {
     withManager(s, { getAdventures: function () { return []; }, isMyAdventure: function () { return true; } });
     assert.deepStrictEqual(plain(s.adv.own()), []);
     assert.deepStrictEqual(plain(s.adv.ownOpen()), []);
+});
+
+// ---- ownRead: a lost entry makes the read partial ------------------------------
+
+t.test('a non-string name makes own null and ownRead partial', function () {
+    var s = setup();
+    var advs = [
+        { adventureName: 'AdvA', zoneID: 11 },
+        { adventureName: undefined, zoneID: 12 },
+        { adventureName: 'AdvC', zoneID: 13 }
+    ];
+    withManager(s, {
+        getAdventures: function () { return advs; },
+        isMyAdventure: function () { return true; }
+    });
+    var r = s.adv.ownRead();
+    assert.strictEqual(r.state, 'partial');
+    assert.strictEqual(r.lost, 1);
+    assert.deepStrictEqual(plain(r.value), [{ name: 'AdvA', zoneId: 11 }, { name: 'AdvC', zoneId: 13 }]);
+    assert.strictEqual(s.adv.own(), null);
+    assert.deepStrictEqual(plain(s.adv.ownOpen()), []);
+});
+
+t.test('a non-numeric zone id makes ownRead partial and never names undefined', function () {
+    var s = setup();
+    withManager(s, {
+        getAdventures: function () { return [{ adventureName: 'AdvA', zoneID: '11' }, { adventureName: '', zoneID: 12 }]; },
+        isMyAdventure: function () { return true; }
+    });
+    var r = s.adv.ownRead();
+    assert.strictEqual(r.state, 'partial');
+    assert.strictEqual(r.lost, 2);
+    assert.deepStrictEqual(plain(r.value), []);
+});
+
+t.test('ownRead is ok for a complete list and unreadable without a manager', function () {
+    var s = setup();
+    withManager(s, {
+        getAdventures: function () { return [{ adventureName: 'AdvA', zoneID: 11 }]; },
+        isMyAdventure: function () { return true; }
+    });
+    assert.strictEqual(s.adv.ownRead().state, 'ok');
+    withManager(s, null);
+    assert.strictEqual(s.adv.ownRead().state, 'unreadable');
+    withManager(s, { getAdventures: function () { throw new Error('boom'); } });
+    assert.strictEqual(s.adv.ownRead().state, 'unreadable');
+});
+
+t.test('own is [] for an empty manager list', function () {
+    var s = setup();
+    withManager(s, { getAdventures: function () { return []; }, isMyAdventure: function () { return true; } });
+    var r = s.adv.ownRead();
+    assert.strictEqual(r.state, 'ok');
+    assert.deepStrictEqual(plain(s.adv.own()), []);
+});
+
+t.test('close check is false on a partial list', function () {
+    var s = setup();
+    var st = closable(s);
+    var def = s.adv.close('AdvA');
+    // AdvA is gone, but one entry was lost: its absence proves nothing.
+    st.advs = [{ adventureName: 'AdvB', zoneID: 12 }, { adventureName: null, zoneID: 13 }];
+    assert.strictEqual(def.check({ zoneId: 11 }), false);
+    st.advs = [{ adventureName: 'AdvB', zoneID: 12 }];
+    assert.strictEqual(def.check({ zoneId: 11 }), true);
+});
+
+t.test('close check reads live inside a read pass', function () {
+    var s = setup();
+    var st = closable(s);
+    var def = s.adv.close('AdvA');
+    s.S.kernel.hostRead.pass(function () {
+        assert.strictEqual(s.adv.own().length, 2);
+        st.advs = [{ adventureName: 'AdvB', zoneID: 12 }];
+        // The pass memo still holds the old list; check must not use it.
+        assert.strictEqual(s.adv.own().length, 2);
+        assert.strictEqual(def.check({ zoneId: 11 }), true);
+    });
 });
 
 // ---- folders --------------------------------------------------------------------

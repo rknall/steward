@@ -6,9 +6,16 @@
  * with S.core.actions.attempt(def, onDone); this file decides nothing about
  * which quest to read or claim or when.
  *
- * list() distinguishes a failed read (null) from an empty pool ([]): a def
- * that verifies by absence must never mistake an unreadable pool for a
- * claimed quest. This is the failure contract of core/actions.js.
+ * The pool is read through the quests.pool source of S.kernel.read, memoized
+ * per read pass and viewed zone. It is partial when quest entries could not be
+ * read (an empty slot, a quest without a key, or an entry that throws), and
+ * unreadable when the pool itself cannot be read. list() keeps its contract:
+ * the entries that were read (complete or partial), or null for a failed read,
+ * so an empty pool ([]) still differs from an unreadable one. A def that
+ * verifies by absence must never mistake an unreadable or partial pool for a
+ * claimed quest: a partial pool may have lost exactly that quest. This is the
+ * failure contract of core/actions.js. Defs read the pool live, so a send is
+ * never checked against a planning-time answer.
  *
  * A claim is verified by the server's result callback for the current send
  * (game.createResponder, a ServerState::ResponderSimple), or by the quest key
@@ -75,6 +82,16 @@
  */
 
 (function (S) {
+
+    var R = S.kernel.read;
+
+    // The precheck refusal for a pool that could not be read well enough to
+    // decide: nothing was sent.
+    var UNREADABLE = R.readRefusal('quests unreadable');
+
+    // Defs read the pool live: they run from the queue, after the plan that
+    // built them, and must see the pool as it is now.
+    var LIVE = { live: true };
 
     // specialType_string of the adventure's final quest contains this marker.
     var LAST_QUEST_MARK = 'lastQuest';
@@ -208,22 +225,36 @@
         return modeOf(q) === UNREAD_MODE && isActive(q);
     }
 
-    // [{ key, name, finished, last, unread }] for the quests on this zone;
-    // null when the pool cannot be read, [] for a pool that reads fine and is
-    // empty. An entry that cannot be read is skipped.
-    function list() {
+    // The quests.pool source: [{ key, name, finished, last, unread }] for the
+    // quests on this zone. Unreadable when the pool cannot be read; ok for a
+    // pool that reads fine, empty or not. An empty slot, a quest whose key
+    // reads null and an entry whose read throws are lost and make the pool
+    // partial. A truthy entry without isFinished is not a quest: the pool
+    // legitimately holds such entries, so it is skipped and not lost, and a
+    // pool of only such extras stays ok. The falsy test comes first so the
+    // two cases stay apart.
+    function readPoolResult(arg, ctx) {
+        var zoneId = ctx ? ctx.zoneId : null;
         var qs = readPool();
-        if (qs === null) return null;
+        if (qs === null) return R.unreadable('quest pool unreadable', zoneId);
         var out = [];
+        var lost = 0;
         for (var i = 0; i < qs.length; i++) {
             try {
                 var q = qs[i];
+                if (!q) {
+                    lost++;
+                    continue;
+                }
                 if (!isQuest(q)) {
                     S.kernel.debug('quests', 'quest entry ' + i + ' is not a quest, skipped');
                     continue;
                 }
                 var key = keyOf(q);
-                if (key === null) continue;
+                if (key === null) {
+                    lost++;
+                    continue;
+                }
                 var name = '';
                 try { name = String(q.getQuestName_string()); } catch (e1) { /* leave default */ }
                 out.push({
@@ -231,10 +262,36 @@
                     last: isLast(q), unread: isUnread(q)
                 });
             } catch (e2) {
+                lost++;
                 S.kernel.warn('quests', 'quest entry ' + i + ' threw:', e2);
             }
         }
-        return out;
+        if (lost > 0) return R.partial(out, lost, lost + ' quest entries unreadable', zoneId);
+        return R.ok(out, zoneId);
+    }
+
+    R.source('quests.pool', { scope: 'zone', read: readPoolResult });
+
+    function pool(opts) {
+        return R.get('quests.pool', undefined, opts);
+    }
+
+    // The entry with this key among a pool Result's entries, or null.
+    function entryOf(r, key) {
+        var all = r.value;
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].key === key) return all[i];
+        }
+        return null;
+    }
+
+    // The entries of the quests.pool source, complete or partial, so a caller
+    // that lists what is there still sees every quest that was read; null
+    // when the pool cannot be read, [] for a pool that reads fine and is
+    // empty. Inside a read pass this is the pass's one read of the pool.
+    function list() {
+        var r = pool();
+        return R.has(r) ? r.value : null;
     }
 
     // The finished entries of list(); null when the pool cannot be read.
@@ -569,13 +626,6 @@
         return null;
     }
 
-    function hasKey(all, key) {
-        for (var i = 0; i < all.length; i++) {
-            if (all[i].key === key) return true;
-        }
-        return false;
-    }
-
     // Send state of one def: whether it has sent at all, and a per-send
     // token. sendTrigger numbers each message, and a result callback records
     // its own number only while that send is still the latest one, so a late
@@ -649,14 +699,13 @@
             category:  'quests',
             timeoutMs: TRIGGER_TIMEOUT_MS,
 
+            // A key missing from a partial pool may be one of the lost
+            // entries, so that is an unreadable pool, not a missing quest.
             precheck: function () {
-                var all = list();
-                if (all === null) return 'quests unreadable';
-                var entry = null;
-                for (var i = 0; i < all.length; i++) {
-                    if (all[i].key === key) { entry = all[i]; break; }
-                }
-                if (!entry) return 'quest not found';
+                var r = pool(LIVE);
+                if (!R.has(r)) return UNREADABLE;
+                var entry = entryOf(r, key);
+                if (!entry) return R.isOk(r) ? 'quest not found' : UNREADABLE;
                 if (entry.last && !allowLast) return 'last quest';
                 if (!entry.finished && !ss.sent) return 'quest not finished';
                 return null;
@@ -677,9 +726,8 @@
                 if (answered(ss)) return true;
                 var zoneId = S.core.zone.id();
                 if (typeof zoneId !== 'number' || zoneId !== base.zoneId) return false;
-                var all = list();
-                if (all === null) return false;
-                return !hasKey(all, key);
+                // Only a complete pool proves the quest has left it.
+                return R.absent(pool(LIVE), function (e) { return e.key === key; });
             }
         };
     }
@@ -705,26 +753,28 @@
             category:  'quests',
             timeoutMs: TRIGGER_TIMEOUT_MS,
 
+            // A key missing from a partial pool may be one of the lost
+            // entries, so that is an unreadable pool, not a missing quest.
             precheck: function () {
-                var all = list();
-                if (all === null) return 'quests unreadable';
-                var entry = null;
-                for (var i = 0; i < all.length; i++) {
-                    if (all[i].key === key) { entry = all[i]; break; }
-                }
-                if (!entry) return 'quest not found';
+                var r = pool(LIVE);
+                if (!R.has(r)) return UNREADABLE;
+                var entry = entryOf(r, key);
+                if (!entry) return R.isOk(r) ? 'quest not found' : UNREADABLE;
                 if (!entry.unread && !ss.sent) return 'quest not unread';
                 return null;
             },
 
             // The keys present before the send, so quests the server starts
             // afterwards can be told apart. The zone is kept so another
-            // zone's pool is never read as new quests.
+            // zone's pool is never read as new quests. Only a complete pool
+            // gives keys: a quest lost from a partial baseline would read as
+            // new once it is read again.
             baseline: function () {
-                var all = list();
+                var r = pool(LIVE);
                 var keys = null;
-                if (all !== null) {
+                if (R.isOk(r)) {
                     keys = {};
+                    var all = r.value;
                     for (var i = 0; i < all.length; i++) keys[all[i].key] = true;
                 }
                 return { found: true, zoneId: S.core.zone.id(), keys: keys };
@@ -740,8 +790,9 @@
                 var zoneId = S.core.zone.id();
                 if (typeof zoneId !== 'number' || zoneId !== base.zoneId) return false;
                 if (base.keys === null) return false;
-                var all = list();
-                if (all === null) return false;
+                var r = pool(LIVE);
+                if (!R.has(r)) return false;
+                var all = r.value;
                 for (var i = 0; i < all.length; i++) {
                     if (base.keys[all[i].key] !== true) return true;
                 }
@@ -752,6 +803,7 @@
 
     if (!S.core.quests) S.core.quests = {};
     S.core.quests.LAST_QUEST_MARK = LAST_QUEST_MARK;
+    S.core.quests.UNREADABLE = UNREADABLE;
     S.core.quests.list     = list;
     S.core.quests.finished = finished;
     S.core.quests.unread   = unread;

@@ -475,3 +475,58 @@ t.test('131 slots with 126 empty log one drop line without a sample tail and ref
     c.all({ zone: z });
     t.assert.strictEqual(dropLines(H).length, 1);
 });
+
+// ---- lookup inside a read pass ----------------------------------------------
+
+t.test('lookup inside a pass hits from the memo with one vector read', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var c = H.Steward.core.specialists;
+    var z = countingZone(function () { return false; });
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.Steward.kernel.hostRead.pass(function () {
+        t.assert.strictEqual(c.listRead().state, 'ok');
+        var r = c.lookup('k');
+        t.assert.strictEqual(r.ok, true);
+        t.assert.strictEqual(r.spec.GetUniqueID().toKeyString(), 'k');
+        t.assert.strictEqual(c.refind('k1').reason, null);
+    });
+    t.assert.strictEqual(z.reads(), 1);
+});
+
+t.test('lookup inside a pass with a miss still reads live five times', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var c = H.Steward.core.specialists;
+    var z = countingZone(function () { return true; });
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    H.Steward.kernel.hostRead.pass(function () {
+        c.listRead();
+        var before = z.reads();
+        var r = c.lookup('k');
+        t.assert.strictEqual(r.ok, true);
+        t.assert.strictEqual(r.spec, null);
+        t.assert.strictEqual(z.reads() - before, c.LOOKUP_CLEAN_MISSES);
+    });
+});
+
+t.test('lookup inside a pass with opts.zone reads that zone live', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var c = H.Steward.core.specialists;
+    var viewed = countingZone(function () { return false; });
+    var other = countingZone(function () { return false; });
+    H.host.game.gi.mCurrentPlayerZone = viewed.zone;
+    H.Steward.kernel.hostRead.pass(function () {
+        t.assert.strictEqual(c.lookup('k', { zone: other.zone }).ok, true);
+    });
+    t.assert.strictEqual(viewed.reads(), 0);
+    t.assert.strictEqual(other.reads(), 1);
+});
+
+t.test('lookup outside a pass is unchanged and reads live each time', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var c = H.Steward.core.specialists;
+    var z = countingZone(function () { return false; });
+    H.host.game.gi.mCurrentPlayerZone = z.zone;
+    c.lookup('k');
+    c.lookup('k');
+    t.assert.strictEqual(z.reads(), 2);
+});

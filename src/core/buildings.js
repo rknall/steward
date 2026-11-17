@@ -7,18 +7,25 @@
  * Buff eligibility: buffState reads every raw fact, buffBlock turns it into
  * null (eligible) or the first reason a production buff must not be applied.
  *
- * Cache: the snapshot behind list, byPredicate, listMines and readable is read
- * on first use and kept until invalidate(). Nothing clears it per tick, so a
- * caller that needs the current set invalidates first (the action defs do).
- * byName and byGrid read the host directly; inside a host-read pass byName
- * answers from one name index of the zone.
+ * Cache: there is no snapshot across ticks. list, byPredicate, listMines,
+ * collectiblesByName, readable and the byName/byGrid fallbacks read the
+ * buildings.list source, which is memoized only inside a read pass and per
+ * viewed zone id, so a zone switch or the next pass reads the host again and a
+ * failed read is never kept as an empty list. Outside a pass every call reads
+ * live. listRead() tells "no buildings" (ok, empty) from "could not read"
+ * (unreadable) and "no zone yet" (notReady); falsy vector slots are skipped and
+ * do not make the list partial, since nothing shows a hole hides a building.
+ * opts.zone always reads that zone live. invalidate() drops the open pass's
+ * building reads so a caller that just changed the map reads it fresh; outside
+ * a pass it has nothing to drop. byName answers inside a pass from one name
+ * index per zone.
  */
 
 (function (S) {
 
-    // Inside a read pass byName scans the zone once for all names.
-    var snapshot = null;     // cached array per tick
+    var R = S.kernel.read;
     var lastGapLog = {};     // last logged name-index gap per building name
+    var lastIndexErr = {};   // last logged name-index error text per building name
 
     // GetProductionState() value of a building that is working. MISSING_INPUT_STATE,
     // 2 (warehouse full) and 5 (stopped) must not take a buff.
@@ -45,12 +52,14 @@
         return S.core.zone.current();
     }
 
-    function readAllFromZone(zone) {
-        var out = [];
-        if (!zone) return out;
+    // The zone's buildings, or null when the list cannot be read: no street
+    // map, no vector, a vector without a numeric length, or a throw. Falsy
+    // slots are skipped.
+    function readList(zone) {
+        if (!zone) return null;
         try {
             var sdm = zone.mStreetDataMap;
-            if (!sdm) return out;
+            if (!sdm) return null;
 
             var src = null;
             if (typeof sdm.GetBuildings_vector === 'function') {
@@ -58,33 +67,62 @@
             } else if (sdm.mBuildingContainer) {
                 src = sdm.mBuildingContainer;
             }
-            if (!src) return out;
+            if (!src || typeof src.length !== 'number') return null;
 
-            // Vectors usually expose a .length and numeric index; iterate defensively.
-            var len = (typeof src.length === 'number') ? src.length : 0;
-            for (var i = 0; i < len; i++) {
+            var out = [];
+            for (var i = 0; i < src.length; i++) {
                 var b = src[i];
                 if (b) out.push(b);
             }
+            return out;
         } catch (e) {
-            S.kernel.warn('buildings', 'readAllFromZone threw:', e);
+            S.kernel.warn('buildings', 'readList threw:', e);
+            return null;
         }
-        return out;
     }
 
-    function ensureSnapshot(zoneOverride) {
-        if (zoneOverride) return readAllFromZone(zoneOverride);
-        if (!snapshot) snapshot = readAllFromZone(currentZone());
-        return snapshot;
+    // Callers that only want an array keep their contract: a failure is [].
+    function readAllFromZone(zone) {
+        return readList(zone) || [];
     }
 
-    function invalidate() { snapshot = null; }
+    R.source('buildings.list', {
+        scope: 'zone',
+        read: function (arg, ctx) {
+            var z = ctx.zone || currentZone();
+            if (!z) return R.notReady('no zone', ctx.zoneId);
+            var l = readList(z);
+            if (l === null) return R.unreadable('building list unreadable', ctx.zoneId);
+            return R.ok(l, ctx.zoneId);
+        }
+    });
 
-    // True when the viewed zone's building list holds anything. byGrid returns
-    // null for a missing zone and the reader flattens failures to [], so a
-    // building's absence only means something on a non-empty list. The caller
-    // invalidates first and checks that the viewed zone is the one it means.
-    function readable() { return ensureSnapshot().length > 0; }
+    function listRead(opts) {
+        return R.get('buildings.list', undefined, opts);
+    }
+
+    // The array behind the listing helpers. A memoized value is shared for
+    // the pass, so callers copy or filter it and never change it in place.
+    function readAll(opts) {
+        if (opts && opts.zone) return readAllFromZone(opts.zone);
+        return listRead().value || [];
+    }
+
+    // Drops this pass's building reads (list and name index), so the next
+    // read asks the host again. Outside a pass nothing is memoized.
+    function invalidate() {
+        S.kernel.hostRead.forget('read.buildings.');
+        S.kernel.hostRead.forget('buildings.');
+    }
+
+    // True when the viewed zone's building list was read completely and holds
+    // anything. byGrid returns null for a missing zone, so a building's absence
+    // only means something on a non-empty list. The caller checks that the
+    // viewed zone is the one it means.
+    function readable() {
+        var r = listRead();
+        return R.isOk(r) && r.value.length > 0;
+    }
 
     function name(b) {
         if (!b) return '';
@@ -108,6 +146,16 @@
             var v = S.kernel.hostRead.call(b, 'GetUpgradeLevel');
             return v === undefined ? 0 : v;
         } catch (e) { return 0; }
+    }
+
+    // The upgrade level, or null when it cannot be read, for a caller that
+    // must not show an unread level as 0.
+    function levelOf(b) {
+        if (!b) return null;
+        try {
+            var v = S.kernel.hostRead.call(b, 'GetUpgradeLevel');
+            return (typeof v === 'number' && isFinite(v)) ? v : null;
+        } catch (e) { return null; }
     }
 
     function playerId(b) {
@@ -191,7 +239,7 @@
 
     function list(opts) {
         opts = opts || {};
-        var src = ensureSnapshot(opts.zone);
+        var src = readAll(opts);
         if (!opts.type) return src.slice();
         var out = [];
         for (var i = 0; i < src.length; i++) {
@@ -212,7 +260,9 @@
             }
             return out;
         }
-        var index = S.kernel.hostRead.cached('buildings.nameIndex', function () {
+        // Keyed by zone id so a zone switch inside a pass never answers from
+        // the index of the island viewed before.
+        var index = S.kernel.hostRead.cached('buildings.nameIndex|' + S.core.zone.id(), function () {
             var map = {};
             var src = readAllFromZone(z);
             for (var j = 0; j < src.length; j++) {
@@ -232,8 +282,8 @@
         // list. Neither source is complete: the name index can omit a whole
         // type that GetBuildings_vector holds, and the building list omits
         // masons that the name index holds. The result is the union, deduped
-        // by grid. The list is read fresh from the same zone because the
-        // cached snapshot may predate the buildings or belong to another zone.
+        // by grid. The list comes from the same zone as the index: read live
+        // outside a pass, from the pass's name index of that zone inside one.
         if (!opts.zone) {
             var z = null;
             try { z = S.core.zone.current(); } catch (e0) { z = null; }
@@ -248,7 +298,19 @@
                             if (v[i]) hits.push(v[i]);
                         }
                     }
-                } catch (e) { hits = []; }
+                } catch (e) {
+                    hits = [];
+                    // Log a failing index only when its error text changes,
+                    // so a render loop stays quiet.
+                    try {
+                        var msg = (e && e.message) ? e.message : String(e);
+                        if (lastIndexErr[targetName] !== msg) {
+                            lastIndexErr[targetName] = msg;
+                            S.kernel.debug('buildings', 'byName ' + targetName +
+                                ': name index threw: ' + msg);
+                        }
+                    } catch (e3) { /* logging never breaks the read */ }
+                }
 
                 var seen = {};
                 for (var h = 0; h < hits.length; h++) {
@@ -286,7 +348,7 @@
                 return hits;
             }
         }
-        var src = ensureSnapshot(opts.zone);
+        var src = readAll(opts);
         var out = [];
         for (var j = 0; j < src.length; j++) {
             if (name(src[j]) === targetName) out.push(src[j]);
@@ -305,7 +367,7 @@
                 }
             } catch (e) { /* fall through */ }
         }
-        var src = ensureSnapshot(opts.zone);
+        var src = readAll(opts);
         for (var i = 0; i < src.length; i++) {
             if (grid(src[i]) === targetGrid) return src[i];
         }
@@ -314,7 +376,7 @@
 
     function byPredicate(fn, opts) {
         opts = opts || {};
-        var src = ensureSnapshot(opts.zone);
+        var src = readAll(opts);
         var out = [];
         for (var i = 0; i < src.length; i++) {
             try { if (fn(src[i])) out.push(src[i]); }
@@ -338,7 +400,7 @@
     // walk + filter + group.
     function collectiblesByName(opts) {
         opts = opts || {};
-        var src = ensureSnapshot(opts.zone);
+        var src = readAll(opts);
         var groups = {};
         for (var i = 0; i < src.length; i++) {
             if (!isCollectible(src[i])) continue;
@@ -588,6 +650,7 @@
         byPredicate:        byPredicate,
         listMines:          listMines,
         collectiblesByName: collectiblesByName,
+        listRead:           listRead,
         invalidate:         invalidate,
         readable:           readable,
 
@@ -595,6 +658,7 @@
         name:         name,
         grid:         grid,
         level:        level,
+        levelOf:      levelOf,
         playerId:     playerId,
         workTime:     workTime,
         amountPerCycle:    amountPerCycle,
