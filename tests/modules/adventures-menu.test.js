@@ -24,6 +24,21 @@ function def(name, type, campaign, requiresEvent) {
     return A.adventureDef({ name: name, type: type, campaign: campaign, requiresEvent: requiresEvent });
 }
 
+// An adventure manager with no open adventures: an own list that cannot be read
+// keeps the map count unknown (×?), so rows need a readable, empty one.
+function emptyOwn(H) {
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return []; },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
+}
+
 // o.defs: adventure definitions (omit for "not readable yet"), o.maps: map
 // name -> amount, o.scenarios: id -> file text (the built-in scenarios).
 function setup(o) {
@@ -38,6 +53,7 @@ function setup(o) {
     S.modules.adventures.builtinScenarios = o.scenarios || {};
     var s = { H: H, S: S, fs: fs, timers: timers, maps: o.maps || {}, reads: 0, rebuilds: 0 };
     A.install(H, { buffs: [], adventureDefs: o.defs });
+    emptyOwn(H);
     s.counts = function () { s.reads++; return plain(s.maps); };
     S.core.buffs.mapCounts = s.counts;
     S.kernel.ui = S.kernel.ui || {};
@@ -51,6 +67,7 @@ function setup(o) {
 // Makes the host adventure list readable after the menu was built.
 function makeReadable(s, defs) {
     A.install(s.H, { buffs: [], adventureDefs: defs });
+    emptyOwn(s.H);
     s.S.core.buffs.mapCounts = s.counts;
 }
 

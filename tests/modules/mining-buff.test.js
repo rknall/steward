@@ -59,6 +59,8 @@ function setup(o) {
     for (var i = 0; i < bl.length; i++) z.building(bl[i]);
     for (var type in (o.deposits || {})) z.deposits(type, o.deposits[type]);
     H.installZone(z);
+    // The home precheck reads the zone view, which needs a numeric viewed zone id.
+    H.host.game.gi.mCurrentViewedZoneID = 1;
     var sent = AC.wire(H);
     H.settings.write('mining', settingsFor(o.on || { IronOre: { buff: 'MineBuff' } }, o.extra));
 

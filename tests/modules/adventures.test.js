@@ -11,10 +11,25 @@ var DIR = 'C:/client/steward/adventures/templates';
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
+// An adventure manager with no open adventures: an own list that cannot be read
+// keeps the map count unknown (×?), so rows need a readable, empty one.
+function emptyOwn(H) {
+    var prev = H.host.game.def;
+    H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.adventure.logic::AdventureManager') {
+            return { getInstance: function () { return {
+                getAdventures: function () { return []; },
+                isMyAdventure: function () { return true; }
+            }; } };
+        }
+        return prev(name);
+    };
+}
+
 function setup(armyOpts) {
     var fs = airfs.make();
     var H = harness.boot({ host: { air: fs.air } });
-    if (armyOpts) A.install(H, armyOpts);
+    if (armyOpts) { A.install(H, armyOpts); emptyOwn(H); }
     var S = H.Steward;
     return {
         fs: fs,
