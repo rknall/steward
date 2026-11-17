@@ -125,33 +125,12 @@
         S.kernel.debug.apply(S.kernel, ['production'].concat(Array.prototype.slice.call(arguments, 1)));
     }
 
+    // Merged per building (the building template, the default row, then the
+    // stored row) so a partly stored entry keeps the default fields it lacks.
     function readSettings() {
-        var stored = S.kernel.settings.read('production') || {};
-        var defaults = S.modules.production.defaultSettings || {};
-        var blank = S.modules.production.defaultBuilding || {};
-        var merged = {};
-        var key, f;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        // Merge per building so a partly stored entry keeps the default
-        // fields it lacks.
-        var out = {};
-        var defaultMap = defaults.buildings || {};
-        var storedMap  = stored.buildings  || {};
-        var names = [];
-        for (key in defaultMap) if (has(defaultMap, key)) names.push(key);
-        for (key in storedMap)  if (has(storedMap, key) && !has(defaultMap, key)) names.push(key);
-        for (var i = 0; i < names.length; i++) {
-            var row = {};
-            for (f in blank) row[f] = blank[f];
-            var d = defaultMap[names[i]] || {};
-            var st = storedMap[names[i]] || {};
-            for (f in d)  row[f] = d[f];
-            for (f in st) row[f] = st[f];
-            out[names[i]] = row;
-        }
-        merged.buildings = out;
-        return merged;
+        return S.kernel.settings.merged('production', S.modules.production.defaultSettings, {
+            rows: { buildings: { template: S.modules.production.defaultBuilding || {} } }
+        });
     }
 
     // One stored row in the automatic-queue shape. The old shape kept an
@@ -482,7 +461,7 @@
     // The gap between queued actions; s defaults to the stored settings.
     function delayOf(s) {
         if (!s) s = readSettings();
-        return typeof s.actionDelay === 'number' ? s.actionDelay : 1500;
+        return typeof s.actionDelay === 'number' ? s.actionDelay : S.modules.production.defaultSettings.actionDelay;
     }
 
     // The two phases share one read pass, so queueNames(), the phases and

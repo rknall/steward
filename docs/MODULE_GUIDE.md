@@ -59,8 +59,7 @@ That's a complete module. After `npm run build` it'll be bundled into `user_stew
     };
 
     function settings() {
-        var stored = S.kernel.settings.read('collect');
-        return stored || S.modules.collect.defaultSettings;
+        return S.kernel.settings.merged('collect', S.modules.collect.defaultSettings);
     }
 
     S.kernel.register({
@@ -132,13 +131,21 @@ The kernel persists settings to a single JSON file on disk. Don't write outside 
 
 Two patterns are common:
 
-**Lazy:** `read()` returns `null` until first write; the module substitutes a default each call.
+**Lazy:** `read()` returns `null` until first write; the module lays its stored values over the defaults on each call with the kernel merge.
 
 ```js
 function settings() {
-    return Steward.kernel.settings.read('collect') || Steward.modules.collect.defaultSettings;
+    return Steward.kernel.settings.merged('collect', Steward.modules.collect.defaultSettings);
 }
 ```
+
+`merged(id, defaults, opts)` returns a fresh deep copy (`Steward.kernel.settings.copy(v)` is the same JSON copy), so the caller may change it freely. With no options, defaults come first and every stored key wins, whatever its type. Options:
+
+- `only: true`: keep only keys the defaults declare; a stored extra key is dropped.
+- `typed: true` (with `only`): a stored value wins only when its type equals the default's type.
+- `rows: { <key>: mode }`: the named key holds a map of rows merged per row. `'replace'`: a stored row replaces the default row whole. `'fields'`: a stored object row is laid over the default row field by field, and a stored-only row passes through raw. `{ template: T }`: each row is `T`, then the default row, then the stored row.
+
+Keep exactly one reader per module, in the file that owns it. Other files call that export at call time (`S.modules.<id>.readSettings()`) and never repeat the merge or fall back to the raw defaults. Delay defaults (`dispatchDelay`, `actionDelay`) derive from `Steward.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS` (1500) instead of a literal.
 
 **Eager:** seed defaults in the `boot` hook so subsequent reads always return populated data.
 
@@ -210,10 +217,10 @@ A module shows things in the native menu and the dashboard through two optional 
 - `ui` adds a section to one dashboard tab. `tab` is one of `specialists`, `geologists`, `mining`, `buildings`, `events` or `misc`. The Overview is built by the dashboard and is not a tab a module can target. `misc` renders on the Settings screen, for tools and module settings that need no dashboard tab (the diagnostics probes, the adventures stuck-step limit). `section.id` only has to be unique. It is not the settings buffer key: the buffer namespace is the module `id` (`collect` registers section `collect_pickups` and its buffer is `collect`). `render($main, h)` runs when the screen draws the section; `h` is `S.kernel.ui.helpers` (see below).
 - Section fields: `title` is the native quick-toggle label, so never change it for a module with an `enabled` flag; `heading` is the optional card, tile, nav and footer name (default `title`); `icon` is one Unicode glyph; `summary(h)` returns the compact strip text and reads the buffer through `h`; `side($side, h)` fills an optional settings column (split layout), with `wide: true` for the wider column; `render($main, h)` is required and fills the right column when `side` exists, else the whole panel; `tiles(h)` returns Overview tiles `{ title, icon, lines, badge, links, toggle }`; `runsNow: true` (misc only) lists the section under "Runs at once" and sets the footer note. There is no per-section action button: a module draws its own runs-now buttons with `h.button` and marks them with `h.now()`.
 - Use `title` for the native label and `heading` when the card needs a different name; the footer names a module's unsaved changes by `heading`.
-- Helpers: layout `card`, `subHead`, `field`, `grid`, `toolRow`, `banner`, `empty`; controls `toggle`, `input`, `number`, `dropdown`, `button`, `link`, `chips` (items may carry `active: true` for multi-select); data `table` (a row may be `{ span }` for one full-width cell), `stats`, `badge`, `statusBadge`, `now`, `duration`, `clock`; buffer `settings`, `update`, `set`, `get`, `escape`, `isChanged`, `baseline`, `fit`.
+- Helpers: layout `card`, `subHead`, `field`, `grid`, `toolRow`, `banner`, `empty`; controls `toggle`, `input`, `number`, `dropdown`, `button`, `link`, `chips` (items may carry `active: true` for multi-select); data `table` (a row may be `{ span }` for one full-width cell), `stats`, `badge`, `statusBadge`, `now`, `duration`, `clock`; buffer `settings`, `update`, `set`, `get`, `shown`, `escape`, `isChanged`, `baseline`, `fit`.
 - `h.clock` and `h.duration` delegate to `Steward.kernel.text`. A module builds any other time, minute or plural text with those helpers (`Steward.kernel.text.clock`, `minText`, `plural` and so on) instead of keeping a local copy.
 - Bound controls take `ns` (the module id) and `path` (dotted). On a change they write the value to the buffer through `h.set` (or `opts.write(value)`), mark themselves `steward-dirty` when it differs from the stored value, then call `opts.onChange`. A reverted value counts as no change.
-- `baseline(ns, shown)` tells the buffer what the screen shows when that differs from the stored value (defaults merged in by the module's own reader). Call it once in `render` before drawing, so showing a default never counts as an unsaved change.
+- `baseline(ns, shown)` tells the buffer what the screen shows when that differs from the stored value (defaults merged in by the module's own reader). Call it once in `render` before drawing, so showing a default never counts as an unsaved change. `h.shown(ns, readSettings(), rows)` returns the values a view draws: the buffer laid over the merged settings (a copy, the buffer is never written). `rows` takes `'fields'` or `'replace'` per key, like the merge.
 - Escaping: every string passed to a helper goes in as text. Only table cells written `{ html: '...' }` take markup, and the caller must have run `h.escape` on every user string in them.
 
 ```js

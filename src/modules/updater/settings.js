@@ -69,16 +69,8 @@
     // Stored values win when they have the default's type, so a hand-edited
     // or corrupted settings.json cannot feed a string where a flag is read.
     function config() {
-        var defaults = S.modules.updater.defaultSettings;
-        var stored = S.kernel.settings.read('updater') || {};
-        var out = {};
-        for (var key in defaults) {
-            if (!defaults.hasOwnProperty(key)) continue;
-            out[key] = (stored.hasOwnProperty(key) && typeof stored[key] === typeof defaults[key])
-                ? stored[key]
-                : defaults[key];
-        }
-        return out;
+        return S.kernel.settings.merged('updater', S.modules.updater.defaultSettings,
+            { only: true, typed: true });
     }
 
     // A shallow copy, so callers never mutate the host's settings buffer.

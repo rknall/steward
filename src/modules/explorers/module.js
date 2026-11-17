@@ -30,10 +30,10 @@
 
 (function (S) {
 
+    // The reader lives in ui.js and is looked up at call time, so the
+    // dashboard's merge is the only one.
     function readSettings() {
-        return (S.modules.explorers && S.modules.explorers.readSettings)
-            ? S.modules.explorers.readSettings()
-            : S.modules.explorers.defaultSettings;
+        return S.modules.explorers.readSettings();
     }
 
     // Per-explorer overrides accept ANY known ExplorerTask — both treasure
@@ -123,7 +123,7 @@
         if (room <= 0) return;
 
         var s = readSettings();
-        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay : 1500;
+        var delay = (typeof s.dispatchDelay === 'number') ? s.dispatchDelay : S.modules.explorers.defaultSettings.dispatchDelay;
         var dispatched = 0;
 
         for (var i = 0; i < idleExplorers.length && dispatched < room; i++) {

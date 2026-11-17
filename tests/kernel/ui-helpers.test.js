@@ -119,6 +119,56 @@ t.test('set replaces a non-object on the path', function () {
     assert.strictEqual(s.h.get('logger', 'a.b'), 2);
 });
 
+// ---- shown ------------------------------------------------------------------
+
+function plainJson(v) { return JSON.parse(JSON.stringify(v)); }
+
+t.test('shown lays the buffer over the base and ignores a buffered undefined', function () {
+    var s = setup();
+    s.h.set('logger', 'a', 5);
+    s.h.set('logger', 'c', 'new');
+    s.h.set('logger', 'u', undefined);
+    var base = { a: 1, b: 2, u: 'keep' };
+    var out = s.h.shown('logger', base, null);
+    assert.deepStrictEqual(plainJson(out), { a: 5, b: 2, u: 'keep', c: 'new' });
+    assert.deepStrictEqual(base, { a: 1, b: 2, u: 'keep' });
+});
+
+t.test('shown fields: a partly edited row keeps the base fields, undefined fields are ignored', function () {
+    var s = setup();
+    s.h.set('logger', 'rows.A', { max: 4, enabled: undefined });
+    s.h.set('logger', 'rows.N', 'abc');
+    var base = { rows: { A: { enabled: true, max: 8 }, B: { enabled: false, max: 1 }, N: { enabled: true, max: 2 } } };
+    var out = s.h.shown('logger', base, { rows: 'fields' });
+    assert.deepStrictEqual(plainJson(out.rows), {
+        A: { enabled: true, max: 4 },
+        B: { enabled: false, max: 1 },
+        N: { enabled: true, max: 2 }
+    });
+});
+
+t.test('shown replace: a buffered object row replaces the base row, a string row is ignored', function () {
+    var s = setup();
+    s.h.set('logger', 'rows.A', { max: 4 });
+    s.h.set('logger', 'rows.B', 'abc');
+    var base = { rows: { A: { enabled: true, max: 8 }, B: { enabled: true, max: 6 } } };
+    var out = s.h.shown('logger', base, { rows: 'replace' });
+    assert.deepStrictEqual(plainJson(out.rows), { A: { max: 4 }, B: { enabled: true, max: 6 } });
+});
+
+t.test('shown returns a copy and leaves base and buffer unchanged', function () {
+    var s = setup();
+    s.h.set('logger', 'rows.A', { max: 4 });
+    var base = { rows: { A: { enabled: true, max: 8 } }, list: [1] };
+    var bufBefore = JSON.stringify(s.h.settings('logger'));
+    var out = s.h.shown('logger', base, { rows: 'fields' });
+    out.rows.A.max = 99;
+    out.list.push(2);
+    assert.deepStrictEqual(base, { rows: { A: { enabled: true, max: 8 } }, list: [1] });
+    assert.strictEqual(JSON.stringify(s.h.settings('logger')), bufBefore);
+    assert.strictEqual(s.h.get('logger', 'rows.A.max'), 4);
+});
+
 // ---- Bound toggle -----------------------------------------------------------
 
 t.test('a bound toggle writes the nested path and marks itself dirty, then clean on revert', function () {

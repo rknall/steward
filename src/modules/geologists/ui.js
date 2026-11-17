@@ -13,9 +13,9 @@
  * once, filtered the way the dispatcher filters, so users can preview
  * routing before they switch the module on.
  *
- * Shown values come from the buffer, falling back to readSettings(), which
- * merges the defaults: the stored settings may lack a deposit row the
- * module still searches with its default.
+ * Shown values are the buffer laid over readSettings() by h.shown;
+ * readSettings() merges the defaults because the stored settings may lack
+ * a deposit row the module still searches with its default.
  */
 
 (function (S) {
@@ -23,22 +23,13 @@
 
     if (!S.modules.geologists) S.modules.geologists = {};
 
+    // The deposits map merges per row, so a partial user edit does not wipe
+    // the defaults of deposit types the user has not touched. A stored row
+    // replaces its default row whole: a partial stored row must not pick up
+    // the default `max`.
     function readSettings() {
-        var stored = S.kernel.settings.read('geologists') || {};
-        var defaults = S.modules.geologists.defaultSettings || {};
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        // Deep-merge nested deposits map so partial user edits don't
-        // wipe defaults for deposit types the user hasn't touched.
-        var depMerged = {};
-        var defaultDeps = defaults.deposits || {};
-        var storedDeps  = stored.deposits  || {};
-        for (key in defaultDeps) depMerged[key] = defaultDeps[key];
-        for (key in storedDeps)  depMerged[key] = storedDeps[key];
-        merged.deposits = depMerged;
-        return merged;
+        return S.kernel.settings.merged('geologists',
+            S.modules.geologists.defaultSettings, { rows: { deposits: 'replace' } });
     }
 
     function writeSettings(s) {
@@ -225,12 +216,17 @@
     // Shown values: buffer first, merged defaults second.
     // ---------------------------------------------------------------
 
-    // The buffered value at `path`, or the merged-defaults one when the
-    // buffer has none.
+    // The settings this view draws: the buffer laid over the merged
+    // settings, a buffered deposit row replacing its row whole as the
+    // reader does.
+    function shownSettings(h) {
+        return h.shown('geologists', readSettings(), { deposits: 'replace' });
+    }
+
+    // The shown value at `path`. Callers pass top-level keys: the buffer
+    // is laid over the merged settings per top key and per deposit row.
     function shown(h, path) {
-        var v = h.get('geologists', path);
-        if (typeof v !== 'undefined') return v;
-        var o = readSettings();
+        var o = shownSettings(h);
         var keys = String(path).split('.');
         for (var i = 0; i < keys.length; i++) {
             if (o === null || typeof o !== 'object') return undefined;
@@ -247,16 +243,8 @@
     // The row the dispatcher would use for a deposit: the buffered one,
     // else the merged-defaults one, else an empty row.
     function depositRow(h, depositName) {
-        var deps = h.get('geologists', 'deposits');
-        if (deps && typeof deps === 'object' && deps[depositName] &&
-            typeof deps[depositName] === 'object') {
-            return deps[depositName];
-        }
-        var merged = readSettings().deposits || {};
-        if (merged[depositName] && typeof merged[depositName] === 'object') {
-            return merged[depositName];
-        }
-        return { enabled: false, max: 0 };
+        var row = (shownSettings(h).deposits || {})[depositName];
+        return (row && typeof row === 'object') ? row : { enabled: false, max: 0 };
     }
 
     function rowMax(row) {

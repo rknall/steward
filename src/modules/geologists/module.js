@@ -47,11 +47,9 @@
 
     if (!S.modules.geologists) S.modules.geologists = {};
 
+    // The reader lives in ui.js; it is looked up at call time.
     function readSettings() {
-        if (S.modules.geologists.readSettings) {
-            return S.modules.geologists.readSettings();
-        }
-        return S.modules.geologists.defaultSettings;
+        return S.modules.geologists.readSettings();
     }
 
     function isReady(ctx) {

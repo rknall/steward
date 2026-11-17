@@ -5,7 +5,7 @@
  *
  *   {
  *     enabled:        false,
- *     actionDelay:    1500,
+ *     actionDelay:    QUEUE_ACTION_GAP_MS (1500),
  *     pauseThreshold: 50,
  *     buffVersion:    1,
  *     deposits: {
@@ -18,10 +18,11 @@
  * amount drops below this threshold. Resume direction (pause: false →
  * setProduction(active)) is unconditional and ignores the threshold.
  *
- * Mine-bearing types (Bronze/Iron/Gold/Coal/Titanium/Salpeter) have the
- * full shape. Mason-only types (Stone/Marble/Granite) carry only
- * enabled / buff / refill — the build/upgrade/pause phases are
- * unreachable for them.
+ * The deposit rows are derived from the deposit types
+ * (core/deposits/types.js), in their order. A type with a mine
+ * (Bronze/Iron/Gold/Coal/Titanium/Salpeter) gets the full shape; a
+ * mason-only type (Stone/Marble/Granite) carries only enabled / buff /
+ * refill, since the build/upgrade/pause phases are unreachable for it.
  *
  * `buff` and `refill` are strings; '' means off, the default for all
  * nine types. `buff` is the buff definition name the buff phase applies
@@ -44,28 +45,28 @@
 
     if (!S.modules.mining) S.modules.mining = {};
 
+    // The default row for one deposit type: the full shape where the type
+    // has a mine, the mason shape otherwise.
+    function defaultRow(info) {
+        if (info.mineName) {
+            return { enabled: true, build: true, upgrade: false, targetLevel: 3,
+                     pause: false, buff: '', refill: '' };
+        }
+        return { enabled: true, buff: '', refill: '' };
+    }
+
+    var deposits = {};
+    var types = S.core.deposits.types();
+    for (var i = 0; i < types.length; i++) {
+        deposits[types[i].name] = defaultRow(types[i]);
+    }
+
     S.modules.mining.defaultSettings = {
         enabled:        false,
-        actionDelay:    1500,
+        actionDelay:    S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS,
         pauseThreshold: 50,
         buffVersion:    1,
-        deposits: {
-            Stone:       { enabled: true, buff: '', refill: '' },
-            BronzeOre:   { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' },
-            Marble:      { enabled: true, buff: '', refill: '' },
-            IronOre:     { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' },
-            GoldOre:     { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' },
-            Coal:        { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' },
-            Granite:     { enabled: true, buff: '', refill: '' },
-            TitaniumOre: { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' },
-            Salpeter:    { enabled: true, build: true, upgrade: false, targetLevel: 3,
-                           pause: false, buff: '', refill: '' }
-        }
+        deposits:       deposits
     };
 
 }(Steward));

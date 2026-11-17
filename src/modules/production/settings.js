@@ -5,7 +5,7 @@
  *
  *   {
  *     enabled:       false,
- *     actionDelay:   1500,
+ *     actionDelay:   QUEUE_ACTION_GAP_MS (1500),
  *     ordersPerPass: 2,
  *     buffsPerPass:  2,
  *     standing:      true,
@@ -54,7 +54,7 @@
 
     S.modules.production.defaultSettings = {
         enabled:         false,
-        actionDelay:     1500,
+        actionDelay:     S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS,
         ordersPerPass:   2,
         buffsPerPass:    2,
         standing:        true,

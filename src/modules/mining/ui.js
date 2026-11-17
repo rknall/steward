@@ -37,26 +37,7 @@
     // laid over them, deposit by deposit so a partly edited row keeps the
     // fields the buffer lacks.
     function shownSettings(h) {
-        var base = readSettings();
-        var buf = h.settings('mining') || {};
-        var out = {};
-        var key;
-        for (key in base) out[key] = base[key];
-        for (key in buf)  out[key] = buf[key];
-        var deps = {};
-        var baseDeps = base.deposits || {};
-        var bufDeps = buf.deposits || {};
-        var name, f;
-        for (name in baseDeps) deps[name] = baseDeps[name];
-        for (name in bufDeps) {
-            var row = {};
-            var under = baseDeps[name] || {};
-            for (f in under) row[f] = under[f];
-            for (f in bufDeps[name]) row[f] = bufDeps[name][f];
-            deps[name] = row;
-        }
-        out.deposits = deps;
-        return out;
+        return h.shown('mining', readSettings(), { deposits: 'fields' });
     }
 
     function activeCount(info) {

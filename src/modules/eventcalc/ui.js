@@ -88,14 +88,10 @@
         return null;
     }
 
-    function readSettings(h) {
-        var defaults = S.modules.eventcalc.defaultSettings || {};
-        var stored = h.settings('eventcalc') || {};
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        return merged;
+    // The values the view draws: the defaults with the unsaved buffer laid
+    // over them. The view only reads, so the buffer is never written here.
+    function shownSettings(h) {
+        return h.shown('eventcalc', S.modules.eventcalc.defaultSettings);
     }
 
     function safeEstimate() {
@@ -233,7 +229,7 @@
 
         if (!session.snapshot) session.snapshot = api.rows(ev.code);
         var snap = session.snapshot || { source: 'manual', rows: [] };
-        var s = readSettings(h);
+        var s = shownSettings(h);
 
         if (snap.source === 'manual') {
             $card.append($('<div>', { 'class': 'steward-muted steward-note' })

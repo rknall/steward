@@ -98,15 +98,11 @@
 
     // ---- Module settings ----------------------------------------------------
 
+    // The one reader of the adventures settings: the stored value of each
+    // default key, or the default. Only default keys are kept, so an extra
+    // stored key never reaches a reader. The kernel returns a fresh copy.
     function settings() {
-        var defs = S.modules.adventures.defaultSettings || {};
-        var stored = S.kernel.settings.read('adventures') || {};
-        var out = {};
-        for (var k in defs) {
-            if (!Object.prototype.hasOwnProperty.call(defs, k)) continue;
-            out[k] = Object.prototype.hasOwnProperty.call(stored, k) ? stored[k] : defs[k];
-        }
-        return out;
+        return S.kernel.settings.merged('adventures', S.modules.adventures.defaultSettings, { only: true });
     }
 
     function setKey(key, value) {

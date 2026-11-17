@@ -47,10 +47,10 @@
         retries: {}
     };
 
+    // The reader lives in ui.js; it is looked up on each call so the module
+    // object can be replaced in tests.
     function readSettings() {
-        return (S.modules.collect && S.modules.collect.readSettings)
-            ? S.modules.collect.readSettings()
-            : S.modules.collect.defaultSettings;
+        return S.modules.collect.readSettings();
     }
 
     // Read through the module object at call time so tests can replace it.

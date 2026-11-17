@@ -76,15 +76,10 @@
     // General group
     // ---------------------------------------------------------------
 
-    // The buffered value when the user already edited it, else the value in
-    // effect; the buffer only holds what is stored or edited.
-    function shown(h, ns, key, inEffect) {
-        var v = h.get(ns, key);
-        return typeof v === 'undefined' ? inEffect : v;
-    }
-
-    function loggerToggle(h, key, label, inEffect) {
-        return h.toggle({ ns: 'logger', path: key, checked: !!shown(h, 'logger', key, inEffect), label: label });
+    // The checkbox shows the value the screen already resolved (buffer over
+    // what is in effect), so the toggle only renders it.
+    function loggerToggle(h, key, label, value) {
+        return h.toggle({ ns: 'logger', path: key, checked: !!value, label: label });
     }
 
     // The steward folder is the parent of its logs folder. stewardDir needs
@@ -109,20 +104,24 @@
         var tick = S.kernel.scheduler.state.tickIntervalMs;
         sc.baseline('logger', cfg);
         sc.baseline('scheduler', { tickInterval: tick });
+        // The buffer only holds what is stored or edited, so the values in
+        // effect are the base and an edit wins over them.
+        var lg = h.shown('logger', cfg);
+        var sch = h.shown('scheduler', { tickInterval: tick });
 
         var $log = h.card({ icon: '✎', title: sc.nsName('logger') });
         $log.append(h.field('Write the log to a file', S.kernel.files.stewardPath('logs') + '/console.log',
-            loggerToggle(h, 'fileEnabled', 'Write the log to a file', cfg.fileEnabled)));
+            loggerToggle(h, 'fileEnabled', 'Write the log to a file', lg.fileEnabled)));
         $log.append(h.field('Include debug lines', 'Much more detail, for bug reports',
-            loggerToggle(h, 'debugEnabled', 'Include debug lines', cfg.debugEnabled)));
+            loggerToggle(h, 'debugEnabled', 'Include debug lines', lg.debugEnabled)));
         $log.append(h.field('Start a new file every day', null,
-            loggerToggle(h, 'rotateDaily', 'Start a new file every day', cfg.rotateDaily)));
+            loggerToggle(h, 'rotateDaily', 'Start a new file every day', lg.rotateDaily)));
         $log.append(h.field('Start a new file at', '0 turns this off', h.number({
-            ns: 'logger', path: 'maxFileSizeKB', value: shown(h, 'logger', 'maxFileSizeKB', cfg.maxFileSizeKB),
+            ns: 'logger', path: 'maxFileSizeKB', value: lg.maxFileSizeKB,
             parse: parse.sizeKB, show: show.mb, unit: 'MB', label: 'Start a new file at'
         })));
         $log.append(h.field('Old files to keep', '0 keeps none', h.number({
-            ns: 'logger', path: 'keepRotated', value: shown(h, 'logger', 'keepRotated', cfg.keepRotated),
+            ns: 'logger', path: 'keepRotated', value: lg.keepRotated,
             parse: parse.whole, unit: 'files', label: 'Old files to keep'
         })));
         $main.append($log);
@@ -132,7 +131,7 @@
         $sched.append(h.field('Check for work every',
             'At least ' + show.seconds(S.kernel.TIMEOUTS.TICK_INTERVAL_MIN_MS) + ' s. Lower is faster but busier.',
             h.number({
-                ns: 'scheduler', path: 'tickInterval', value: shown(h, 'scheduler', 'tickInterval', tick),
+                ns: 'scheduler', path: 'tickInterval', value: sch.tickInterval,
                 parse: parse.tickMs, show: show.seconds, unit: 's', label: 'Check for work every'
             })));
         $main.append($sched);

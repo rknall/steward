@@ -31,18 +31,13 @@
     function M() { return S.modules.production; }
 
     function readSettings() {
-        var fn = M().readSettings;
-        return (typeof fn === 'function' ? fn() : null) || M().defaultSettings || {};
+        return M().readSettings() || {};
     }
 
+    // Only the top-level flags are read from it, so the buffer lies over the
+    // merged settings without the per-building rows.
     function shownSettings(h) {
-        var base = readSettings();
-        var buf = h.settings('production') || {};
-        var out = {};
-        var key;
-        for (key in base) out[key] = base[key];
-        for (key in buf)  out[key] = buf[key];
-        return out;
+        return h.shown('production', readSettings());
     }
 
     function num(v, fallback) {

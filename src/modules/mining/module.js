@@ -69,38 +69,12 @@
         resumeText: 'buffing resumes'
     });
 
+    // Deposit rows merge per field: a stored row missing fields (an
+    // older build, a hand-edited file) still reads whole, the gaps filled
+    // from its default row. Types without a default row stay as stored.
     function mergeSettings() {
-        var stored = S.kernel.settings.read('mining') || {};
-        var defaults = S.modules.mining.defaultSettings || {};
-        var merged = {};
-        var key;
-        var field;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        // Deposit rows merge per field: a stored row missing fields (an
-        // older build, a hand-edited file) still reads whole, the gaps
-        // filled from its default row. Types without a default row stay
-        // as stored.
-        var depMerged = {};
-        var defaultDeps = defaults.deposits || {};
-        var storedDeps  = stored.deposits  || {};
-        for (key in defaultDeps) {
-            var row = {};
-            var defRow = defaultDeps[key] || {};
-            var storedRow = storedDeps[key];
-            for (field in defRow) row[field] = defRow[field];
-            if (storedRow !== null && typeof storedRow === 'object') {
-                for (field in storedRow) row[field] = storedRow[field];
-            }
-            depMerged[key] = row;
-        }
-        for (key in storedDeps) {
-            if (!Object.prototype.hasOwnProperty.call(defaultDeps, key)) {
-                depMerged[key] = storedDeps[key];
-            }
-        }
-        merged.deposits = depMerged;
-        return merged;
+        return S.kernel.settings.merged('mining',
+            S.modules.mining.defaultSettings, { rows: { deposits: 'fields' } });
     }
 
     // Every reader, this file included, goes through the export, so the
@@ -195,7 +169,8 @@
             buffStock:          {},     // buff name -> stock left this pass
             buffsCurrent:       buffSettingsCurrent(),
             buildStop:          false,  // build breaker open, no probe left this pass
-            actionDelay:       (typeof s.actionDelay === 'number') ? s.actionDelay : 1500
+            actionDelay:       (typeof s.actionDelay === 'number')
+                ? s.actionDelay : S.modules.mining.defaultSettings.actionDelay
         };
     }
 
@@ -407,7 +382,7 @@
 
         var settings  = readSettings();
         var threshold = (typeof settings.pauseThreshold === 'number')
-            ? settings.pauseThreshold : 50;
+            ? settings.pauseThreshold : S.modules.mining.defaultSettings.pauseThreshold;
 
         // Walk deposits (not buildings) so we can read GetAmount() for the
         // threshold gate. Mines on depleted shells (no on-map deposit) are

@@ -67,12 +67,11 @@
         retrainSettlersOnly: false
     };
 
-    // The stored settings with the defaults filled in (the defaults alone
-    // while templates.js is not loaded yet), so every reader below sees the
-    // same values.
+    // The stored settings with the defaults filled in. templates.js owns the
+    // reader and is read at call time, so every reader below sees the same
+    // values.
     function settingsNow() {
-        var a = S.modules.adventures;
-        return a.templates && a.templates.settings ? a.templates.settings() : a.defaultSettings;
+        return S.modules.adventures.templates.settings();
     }
 
     // A stored limit that is not a usable minute count falls back to the

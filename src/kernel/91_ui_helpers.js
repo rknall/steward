@@ -11,6 +11,7 @@
  *   h.update('collect', { enabled: true });          // patch + mark dirty
  *   h.set('mining', 'deposits.BronzeOre.max', 4);    // nested write
  *   h.get('mining', 'deposits.BronzeOre.max');       // nested read
+ *   h.shown('mining', base, { deposits: 'fields' })  // buffer over merged
  *
  * The buffer is committed when the user presses Save; Close discards.
  *
@@ -106,6 +107,59 @@
             o = o[keys[i]];
         }
         return o;
+    }
+
+    function isObj(v) { return v !== null && typeof v === 'object'; }
+
+    // One row map of the shown settings: baseRows from the merged settings,
+    // bufRows from the buffer. Only object rows in the buffer count, since a
+    // control only ever writes an object row.
+    function overlayRows(baseRows, bufRows, mode) {
+        var m = {};
+        var n, f;
+        for (n in baseRows) m[n] = baseRows[n];
+        for (n in bufRows) {
+            var buffered = bufRows[n];
+            if (!isObj(buffered)) continue;
+            if (mode === 'replace') {
+                m[n] = buffered;
+                continue;
+            }
+            // 'fields': a partly edited row keeps the fields the buffer lacks.
+            var row = {};
+            var under = isObj(baseRows[n]) ? baseRows[n] : {};
+            for (f in under) row[f] = under[f];
+            for (f in buffered) {
+                if (typeof buffered[f] !== 'undefined') row[f] = buffered[f];
+            }
+            m[n] = row;
+        }
+        return m;
+    }
+
+    // What a view draws: `base` (the module's merged settings, or whatever
+    // is in effect) with the unsaved buffer of `ns` laid over it key by key.
+    // A buffered undefined counts as not edited, like h.get. `rows` names
+    // row maps to overlay row by row instead of whole: { key: 'fields' }
+    // keeps a partly edited row's other fields, { key: 'replace' } lets a
+    // buffered row replace its base row. Returns a copy; the buffer is only
+    // read.
+    function shown(ns, base, rows) {
+        var b = isObj(base) ? base : {};
+        var buf = S.kernel.ui.bufferedSettings(ns);
+        if (!isObj(buf)) buf = {};
+        var out = {};
+        var k;
+        for (k in b) out[k] = b[k];
+        for (k in buf) {
+            if (typeof buf[k] !== 'undefined') out[k] = buf[k];
+        }
+        var r = rows || {};
+        for (k in r) {
+            if (!Object.prototype.hasOwnProperty.call(r, k)) continue;
+            out[k] = overlayRows(isObj(b[k]) ? b[k] : {}, isObj(buf[k]) ? buf[k] : {}, r[k]);
+        }
+        return S.kernel.settings.copy(out);
     }
 
     function isChanged(ns, path) {
@@ -719,6 +773,7 @@
         READING:   READING,
         set:       set,
         get:       get,
+        shown:     shown,
         settings:  settings,
         update:    update,
         escape:    escape,

@@ -18,13 +18,7 @@
     if (!S.modules.collect) S.modules.collect = {};
 
     function readSettings() {
-        var stored = S.kernel.settings.read('collect') || {};
-        var defaults = S.modules.collect.defaultSettings || {};
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        return merged;
+        return S.kernel.settings.merged('collect', S.modules.collect.defaultSettings);
     }
 
     // Walk every building on the current zone and log whether the host's

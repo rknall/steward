@@ -5,7 +5,7 @@
  *
  *   {
  *     enabled:       false,
- *     dispatchDelay: 1500,
+ *     dispatchDelay: QUEUE_ACTION_GAP_MS (1500),
  *     removeDepleted: false,
  *     deposits:      { <Name>: { enabled: bool, max: int, kinds: [GetType] }, ... },
  *     overrides:     { '<geologist name>': ['Stone', 'Marble'] }
@@ -15,9 +15,11 @@
  * the managed types on the home island, so their grid frees up for new
  * searches. Deposits that still hold ore are never touched.
  *
- * Per-deposit `max` defaults mirror autoTSO's Deposits.data (user_auto.js
- * 1086-1095) — values shipped against the live host. Adjust per-zone
- * or per-playstyle in the dashboard.
+ * The default `deposits` map has one row per deposit type, under the names
+ * and in the order of core/deposits/types.js, so the type list is not
+ * written twice. Per-deposit `max` defaults mirror autoTSO's Deposits.data
+ * (user_auto.js 1086-1095) — values shipped against the live host. Adjust
+ * per-zone or per-playstyle in the dashboard.
  *
  * `overrides` is keyed by the cleaned display name (HTML stripped) and
  * pins the named geologist to a deposit-name list — the routing
@@ -38,22 +40,36 @@
 
     if (!S.modules.geologists) S.modules.geologists = {};
 
+    // How many deposits of each type to keep on the map by default, keyed
+    // by deposit name. The keys and their order come from
+    // core/deposits/types.js; this table holds only the per-type numbers.
+    var DEFAULT_MAX = {
+        Stone:        8,
+        BronzeOre:    6,
+        Marble:      10,
+        IronOre:     19,
+        GoldOre:      9,
+        Coal:         6,
+        Granite:      6,
+        TitaniumOre:  4,
+        Salpeter:     4
+    };
+
+    function defaultDeposits() {
+        var out = {};
+        var types = S.core.deposits.types();
+        for (var i = 0; i < types.length; i++) {
+            out[types[i].name] = { enabled: true, max: DEFAULT_MAX[types[i].name] };
+        }
+        return out;
+    }
+
     S.modules.geologists.defaultSettings = {
         enabled:       false,
-        dispatchDelay: 1500,
+        dispatchDelay: S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS,
         removeDepleted: false,
 
-        deposits: {
-            Stone:       { enabled: true, max:  8 },
-            BronzeOre:   { enabled: true, max:  6 },
-            Marble:      { enabled: true, max: 10 },
-            IronOre:     { enabled: true, max: 19 },
-            GoldOre:     { enabled: true, max:  9 },
-            Coal:        { enabled: true, max:  6 },
-            Granite:     { enabled: true, max:  6 },
-            TitaniumOre: { enabled: true, max:  4 },
-            Salpeter:    { enabled: true, max:  4 }
-        },
+        deposits: defaultDeposits(),
 
         overrides: {
             // 'Stone Geologist Foo': ['Stone'],

@@ -16,13 +16,7 @@
     var filter = 'all';
 
     function readSettings() {
-        var stored = S.kernel.settings.read('explorers') || {};
-        var defaults = S.modules.explorers.defaultSettings || {};
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        return merged;
+        return S.kernel.settings.merged('explorers', S.modules.explorers.defaultSettings);
     }
 
     function writeSettings(s) {

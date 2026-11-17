@@ -26,7 +26,7 @@ Everything attaches to `Steward`:
 Steward
 ├── kernel
 │   ├── log, warn, error
-│   ├── settings        ← read(module), write(module, obj), replaceAll(map) (replace every steward namespace, drops absent ones)
+│   ├── settings        ← read(module), write(module, obj), replaceAll(map) (replace every steward namespace, drops absent ones), merged(module, defaults, opts) (stored over defaults, fresh copy), copy(v) (JSON deep copy)
 │   ├── files           ← file API: writableDir, readText, writeText, readBytes, writeBytes, list, remove, browse
 │   ├── semver          ← parse, compare, running, isNewer, autoInstallable (version strings, VersionKind)
 │   ├── sha256          ← binary, utf8, bytes, toBinary (digest of a string or an air.ByteArray)

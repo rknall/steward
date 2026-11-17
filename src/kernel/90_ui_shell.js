@@ -778,10 +778,9 @@
 
     function isPlainObject(v) { return S.kernel.is.plainObject(v); }
 
-    // Settings are JSON in storage, so a JSON round trip is a full copy.
+    // The settings store owns the one deep copy of a settings value.
     function deepCopy(v) {
-        if (v === null || typeof v !== 'object') return v;
-        return JSON.parse(JSON.stringify(v));
+        return S.kernel.settings.copy(v);
     }
 
     function hasOwn(o, k) { return S.kernel.is.has(o, k); }

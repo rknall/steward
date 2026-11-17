@@ -7,7 +7,7 @@
  *   {
  *     enabled:       true,
  *     overrides:     { '<explorer name>': 'TaskExplorerShort', ... },
- *     dispatchDelay: 1500      // ms between queued sends
+ *     dispatchDelay: QUEUE_ACTION_GAP_MS (1500)  // ms between queued sends
  *   }
  *
  * Naming the override map by explorer NAME (not by GetType) is intentional:
@@ -30,7 +30,7 @@
         // Delay between dispatch actions. Match the kernel's default queue
         // gap so a roster of 300 explorers takes ~7-8 minutes rather than
         // 25. The kernel still pace-protects against server flooding.
-        dispatchDelay: 1500,
+        dispatchDelay: S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS,
         // When a treasure event is in its `_Content` phase, force every
         // owned explorer onto a treasure dispatch — including ones whose
         // trait would otherwise lean toward adventure (Royal, Love Struck,

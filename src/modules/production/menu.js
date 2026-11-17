@@ -40,15 +40,14 @@
 
     // The settings with their defaults applied, because a key never stored
     // (standing and buffs default to on) must read as its default and flip
-    // from there. Falls back to the raw stored object when the module part
-    // that merges them is not loaded.
+    // from there. A throwing read shows as no settings, so the menu still draws.
     function current() {
         try {
-            if (typeof M().readSettings === 'function') return M().readSettings() || {};
+            return M().readSettings() || {};
         } catch (e) {
             S.kernel.error('production', 'readSettings threw:', e);
         }
-        return S.kernel.settings.read(OWNER) || {};
+        return {};
     }
 
     function mark(on) { return on ? '✓ ' : '✕ '; }
