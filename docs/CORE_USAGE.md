@@ -256,6 +256,10 @@ Several owners order into the same host queues, so none of them spends the wareh
 - `Steward.core.production.producing(b)` says whether a queue building is producing: true (unfinished head, queue runs at this building), false (empty queue, finished head, or the queue runs at another building of the type), null when unreadable. Queue buildings only. `Steward.core.buildings.buffBlock(b)` uses it for a building with a `productionQueue` and no ResourceCreation; never compare a queue building against `productionState`.
 - `Steward.core.buildings.productionState(b)` and `Steward.core.buildings.MISSING_INPUT_STATE` read the production state. Compare against the constant, never a bare number.
 
+## Rule 6.6: a send that must never go out twice
+
+Run it through `S.core.ledger.attempt(def, { key, owner, name }, onDone)`, never straight through `S.core.actions.attempt`. The ledger writes the key to `steward/state/ledger.json` before the host call, so a late answer, a reload or a restart cannot cause a second send. Build the key with `S.core.ledger.key(kind, zone, target)`, register the owner once with `S.core.ledger.register`, and check `S.core.ledger.blocked(key)` before queuing: any non-null value, including `'unread'`, means do not queue. Call `reread(key, def)` at plan time to settle an unseen entry. A def frees its key only by returning a proof from `failedProof(base)`, never from a failed read.
+
 ## Rule 7: wrap risky calls
 
 Every game-API call can throw — the API surface is large and not all of it is documented. Wrap calls in try/catch and log the failure:

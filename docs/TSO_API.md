@@ -370,7 +370,7 @@ Checked live on 2026-11-09 with the steward "Dump mine buffs" diagnostic
   `IsInConstructionMode()` and `IsInDestruction()`. All three are present live on every
   building, and all read false. A value of true was not seen. An absent method is skipped; a
   throwing one blocks the building.
-- Depleted mines are separate building types (`MineDepletedDeposit*`), not seen live.
+- Depleted mines are separate building types (`MineDepletedDeposit*`), not seen live. See "Rebuilding a depleted well or field".
 - Apply is server action 61 with the building grid and the buff entry uid:
   `sendAction(61, 0, <building grid>, 0, <entry uid>)`. Confirmed by verified applies. It is
   sent once and never retried, because a second send could spend a second buff when the first
@@ -378,6 +378,23 @@ Checked live on 2026-11-09 with the steward "Dump mine buffs" diagnostic
 - Applied means `productionBuff` is non-null within 15 s. Confirmed by verified applies: each
   one was seen inside the window after a single send. `mBuffs_vector` has length 1 on a buffed
   building; it is recorded in the dump only. A stock drop alone is not treated as success.
+
+### Rebuilding a depleted well or field
+
+None of this was seen live; the first real rebuild's final log line records the facts below.
+
+- An exhausted well or field becomes the shell `MineDepletedDepositWater` (well) or
+  `MineDepletedDepositCorn` (field). Not seen live.
+- `mStreetDataMap.IsADepletedDeposit(building)` reads whether a shell is depleted. Not seen
+  live. An absent method lets the shell name stand as the fact.
+- The rebuild is server action 50 on the shell's grid with the building number from the
+  module's list: `sendAction(50, <building id>, <grid>, 0, null)`. Not seen live. The id is
+  the list's number; `buildingGroup.GetNrFromName` is only logged as a check.
+- `mStreetDataMap.SetPrePlaceBuildingGridPos` exists but is not called: the rebuild is sent
+  without a pre-place, and the log records whether the grid changed anyway. Not seen live.
+- Verified when the grid's occupant has another name, is under construction, or the shell
+  reads not depleted. An emptied grid does not count and the build queue is not a signal,
+  because the construction site's name is not known. Not seen live.
 
 ## Timed production
 
