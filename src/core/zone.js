@@ -4,9 +4,21 @@
  * Thin wrappers around game.gi for current-zone identity and navigation.
  * Modules consult these instead of reaching into game.gi directly so the
  * abstraction can absorb client API changes in one place.
+ *
+ * view() is the readiness-aware read of the viewed zone: a Result that says
+ * whether the zone is loading (notReady), cannot be read (unreadable) or is
+ * known (ok, { id, home, adventure }). current/id/isHome/isAdventure keep their
+ * plain contracts, where a failed read looks like "not home"; a caller that
+ * must not act on such a guess reads view() instead.
  */
 
 (function (S) {
+
+    var R = S.kernel.read;
+
+    // A precheck refusal that only means the zone could not be read and nothing
+    // went out, so callers can treat it as "try again", not as a decision.
+    var UNREADABLE = R.readRefusal('zone unreadable');
 
     function gi() {
         try {
@@ -51,6 +63,27 @@
             if (z && z.mAdventureName && z.mAdventureName !== 'Home') return true;
         } catch (e2) { /* swallow */ }
         return false;
+    }
+
+    // A read that throws is left to the read engine, which reports it as
+    // unreadable and does not memoize it, so the next read in the pass retries.
+    function readView() {
+        var g = gi();
+        if (!g) return R.notReady('no game.gi');
+        // The player zone is null while the client loads a zone; the other
+        // members may still describe the previous one.
+        if (!g.mCurrentPlayerZone) return R.notReady('zone loading');
+        var zid = g.mCurrentViewedZoneID;
+        if (typeof zid !== 'number') return R.unreadable('viewed zone id is not a number');
+        if (typeof g.isOnHomzone !== 'function') return R.unreadable('isOnHomzone missing');
+        var home = !!g.isOnHomzone();
+        return R.ok({ id: zid, home: home, adventure: isAdventure() }, zid);
+    }
+
+    R.source('zone.view', { read: readView, scope: 'pass' });
+
+    function view(opts) {
+        return R.get('zone.view', undefined, opts);
     }
 
     function homePlayer() {
@@ -134,10 +167,12 @@
     }
 
     // Grids of the landing fields: where the client lets a general be placed on
-    // an adventure map. An unreadable vector yields an empty list, so a caller
-    // finds no grid.
+    // an adventure map. An unreadable vector, or a zone view that is not ok,
+    // yields an empty list, so a caller finds no grid: while the zone loads or
+    // cannot be read, the street data may still belong to the previous zone.
     function landingGrids() {
         var out = [];
+        if (!R.isOk(view())) return out;
         try {
             if (typeof game === 'undefined' || !game || !game.zone) return out;
             var sdm = game.zone.mStreetDataMap;
@@ -168,7 +203,9 @@
         viewedPlayer: viewedPlayer,
         visit:        visit,
         scrollTo:     scrollTo,
-        landingGrids: landingGrids
+        landingGrids: landingGrids,
+        view:         view,
+        UNREADABLE:   UNREADABLE
     };
 
 }(Steward));

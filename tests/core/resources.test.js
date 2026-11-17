@@ -191,3 +191,44 @@ t.test('uncategorized is null when the host lists cannot be read', function () {
     H.host.game.def = function () { throw new Error('boom'); };
     t.assert.strictEqual(R.uncategorized(), null);
 });
+
+t.test('listRead is partial when an item has no name', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withResources(H, {
+        GetPlayerResources_vector: function () {
+            return [{ name_string: 'Wood', amount: 5 }, { amount: 1 }, null];
+        }
+    });
+
+    var r = H.Steward.core.resources.listRead();
+    t.assert.strictEqual(r.state, 'partial');
+    t.assert.strictEqual(r.lost, 2);
+    t.assert.deepStrictEqual(JSON.parse(JSON.stringify(r.value)), [{ name: 'Wood', amount: 5 }]);
+});
+
+t.test('list keeps the readable entries', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withResources(H, {
+        GetPlayerResources_vector: function () {
+            return [{ name_string: 'Wood', amount: 5 }, { name_string: '', amount: 1 }, { name_string: 'Gold', amount: 'x' }];
+        }
+    });
+
+    var R = H.Steward.core.resources;
+    t.assert.deepStrictEqual(JSON.parse(JSON.stringify(R.list())), [
+        { name: 'Wood', amount: 5 },
+        { name: 'Gold', amount: null }
+    ]);
+    t.assert.strictEqual(R.listRead().state, 'partial');
+});
+
+t.test('listRead is ok when every item is readable and unreadable without the host list', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.listRead().state, 'unreadable');
+    t.assert.strictEqual(R.list(), null);
+
+    withResources(H, { GetPlayerResources_vector: function () { return []; } });
+    t.assert.strictEqual(R.listRead().state, 'ok');
+    t.assert.strictEqual(JSON.stringify(R.list()), '[]');
+});

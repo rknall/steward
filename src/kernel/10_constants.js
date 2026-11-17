@@ -42,7 +42,9 @@
         HEARTBEAT_MS:            900000,   // scheduler heartbeat line
         QUEUE_MODAL_STALE_MS:    600000,   // a deferral this old warns once and shows in the menu status
         TICK_INTERVAL_MIN_MS:    10000,    // lowest tick the Settings screen accepts
-        PORTRAIT_RETRY_MS:       1000      // one redraw of a table whose portraits were not decoded yet
+        PORTRAIT_RETRY_MS:       1000,     // one redraw of a table whose portraits were not decoded yet
+        READ_RETRY_MS:           2000,     // wake of a module waiting on a read; gap between redraws of an unsettled view
+        READ_MAX_MS:             60000     // default time a read wait lasts before it expires
     };
 
     S.kernel.LIMITS = {
@@ -50,7 +52,9 @@
         LOG_FILE_MAX_KB_DEFAULT: 5120,     // rotate console.log at 5 MB
         LOG_KEEP_ROTATED_DEFAULT: 7,       // numbered old files kept beside console.log
         LOG_ROTATE_DAILY_DEFAULT: true,    // rotate at the first write after midnight
-        TICK_GAP_FACTOR:         3         // a tick later than this many intervals is a gap
+        TICK_GAP_FACTOR:         3,        // a tick later than this many intervals is a gap
+        READ_WAIT_TRIES:         3,        // default non-ready reads before a read wait may expire
+        READ_REDRAWS:            3         // most redraws of one view whose reads stay unsettled
     };
 
 }(Steward));

@@ -67,35 +67,54 @@
         return read('GetFree');
     }
 
-    // Every resource the player holds, as [{ name, amount }]. An amount the
-    // host does not give as a number is null, never 0. Returns null when the
-    // host, the method or the vector is missing, or the call threw.
-    function list() {
+    // One read of the player's resources: ok with [{ name, amount }] when every
+    // item is readable, partial when some item has no name (lost counts them,
+    // so a missing resource is not proof the player lacks it), unreadable when
+    // the host, the method or the vector is missing or the call threw. An
+    // amount the host does not give as a number is null, never 0.
+    function readList() {
         try {
-            if (typeof game === 'undefined' || !game || typeof game.getResources !== 'function') return null;
+            if (typeof game === 'undefined' || !game || typeof game.getResources !== 'function') {
+                return S.kernel.read.unreadable('no resources host');
+            }
             var resources = game.getResources();
-            if (!resources) return null;
+            if (!resources) return S.kernel.read.unreadable('no resources');
             var fn = resources.GetPlayerResources_vector;
-            if (typeof fn !== 'function') return null;
+            if (typeof fn !== 'function') return S.kernel.read.unreadable('no resource list method');
             var vec = fn.call(resources, '');
-            if (!vec || typeof vec.length !== 'number') return null;
+            if (!vec || typeof vec.length !== 'number') return S.kernel.read.unreadable('no resource list');
             var out = [];
+            var lost = 0;
             for (var i = 0; i < vec.length; i++) {
                 var item = vec[i];
-                if (!item) continue;
+                if (!item) { lost++; continue; }
                 var name = item.name_string;
-                if (typeof name !== 'string' || !name) continue;
+                if (typeof name !== 'string' || !name) { lost++; continue; }
                 var amt = item.amount;
                 out.push({ name: name, amount: (typeof amt === 'number' && !isNaN(amt)) ? amt : null });
             }
-            return out;
+            return lost ? S.kernel.read.partial(out, lost, 'unnamed resource') : S.kernel.read.ok(out);
         } catch (e) {
             if (!warnedThrow) {
                 warnedThrow = true;
                 S.kernel.warn('resources', 'GetPlayerResources_vector threw:', e);
             }
-            return null;
+            return S.kernel.read.unreadable('threw: ' + ((e && e.message) ? e.message : String(e)));
         }
+    }
+
+    S.kernel.read.source('resources.list', { read: readList, scope: 'pass' });
+
+    // The list read as a Result; opts as for S.kernel.read.get.
+    function listRead(opts) {
+        return S.kernel.read.get('resources.list', undefined, opts);
+    }
+
+    // Every resource the player holds, as [{ name, amount }]: the readable
+    // entries, also when some were lost. null when the list cannot be read.
+    function list() {
+        var r = listRead();
+        return S.kernel.read.has(r) ? r.value : null;
     }
 
     // The economy default definition of one resource, or null when it cannot
@@ -177,6 +196,7 @@
     S.core.resources.freePopulation = freePopulation;
     S.core.resources.POPULATION     = POPULATION;
     S.core.resources.list           = list;
+    S.core.resources.listRead       = listRead;
     S.core.resources.eventName      = eventName;
     S.core.resources.uncategorized  = uncategorized;
 

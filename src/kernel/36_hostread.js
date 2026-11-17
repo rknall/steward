@@ -18,6 +18,14 @@
  * is shared by every reader in the pass, so it is read-only to all of them.
  * Keys are namespaced '<area>.<what>' or '<area>.<what>|<arg>'.
  *
+ * forget(prefix) drops the open pass's keys that start with prefix, for a
+ * caller that changed the game inside the pass and needs the next read fresh.
+ * markUnsettled() records that some read of the open pass was not complete;
+ * unsettled() tells a view at the end of its pass that it drew from partial
+ * facts and may redraw later. The flag belongs to the outermost pass: it resets
+ * when that pass opens and reads false outside a pass. Both are no-ops outside
+ * a pass, where nothing is memoized and no view is being drawn.
+ *
  * Bundle slot: kernel, after 35_host.js and before 40_registry.js. It needs
  * only the namespace; core and modules call it at run time. No state survives
  * a pass, so a script reload never inherits a memo.
@@ -28,6 +36,9 @@
 
     // The open pass's memo, or null when no pass is open.
     var memo = null;
+
+    // Whether a read of the open pass came back incomplete.
+    var unsettledFlag = false;
 
     function call(o, m) {
         if (!o) return undefined;
@@ -41,10 +52,12 @@
     function pass(fn) {
         if (memo !== null) return fn();
         memo = {};
+        unsettledFlag = false;
         try {
             return fn();
         } finally {
             memo = null;
+            unsettledFlag = false;
         }
     }
 
@@ -64,6 +77,33 @@
         return memo !== null;
     }
 
-    S.kernel.hostRead = { call: call, pass: pass, cached: cached, inPass: inPass };
+    // Keys are collected first so deleting never disturbs the walk.
+    function forget(prefix) {
+        if (memo === null) return;
+        var p = String(prefix);
+        var drop = [];
+        for (var k in memo) {
+            if (Object.prototype.hasOwnProperty.call(memo, k) && k.indexOf(p) === 0) drop.push(k);
+        }
+        for (var i = 0; i < drop.length; i++) delete memo[drop[i]];
+    }
+
+    function markUnsettled() {
+        if (memo !== null) unsettledFlag = true;
+    }
+
+    function unsettled() {
+        return memo !== null && unsettledFlag;
+    }
+
+    S.kernel.hostRead = {
+        call: call,
+        pass: pass,
+        cached: cached,
+        inPass: inPass,
+        forget: forget,
+        markUnsettled: markUnsettled,
+        unsettled: unsettled
+    };
 
 }(Steward));

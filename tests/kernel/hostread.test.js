@@ -164,3 +164,50 @@ t.test('keys that shadow Object.prototype members are plain keys', function () {
     });
     t.assert.strictEqual(c.n, 2);
 });
+
+t.test('forget drops keys by prefix', function () {
+    var R = hostRead();
+    var a = counter('A');
+    var b = counter('B');
+    var c = counter('C');
+    R.pass(function () {
+        R.cached('buildings.list|1', a.fn);
+        R.cached('buildings.nameIndex|1', b.fn);
+        R.cached('quests.pool|1', c.fn);
+        R.forget('buildings.');
+        R.cached('buildings.list|1', a.fn);
+        R.cached('buildings.nameIndex|1', b.fn);
+        R.cached('quests.pool|1', c.fn);
+    });
+    t.assert.strictEqual(a.n, 2);
+    t.assert.strictEqual(b.n, 2);
+    t.assert.strictEqual(c.n, 1);
+});
+
+t.test('forget outside a pass is a no-op', function () {
+    var R = hostRead();
+    R.forget('x.');
+    t.assert.strictEqual(R.inPass(), false);
+});
+
+t.test('markUnsettled sets the flag of the open pass only', function () {
+    var R = hostRead();
+    R.markUnsettled();
+    t.assert.strictEqual(R.unsettled(), false);
+    R.pass(function () {
+        t.assert.strictEqual(R.unsettled(), false);
+        R.pass(function () { R.markUnsettled(); });
+        t.assert.strictEqual(R.unsettled(), true);
+    });
+    t.assert.strictEqual(R.unsettled(), false);
+});
+
+t.test('unsettled resets on a new outer pass', function () {
+    var R = hostRead();
+    R.pass(function () { R.markUnsettled(); });
+    R.pass(function () { t.assert.strictEqual(R.unsettled(), false); });
+    t.assert.throws(function () {
+        R.pass(function () { R.markUnsettled(); throw new Error('boom'); });
+    }, /boom/);
+    R.pass(function () { t.assert.strictEqual(R.unsettled(), false); });
+});
