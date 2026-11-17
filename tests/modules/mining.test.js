@@ -915,9 +915,11 @@ function freshDepositZone(H) {
     var depo = H.zone.deposit({ name: 'IronOre', grid: 12 });
     var z = H.zone.zone()
         .deposits('IronOre', [depo])
+        .building(H.zone.building({ name: 'Woodcutter', grid: 99 }))  // so the building list reads
         .buildQueue(0, 4)
         .mountOnPlayer((H.host.game.gi.mCurrentPlayer = {}));
     H.host.game.gi.mCurrentPlayerZone = z.zone;
+    viewHome(H);
 }
 
 t.test('a level edit on a deposit row the store lacks saves the whole row', function () {
