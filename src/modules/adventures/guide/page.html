@@ -67,6 +67,37 @@
   </dl>
 </div>
 
+<div class="ug-story">
+  <p class="ug-want">You want to run several maps one after another, for example a short map while the generals of a long map travel home.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open <strong>Run templates&hellip;</strong> and switch the window from <strong>Templates</strong> to <strong>Queues</strong>.</li>
+      <li>Create a new queue and give it a <strong>Label</strong>. A queue without a label, or with a label another queue already uses, is refused at save.</li>
+      <li>Choose <strong>Add entry</strong>. The select lists your templates under <strong>Adventures</strong> and the built-in and own scenarios under <strong>Scenarios</strong>. Give each entry its own number of runs.</li>
+      <li>Set the options you want: loop the whole queue (with an optional limit on passes), start the next entry early, retrain, and what to do when an entry has no map.</li>
+      <li>Save the queue.</li>
+      <li>Go home, open <strong>~Steward~</strong> &rsaquo; <strong>Adventures</strong> and choose the queue in the <strong>Queues</strong> folder after <strong>Scenarios</strong>. A row reads the label and the number of entries, with the map count of the first entry. A row with a count of 0 is greyed out.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>The queue starts at its first entry. Steward asks only that entry's start questions (start wave for an open template map, start trip for an open scenario map) and does not ask how many runs, because each entry has its own count. When an entry's last run is done, the next entry begins by itself. The status line reads the queue label and the entry, for example <code>Short then long 2/3</code>, with the pass when the queue loops.</dd>
+  </dl>
+  <figure class="ug-shot" data-shot="adventures-queue-view.png"><div class="ug-shot-box">Screenshot to come</div><figcaption>The Queues view of the Steward adventures window with a queue open.</figcaption></figure>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to move a queue on to its next entry without waiting for the current one.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Go home and pause the run, or wait for it to pause.</li>
+      <li>Open <strong>~Steward~</strong> &rsaquo; <strong>Adventures</strong> and choose <strong>Skip entry</strong>. It is greyed out unless a queue is paused and you are at home.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>If the entry's map has not been started yet, its remaining runs are dropped without counting and the next entry begins. If the queue paused because an entry could not start, that entry is stepped over and the queue carries on by itself. If the next entry cannot begin either, a notice says why and the queue stays paused.</dd>
+  </dl>
+</div>
+
 <h2>Scenario runs</h2>
 
 <p>A scenario run plays a scenario adventure without generals. Each trip to the map applies items to their grids, picks up what the quests ask for and returns home to produce the next trip's items. Steward ships these scenarios, listed in the <strong>Scenarios</strong> folder, in a sub-folder per campaign when the adventure has one:</p>
@@ -96,6 +127,23 @@
 
 <p>For the exact file format and every rule, see the scenario notes in the repository documentation. Problems you may meet are collected on the <a href="troubleshooting.html">Troubleshooting</a> page.</p>
 
+<h2>Queues</h2>
+
+<p>A queue is a saved, ordered list of templates and scenarios, each with its own number of runs. It runs inside the normal run, so the same pauses, commands and restart handling apply.</p>
+
+<ul>
+  <li><strong>Hand-over.</strong> If the next entry's generals are not home yet, the queue waits for them. The 180 second wait after the last map holds across entries, so the next entry never starts a map too soon.</li>
+  <li><strong>Early start.</strong> With <strong>early</strong> on, the next entry starts while the generals of the finished template travel home, as long as it uses a different template or is a scenario. The finished entry then skips its retraining.</li>
+  <li><strong>Loop.</strong> A looping queue repeats from the first entry until you choose <strong>End repetition</strong> or <strong>Stop run</strong>, or until the pass limit you set is reached.</li>
+  <li><strong>No map left.</strong> With <strong>pause</strong>, an entry without a map pauses the queue, as a single run does. With <strong>skip</strong>, the entry is stepped over with a log line and a notice. If every entry lacks a map the queue pauses.</li>
+  <li><strong>Retrain.</strong> The queue can follow the <strong>Retrain lost troops</strong> setting, or force it on or off for every entry. A scenario entry retrains nothing either way.</li>
+  <li><strong>Edits.</strong> A running queue uses its own copy. Changes you save apply at the next start, and the edit view warns you about it.</li>
+  <li><strong>Restart.</strong> A client restart in the middle of a queue resumes on the entry it was on.</li>
+  <li><strong>Broken entries.</strong> An entry whose template or scenario is gone, or of a kind this build does not know, stops the queue from starting until you remove it.</li>
+</ul>
+
+<p>Each queue is its own file in the <code>adventures/queues</code> folder of the steward data folder. For the file format and every rule, see the queue notes (<code>docs/QUEUES.md</code>) in the repository documentation.</p>
+
 <h2>Wave runs</h2>
 
 <p>A wave run plays the waves of your template one after the other. Within a wave the attack and buff lines go out in file order: the first at once, and each later one after its own delay.</p>
@@ -114,7 +162,7 @@
 
 <h2>Settings</h2>
 
-<p>These settings are in the <strong>Adventures</strong> group of the <strong>Settings</strong> screen. They are saved with the screen's own save button. Run templates are not settings: each one is its own file.</p>
+<p>These settings are in the <strong>Adventures</strong> group of the <strong>Settings</strong> screen. They are saved with the screen's own save button. Run templates and queues are not settings: each one is its own file.</p>
 
 <div class="ug-set">
   <h3><code>lastDir</code></h3>
@@ -133,7 +181,7 @@
 <div class="ug-set">
   <h3><code>retrain</code></h3>
   <p class="ug-def">Default: off</p>
-  <p>The <strong>Retrain lost troops</strong> switch, in the card <strong>After each map</strong>: orders the troops lost on a map back, for every run. It is read again each time a run reaches the retrain step, so changing it takes effect in the middle of a run.</p>
+  <p>The <strong>Retrain lost troops</strong> switch, in the card <strong>After each map</strong>: orders the troops lost on a map back, for every run. It is read again each time a run reaches the retrain step, so changing it takes effect in the middle of a run. A running queue can override it with its own retrain option.</p>
   <p><em>Change it when</em> you want every run to restore its army without your help.</p>
 </div>
 
