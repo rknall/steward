@@ -15,6 +15,8 @@ Modular automation framework for [The Settlers Online](https://www.thesettlerson
 
 Releases are built and published by the Release workflow; the badge above shows the latest one.
 
+A full documentation for Steward is available [here](https://rknall.github.io/steward/)
+
 ## Thanks
 
 Steward stands on the work of others, and a big thank you goes to them:
