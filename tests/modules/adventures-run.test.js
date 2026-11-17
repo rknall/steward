@@ -3268,6 +3268,13 @@ function queueSetup(o) {
     S.core.adventures.zoneIdOf = function (adv) {
         return Object.prototype.hasOwnProperty.call(q.open, adv) ? q.open[adv] : null;
     };
+    // The own adventures from q.open; q.own = null reads as unreadable.
+    S.core.adventures.own = function () {
+        if (q.own === null) return null;
+        return Object.keys(q.open).map(function (adv) { return { name: adv, zoneId: q.open[adv] }; });
+    };
+    // No map for long: the gap before a map start is not in the way.
+    S.modules.adventures.runState.maps = { open: [], closedAt: null, sentAt: null };
     S.core.production.isProduceable = function () { return q.known; };
     S.modules.adventures.executor.check = function () {
         if (!q.listOk) return { listOk: false };
@@ -3471,7 +3478,13 @@ t.test('can().skipEntry: the cases before the map is out and at Next', function 
     assert.strictEqual(q.run.can().skipEntry, true, 'start map failed');
     r.marks = { map: { sentAt: 1, seen: true, sentOnce: true } };
     assert.strictEqual(q.run.can().skipEntry, false, 'map mark seen');
+    r.marks = { map: { sentAt: 1, seen: false, sentOnce: true } };
+    assert.strictEqual(q.run.can().skipEntry, false, 'map start sent, not seen: the map may be out');
     r.marks = {};
+    q.own = null;
+    assert.strictEqual(q.run.can().skipEntry, false, 'own adventures unreadable');
+    delete q.own;
+    assert.strictEqual(q.run.can().skipEntry, true, 'own adventures readable again');
     r.pause.reason = S.RunPause.NotObserved;
     assert.strictEqual(q.run.can().skipEntry, false, 'NotObserved at StartMap');
     r.pause.reason = S.RunPause.MapFailed;

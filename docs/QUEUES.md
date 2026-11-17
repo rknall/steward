@@ -76,6 +76,11 @@ When an entry's last run is done the run state machine hands over at Next:
 - **Early.** With `early` on, when a template entry finishes and the next
   entry uses a different template (or is a scenario), the finished entry's
   retrain is skipped and the next entry starts while the generals travel home.
+  It still waits the 180 s gap after the last map before its map start.
+- **Map gap.** Every entry's first run goes through the same Muster and
+  StartMap checks as a repeat: the 180 s gap after the last map (kept across
+  entries, Stop and restart) and no map start while the own adventures cannot
+  be read.
 - **Retrain.** The `retrain` option decides for the whole queue; `settings`
   reads the module setting as before.
 - **No map left.** With `noMap` `pause`, a missing map pauses at StartMap as
@@ -88,8 +93,8 @@ When an entry's last run is done the run state machine hands over at Next:
   run.
 - **Broken entry.** An entry that cannot start at hand-over (record missing,
   unknown kind, start check failed) pauses the queue at Next. Resume repeats
-  the hand-over; Skip entry steps over it. Definitions or the specialist list
-  not readable yet make the hand-over wait instead.
+  the hand-over; Skip entry steps over it. Definitions, the specialist list
+  or the own adventures not readable yet make the hand-over wait instead.
 
 Any pause pauses the queue; Resume continues the entry. A stop-type end stops
 the queue. End repetition ends the queue after the current run.
@@ -99,10 +104,10 @@ the queue. End repetition ends the queue after the current run.
 Command Skip entry in `~Steward~ > Adventures`, enabled only in a queue, paused
 and at home:
 
-- Before the entry's map is out (up to StartMap, map not open, and at StartMap
-  neither a not-observed pause nor a seen map mark): the entry's remaining runs
-  are dropped uncounted and the next entry begins. A scenario run paused at
-  Produce qualifies.
+- Before the entry's map is out (up to StartMap, the own adventures readable
+  and the map not among them, no map start sent, seen or not, and no
+  not-observed pause): the entry's remaining runs are dropped uncounted and
+  the next entry begins. A scenario run paused at Produce qualifies.
 - At Next with a broken-entry pause: that entry is stepped over and the run
   resumes by itself, so no separate Resume is needed.
 

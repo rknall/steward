@@ -51,6 +51,9 @@ function setup(o) {
     S.core.zone.id = function () { return null; };
     S.core.adventures.zoneIdOf = function () { return null; };
     S.core.adventures.ownOpen = function () { return []; };
+    S.core.adventures.own = function () { return q.own === null ? null : []; };
+    // No map for long: the gap before a map start is not in the way.
+    S.modules.adventures.runState.maps = { open: [], closedAt: null, sentAt: null };
     S.core.buffs.mapCounts = function () { return q.maps; };
     S.core.army.inventory = function () { return q.inv; };
     S.core.production.queued = function () { return 0; };
@@ -411,4 +414,39 @@ t.test('a single series is unchanged', function () {
     r = next(q);
     assert.strictEqual(r.status, S.RunStatus.Done);
     assert.strictEqual(req(q).finished, 2);
+});
+
+t.test('the next entry waits the map gap at Muster like any start, also after an early hand-over', function () {
+    var q = setup({ retrain: true });
+    var S = q.S;
+    startQueue(q, [['template', q.long, 1], ['scenario', 'twins', 1]], { early: true });
+    q.st.run().loadoutKeys = {};
+    assert.strictEqual(pass(q, S.RunStep.ArriveHome).step, S.RunStep.Next);
+    // The finished entry's map closed just now.
+    q.st.maps().closedAt = q.st.now();
+    var r = next(q);
+    assert.strictEqual(r.scenarioId, 'twins');
+    assert.strictEqual(r.step, S.RunStep.Muster);
+    r = pass(q);
+    assert.strictEqual(r.step, S.RunStep.Muster, 'held inside the gap');
+    assert.ok(/waiting 180 s after the last map/.test(logText(q)), logText(q));
+    q.st.maps().closedAt = q.st.now() - q.home.GAP_MS - 1;
+    r = pass(q);
+    assert.notStrictEqual(r.step, S.RunStep.Muster, 'past the gap the entry goes on');
+});
+
+t.test('an unreadable own adventures list waits at Next before a template entry, uncounted', function () {
+    var q = setup();
+    var S = q.S;
+    startQueue(q, [['scenario', 'twins', 1], ['template', q.short, 1]]);
+    q.own = null;
+    var r = next(q);
+    assert.strictEqual(r.step, S.RunStep.Next);
+    assert.strictEqual(r.scenarioId, 'twins');
+    assert.strictEqual(req(q).finished, 0, 'nothing counted while waiting');
+    assert.ok(/own adventures/.test(busyText(q) + logText(q)), busyText(q));
+    delete q.own;
+    r = next(q);
+    assert.strictEqual(r.templateId, q.short);
+    assert.strictEqual(r.step, S.RunStep.Muster);
 });

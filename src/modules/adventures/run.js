@@ -635,8 +635,9 @@
     // so its remaining runs go uncounted and the next entry begins), 'over'
     // (the hand-over paused on an entry that cannot begin) or null. Only in
     // a paused queue at home: the next entry begins at home. A map start that
-    // was seen, or that cannot be told apart from one (NotObserved), keeps
-    // the entry, since its map may be out.
+    // was sent at all, seen or not, keeps the entry, as does an own list that
+    // cannot be read: the map may be out, and a map start is never sent while
+    // the last one may be open.
     function skipCase(rs) {
         var req = rs.request;
         var r = rs.run;
@@ -645,10 +646,11 @@
         if (r.step === S.RunStep.Next && r.pause && r.pause.reason === S.RunPause.QueueEntry) return 'over';
         if (store().position(r.step) > store().position(S.RunStep.StartMap)) return null;
         if (!store().queueNext(req)) return null;
-        if (typeof S.core.adventures.zoneIdOf(r.adventure) === 'number') return null;
+        var list = store().ownRead();
+        if (list === null || S.core.adventures.entryOf(list, r.adventure)) return null;
         if (r.step === S.RunStep.StartMap && r.pause && r.pause.reason === S.RunPause.NotObserved) return null;
-        var m = loader() && loader().marked ? loader().marked(r, 'map') : null;
-        if (m && m.seen) return null;
+        var m = loader() && loader().marked ? loader().marked(r, store().MAP_MARK) : null;
+        if (m && (m.seen || typeof m.sentAt === 'number')) return null;
         return 'drop';
     }
 
