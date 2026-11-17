@@ -81,7 +81,7 @@
     var MAX_ROUNDS        = 2;         // action rounds per step before a pause
     var MAX_UNLOAD_CYCLES = 2;         // Supply -> Unload -> Supply cycles per load at home
     var READ_LAG_MS       = 10000;     // a verified effect may read this late; the old gap between two looks
-    var READ_MAX_MS       = 60000;     // a hold pauses after this long
+    var READ_MAX_MS       = S.kernel.TIMEOUTS.READ_MAX_MS;  // a hold pauses after this long; the one read-wait limit
     var MISSING_GRACE_MS  = READ_MAX_MS;  // a general stays gone this long before a pause
     var MISSING_GAP_MS    = 30000;     // a longer silence restarts that grace and is not counted as watched time
     var MARK_SETTLE_MS    = 30000;     // a step that closes the adventure waits this long before it sends
@@ -452,16 +452,18 @@
         return typeof round.doneAt === 'number' && now() - round.doneAt < READ_LAG_MS;
     }
 
-    // Whether a result is a first-step refusal that sent nothing: the general
-    // could not be read, the round's zone was no longer viewed, or the send
-    // made no host call (NOT_SENT). Either way the round had no effect. A ZONE_CHANGED result is normally already
+    // Whether a result is a first-step refusal that sent nothing: a read the
+    // precheck needed failed (a general, the viewed zone or the quest pool;
+    // each owner registers its reason as a read refusal, so the list has one
+    // home), the round's zone was no longer viewed, or the send made no host
+    // call (NOT_SENT). Either way the round had no effect. A ZONE_CHANGED result is normally already
     // discarded by record() (its zone differs from the round's), so this branch
     // is a defence for a result that still arrives. Only this exact form counts. A Failed 'retry
     // refused: ...' went out once, and taking it for no effect would send a
     // marked order again.
     function unreadable(res) {
         return !!res && res.status === S.ActionResult.Refused &&
-            (res.reason === S.core.specialists.UNREADABLE || res.reason === ZONE_CHANGED ||
+            (S.kernel.read.isReadRefusal(res.reason) || res.reason === ZONE_CHANGED ||
              res.reason === S.core.actions.NOT_SENT);
     }
 

@@ -112,13 +112,17 @@
     // Maps of `adventure` the player can run: star-menu stock plus one for an
     // own adventure already open. `pass` caches both reads, so a menu pass that
     // asks for every template reads the star menu and the open adventures once.
-    // Null while the star menu cannot be read: a null read is cached too, so one
-    // pass does not ask the host again for each template.
+    // Null while the star menu or the own adventures cannot be read: a null
+    // read is cached too, so one pass does not ask the host again for each
+    // template, and an unreadable open list never counts as "none open".
     function available(adventure, pass) {
         pass = pass || {};
         if (pass.maps === undefined) pass.maps = S.core.buffs.mapCounts();
-        if (!pass.open) pass.open = namesOf(store().ownRead());
-        if (pass.maps === null) return null;
+        if (pass.open === undefined) {
+            var own = store().ownRead();
+            pass.open = own ? namesOf(own) : null;
+        }
+        if (pass.maps === null || pass.open === null) return null;
         return (pass.maps[adventure] || 0) + (pass.open.indexOf(adventure) !== -1 ? 1 : 0);
     }
 
@@ -302,9 +306,12 @@
             notify(kind + ' ' + id + ' cannot be read.');
             return null;
         }
-        var maps = available(rec.adventure);
+        var reads = {};
+        var maps = available(rec.adventure, reads);
         if (maps === null) {
-            notify('The star menu cannot be read right now. Try again in a moment.');
+            // Name the read that failed: the star menu, or else the open list.
+            notify(reads.maps === null ? 'The star menu cannot be read right now. Try again in a moment.'
+                : UNREADABLE_OWN);
             return null;
         }
         var advLabel = S.core.adventures.label(rec.adventure) || rec.adventure;

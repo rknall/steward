@@ -69,9 +69,12 @@
         for (var i = 0; i < geos.length; i++) {
             var g = geos[i];
             if (!g) continue;
-            try {
-                if (c.status(g) === S.SpecialistStatus.Idle) continue;
-            } catch (e) { continue; }
+            var st;
+            try { st = c.status(g); }
+            catch (e) { continue; }
+            // An Unknown geologist's task could not be read, so it is not
+            // known to be searching this deposit and is not counted here.
+            if (st === S.SpecialistStatus.Idle || st === S.SpecialistStatus.Unknown) continue;
             if (c.searchingIndex(g) === depositIndex) count++;
         }
         return count;
@@ -178,13 +181,18 @@
 
     function planRemoval(s, delay) {
         if (!s || !s.removeDepleted) return;
-        if (!S.core.deposits || !S.core.deposits.depletedManaged) return;
-        var list;
-        try { list = S.core.deposits.depletedManaged(); }
+        if (!S.core.deposits || !S.core.deposits.depletedManagedRead) return;
+        var r;
+        try { r = S.core.deposits.depletedManagedRead(); }
         catch (e) {
             S.kernel.warn('geologists', 'depleted list failed:', e);
             return;
         }
+        // A pending removal is verified by its building being gone, so an
+        // unreadable or not yet ready building list must not touch the
+        // pending set: every building would read as gone.
+        if (!S.kernel.read.isOk(r)) return;
+        var list = r.value;
         var present = {};
         var i;
         for (i = 0; i < list.length; i++) {
@@ -223,20 +231,42 @@
             return;
         }
 
-        var before = c.dropped();
-        var allGeos;
-        try { allGeos = c.geologists(); }
+        var R = S.kernel.read;
+        var r;
+        try { r = c.byTypeRead(S.SpecialistType.Geologist); }
         catch (e) {
-            S.kernel.error('geologists', 'geologists() threw:', e);
+            S.kernel.error('geologists', 'byTypeRead threw:', e);
             return;
         }
-        // Dropped busy geologists would shorten busyOnDeposit, raise wanted
-        // and over-dispatch the healthy idle ones, so this tick plans nothing.
-        if (c.dropped() !== before) return;
-        // The check above makes this read complete, so the guard may judge
+        // A dropped busy geologist would shorten busyOnDeposit, raise wanted
+        // and over-dispatch the healthy idle ones, and an Unknown one may be
+        // busy on any deposit, so a list that is not complete, or that holds
+        // an Unknown status, plans nothing. The module is woken to read again
+        // soon instead of waiting for the next tick.
+        if (R.isOk(r)) {
+            var unknown = 0;
+            for (var iu = 0; iu < r.value.length; iu++) {
+                var su;
+                try { su = c.status(r.value[iu]); }
+                catch (eU) { su = S.SpecialistStatus.Unknown; }
+                if (su === S.SpecialistStatus.Unknown) unknown++;
+            }
+            // The wait takes an ok Result as go, so the Unknown case waits on
+            // a partial Result of the same list.
+            if (unknown > 0) r = R.partial(r.value, unknown, 'status unknown ' + unknown, r.zoneId);
+        }
+        if (!R.isOk(r)) {
+            if (R.wait('geologists', 'list', r) === 'expired') {
+                S.kernel.warn('geologists', 'geologist list still not readable:', r.why);
+            }
+            return;
+        }
+        R.clearWait('geologists', 'list');
+        var allGeos = r.value;
+        // The checks above make this read complete, so the guard may judge
         // an Idle geologist as a missed send.
-        c.sendGuard.settle('geologists', allGeos || [], true);
-        if (!allGeos || !allGeos.length) return;
+        c.sendGuard.settle('geologists', allGeos, true);
+        if (!allGeos.length) return;
 
         // Idle pool: idle status AND a stable uniqueID. The reader already
         // leaves out entries without one; an entry can still lose its members
@@ -275,14 +305,16 @@
             var max = (typeof cfg.max === 'number') ? cfg.max : 0;
             if (max <= 0) continue;
 
-            var onMap;
-            try { onMap = S.core.deposits.byType(info.name).length; }
-            catch (e) {
-                // An unknown count must not read as zero: wanted would then equal
-                // max and over-dispatch, so this type is skipped for this tick.
-                S.kernel.warn('geologists', 'byType failed for', info.name, '- skipping this tick:', e);
+            // An unknown count must not read as zero: wanted would then equal
+            // max and over-dispatch, so this type is skipped for this tick.
+            var onMapR;
+            try { onMapR = S.core.deposits.byTypeRead(info.name); }
+            catch (e) { onMapR = R.unreadable(e && e.message ? e.message : String(e)); }
+            if (!R.isOk(onMapR)) {
+                S.kernel.warn('geologists', 'byType failed for', info.name, '- skipping this tick:', onMapR.why);
                 continue;
             }
+            var onMap = onMapR.value.length;
             var onTask = busyOnDeposit(allGeos, info.index) + countTag(pendingTags, info.name);
             var wanted = max - onMap - onTask;
             if (wanted <= 0) continue;

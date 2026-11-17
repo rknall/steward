@@ -502,3 +502,16 @@ t.test('dumpDefinitions logs campaigns and each template\'s folder', function ()
     t.assert.ok(lines.some(function (l) { return /^ {2}template "Alpha" AdvM type=Mission .*folder=Missions$/.test(l); }), lines.join('\n'));
     t.assert.ok(!lines.some(function (l) { return /"undefined"|template .*undefined/.test(l); }), lines.join('\n'));
 });
+
+t.test('the buff probe logs unreadable for a null inventory', function () {
+    var A = require('../stubs/army');
+    var fs = airfs.make();
+    var H = harness.boot({ host: { air: fs.air } });
+    A.install(H, { buffs: [{ type: 'MineBuff', amount: 2, uid: 'u1' }], buffDefs: {} });
+    H.Steward.core.buffs.inventory = function () { return null; };
+    H.clearLogs();
+    H.Steward.modules.diagnostics.army.dumpDefinitions();
+    var lines = H.logs().map(function (l) { return String(l.args[0]); });
+    t.assert.ok(lines.some(function (l) { return l === '  buff inventory unreadable'; }), lines.join('\n'));
+    t.assert.ok(!lines.some(function (l) { return /sharing the type|buff inventory probe threw/.test(l); }), lines.join('\n'));
+});

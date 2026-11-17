@@ -63,3 +63,44 @@ t.test('core removeDepleted refuses off the home island', function () {
     t.assert.strictEqual(s.H.Steward.core.deposits.removeDepleted(s.zone.GetBuildingFromGridPosition(7)), false);
     t.assert.strictEqual(s.zone.sent.length, 0);
 });
+
+// The registered removal queue action, captured while the module boots.
+function removeAction(H) {
+    var q = H.Steward.kernel.queue;
+    var orig = q.action;
+    var fn = null;
+    q.action = function (name, f) {
+        if (name === 'geologists.removeDepleted') fn = f;
+        return orig.apply(q, arguments);
+    };
+    H.module('geologists').boot();
+    q.action = orig;
+    return fn;
+}
+
+function removals(H) {
+    return H.queued().filter(function (e) { return e.name === 'geologists.removeDepleted'; }).length;
+}
+
+t.test('removal does not verify when the building list is unreadable', function () {
+    var s = setup([harness.boot().zone.building({ name: 'DepletedIronOre', grid: 7 })]);
+    s.H.settings.write('geologists', settings(true));
+    var fire = removeAction(s.H);
+    var mod = s.H.module('geologists');
+    mod.plan({ zone: { isHome: true } });
+    t.assert.strictEqual(removals(s.H), 1);
+    fire([7]);
+    t.assert.strictEqual(s.zone.sent.length, 1, 'the removal went out and is pending');
+
+    var sdm = s.zone.mStreetDataMap;
+    var vec = sdm.GetBuildings_vector;
+    sdm.GetBuildings_vector = function () { throw new Error('bridge'); };
+    mod.plan({ zone: { isHome: true } });
+    t.assert.strictEqual(removals(s.H), 1, 'an unreadable list queues nothing');
+
+    // The deposit is still there: had the unreadable read verified the
+    // pending removal, this plan would queue the next one at once.
+    sdm.GetBuildings_vector = vec;
+    mod.plan({ zone: { isHome: true } });
+    t.assert.strictEqual(removals(s.H), 1, 'the removal is still pending');
+});

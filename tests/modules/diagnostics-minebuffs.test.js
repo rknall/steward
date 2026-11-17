@@ -171,3 +171,14 @@ t.test('dump survives a throwing building', function () {
         assert.ok(typeOf(doc, 'IronOre').buildings.length >= 1);
     });
 });
+
+t.test('a null inventory dumps as unreadable', function () {
+    withSetup([mine(1)], function (s) {
+        s.H.Steward.core.buffs.inventory = function () { return null; };
+        s.mb.dump();
+        var found = files(s);
+        assert.strictEqual(found.length, 1);
+        var doc = JSON.parse(s.fs.disk[found[0]]);
+        assert.deepStrictEqual(doc.inventory, { unreadable: true });
+    });
+});

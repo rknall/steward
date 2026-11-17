@@ -51,6 +51,9 @@
     function inventoryRecord() {
         var b = S.core.buffs;
         var inv = b.inventory();
+        // Null means the star menu could not be read: say so in the dump
+        // rather than an empty list that looks like "no stock".
+        if (inv === null) return { unreadable: true };
         var out = [];
         for (var i = 0; i < inv.length; i++) {
             var type = inv[i].type;

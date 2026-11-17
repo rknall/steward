@@ -827,6 +827,21 @@ t.test('StartMap gap: a hand close seen by the menu read is dated', function () 
     assert.strictEqual(w.st.maps().closedAt, w.t);
 });
 
+t.test('available is null while the open list is unreadable', function () {
+    var w = homeWorld({ mapOpen: true });
+    var run = w.S.modules.adventures.run;
+    w.adventures = null;
+    assert.strictEqual(run.available('BlackKnights'), null, 'no count, never stock minus the open one');
+    var pass = {};
+    assert.strictEqual(run.available('BlackKnights', pass), null);
+    assert.strictEqual(pass.open, null, 'the unreadable read is cached for the pass');
+    w.adventures = [{ adventureName: 'BlackKnights', zoneID: ZONE }];
+    assert.strictEqual(run.available('BlackKnights', pass), null, 'one pass does not read again');
+    assert.strictEqual(run.available('BlackKnights'), 4);
+    w.adventures = [];
+    assert.strictEqual(run.available('BlackKnights'), 3, 'an empty list is read, not unreadable');
+});
+
 t.test('StartMap gap: no map history waits GAP_MS from the first look', function () {
     var w = homeWorld({ mapsUnknown: true });
     assert.strictEqual(w.st.maps().open, null);

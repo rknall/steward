@@ -618,7 +618,9 @@ function verified(w) { return { status: w.S.ActionResult.Verified }; }
 [
     { name: 'specialist unreadable', get: function (w) { return w.S.core.specialists.UNREADABLE; } },
     { name: 'nothing sent', get: function (w) { return w.S.core.actions.NOT_SENT; } },
-    { name: 'viewed zone changed', get: function (w) { return ld(w).ZONE_CHANGED; } }
+    { name: 'viewed zone changed', get: function (w) { return ld(w).ZONE_CHANGED; } },
+    { name: 'quests unreadable', get: function (w) { return w.S.core.quests.UNREADABLE; } },
+    { name: 'zone unreadable', get: function (w) { return w.S.core.zone.UNREADABLE; } }
 ].forEach(function (c) {
     t.test('settleRound: a round refused unreadable is dropped without counting: ' + c.name, function () {
         var w = islandWorld();
@@ -632,6 +634,25 @@ function verified(w) { return { status: w.S.ActionResult.Verified }; }
         assert.strictEqual(ld(w).currentRound(r, r.step), null);
         assert.strictEqual(ld(w).settleRound(r, r.step, function () { failed++; }, 'positioning'), 'new');
     });
+});
+
+t.test('unreadable: a last-quest round refused with quests unreadable counts as unread', function () {
+    var w = islandWorld();
+    var Refused = w.S.ActionResult.Refused;
+    assert.strictEqual(ld(w).unreadable({ status: Refused, reason: w.S.core.quests.UNREADABLE }), true);
+    assert.strictEqual(ld(w).unreadable({ status: Refused, reason: 'quest not found' }), false,
+        'a quest the pool lacks is a real refusal');
+    assert.strictEqual(ld(w).unreadable({ status: w.S.ActionResult.Failed,
+        reason: w.S.core.quests.UNREADABLE }), false, 'only a refusal sent nothing');
+});
+
+t.test('unreadable: zone unreadable counts as unread', function () {
+    var w = islandWorld();
+    var Refused = w.S.ActionResult.Refused;
+    assert.strictEqual(ld(w).unreadable({ status: Refused, reason: w.S.core.zone.UNREADABLE }), true);
+    assert.strictEqual(ld(w).unreadable({ status: Refused, reason: w.S.core.specialists.UNREADABLE }), true);
+    assert.strictEqual(ld(w).unreadable({ status: Refused, reason: 'busy' }), false);
+    assert.strictEqual(ld(w).unreadable(null), false);
 });
 
 t.test('settleRound: with open, a shown verified key and an unreadable one drop uncounted', function () {

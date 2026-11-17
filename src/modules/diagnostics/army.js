@@ -668,17 +668,22 @@
         S.kernel.log(cat, 'horseshoe buff type(s): ' + (speedTypes.length ? speedTypes.join(', ') : '(unknown)'));
         try {
             var inv = b.inventory();
-            var shared = 0;
-            for (var j = 0; j < inv.length; j++) {
-                var name = inv[j].type;
-                if (b.isSpeedBuff(name)) continue;
-                var it = b.buffTypeOf(name);
-                if (it === null || speedTypes.indexOf(it) === -1) continue;
-                shared++;
-                S.kernel.log(cat, '  same type, other name: ' + name + ' GetBuffType=' + fmt(it) +
-                                  ' amount=' + inv[j].amount);
+            // Null: the star menu is unreadable, so no sharing count is claimed.
+            if (inv === null) {
+                S.kernel.log(cat, '  buff inventory unreadable');
+            } else {
+                var shared = 0;
+                for (var j = 0; j < inv.length; j++) {
+                    var name = inv[j].type;
+                    if (b.isSpeedBuff(name)) continue;
+                    var it = b.buffTypeOf(name);
+                    if (it === null || speedTypes.indexOf(it) === -1) continue;
+                    shared++;
+                    S.kernel.log(cat, '  same type, other name: ' + name + ' GetBuffType=' + fmt(it) +
+                                      ' amount=' + inv[j].amount);
+                }
+                S.kernel.log(cat, '  inventory entries sharing the type: ' + shared);
             }
-            S.kernel.log(cat, '  inventory entries sharing the type: ' + shared);
         } catch (e4) { S.kernel.warn(cat, 'buff inventory probe threw:', e4); }
     }
 

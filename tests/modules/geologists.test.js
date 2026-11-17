@@ -602,3 +602,42 @@ t.test('a render whose portraits are all real schedules no redraw', function () 
     build(H, 'render');
     t.assert.strictEqual(timers.length, 0);
 });
+
+t.test('an Unknown geologist holds the plan', function () {
+    var H = harness.boot();
+    var unknown = H.specs.geologist({ name: 'unk', uid: 'g2' });
+    unknown.GetTask = function () { throw new Error('bridge'); };
+    t.assert.strictEqual(H.Steward.core.specialists.status(unknown), H.Steward.SpecialistStatus.Unknown);
+    var wakes = [];
+    H.Steward.kernel.scheduler.wake = function (id, ms) { wakes.push([id, ms]); return true; };
+    var settles = 0;
+    var g = H.Steward.core.specialists.sendGuard;
+    var settle = g.settle;
+    g.settle = function () { settles++; return settle.apply(g, arguments); };
+
+    planWith(H, [H.specs.geologist({ name: 'irongut', uid: 'g1' }), unknown], 1);
+
+    t.assert.strictEqual(H.queued().length, 0);
+    t.assert.strictEqual(settles, 0, 'a held plan settles nothing');
+    t.assert.deepStrictEqual(wakes, [['geologists', H.Steward.kernel.TIMEOUTS.READ_RETRY_MS]]);
+    t.assert.strictEqual(geoWarns(H).length, 0, 'no warn before the wait expires');
+});
+
+t.test('a partial list plans nothing', function () {
+    var H = harness.boot();
+    var wakes = [];
+    H.Steward.kernel.scheduler.wake = function (id, ms) { wakes.push([id, ms]); return true; };
+    planWith(H, [ghostGeologist(H), H.specs.geologist({ name: 'irongut', uid: 'g1' })], 1);
+
+    t.assert.strictEqual(H.queued().length, 0);
+    t.assert.strictEqual(wakes.length, 1, 'the module is woken to read again');
+});
+
+t.test('busyOnDeposit does not count an Unknown geologist', function () {
+    var H = harness.boot();
+    var unknown = H.specs.geologist({ name: 'unk', uid: 'g2' });
+    unknown.GetTask = function () { throw new Error('bridge'); };
+    var idx = H.Steward.core.deposits.indexOf('IronOre');
+    H.Steward.core.specialists.searchingIndex = function () { return idx; };
+    t.assert.strictEqual(H.Steward.modules.geologists.busyOnDeposit([unknown], idx), 0);
+});

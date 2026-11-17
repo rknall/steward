@@ -502,9 +502,13 @@
     // the log later. Text only, and every read is guarded so it never throws.
     function sendNote(b, grid, s) {
         var ents = [];
+        var invRead = true;
         try {
-            var inv = S.core.buffs.inventory() || [];
-            for (var i = 0; i < inv.length; i++) {
+            // A null inventory is an unreadable star menu, not an empty one,
+            // so the line says so instead of 'none'.
+            var inv = S.core.buffs.inventory();
+            if (inv === null) invRead = false;
+            for (var i = 0; inv && i < inv.length; i++) {
                 if (inv[i].type !== b || (inv[i].resource || '') !== '') continue;
                 ents.push(inv[i].bad ? '?' : inv[i].amount + '[' + (inv[i].uid || '') + ']');
             }
@@ -525,7 +529,8 @@
         var targets = tgt && tgt.targets && tgt.targets.length ? tgt.targets.join(',') : 'none';
         var group = tgt && tgt.group ? tgt.group : 'none';
         var via = !tgt ? '?' : (!s.cur ? '-' : (tgt.via || 'no'));
-        return 'item ' + b + ' -> ' + grid + ': entries ' + (ents.length ? ents.join(',') : 'none') +
+        return 'item ' + b + ' -> ' + grid + ': entries ' +
+            (ents.length ? ents.join(',') : (invRead ? 'none' : 'unreadable')) +
             '; building ' + (s.cur || 'none') +
             (s.first && s.first !== s.cur ? ' (first seen ' + s.first + ')' : '') +
             ' grid ' + (own === null ? '?' : own) +
