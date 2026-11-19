@@ -7,7 +7,8 @@ var EVENT_OF = {
     HalloweenResource:    'HW2017plus_Shop',
     StripedEggs:          'EasterEvent_Shop_Easter',
     AdventureRelics:      'AdventureSeasonMercenary',
-    Wood:                 ''
+    Wood:                 '',
+    SeasonalThing:        'SeasonalThing'
 };
 
 function boot(vector) {
@@ -140,4 +141,30 @@ t.test('heldResources never throws', function () {
     H.host.game.getResources = undefined;
     var r = H.Steward.core.events.heldResources();
     t.assert.strictEqual(r.source, 'data');
+});
+
+t.test('resourceLive: empty name is live, no definition is null', function () {
+    var H = boot([]);
+    var E = H.Steward.core.events;
+    t.assert.strictEqual(E.resourceLive('Wood'), true);
+    t.assert.strictEqual(E.resourceLive('Unknown'), null);
+});
+
+t.test('resourceLive follows the base code event', function () {
+    var H = boot([]);
+    var E = H.Steward.core.events;
+    t.assert.strictEqual(E.resourceLive('HalloweenResource'), false);
+    H.host.game.gi.mEventManager.GetActiveEventNames = function () { return ['HW2017plus_Content']; };
+    t.assert.strictEqual(E.resourceLive('HalloweenResource'), true);
+    t.assert.strictEqual(E.resourceLive('StripedEggs'), false);
+});
+
+t.test('resourceLive matches an unknown code by raw name substring', function () {
+    var H = boot([]);
+    var E = H.Steward.core.events;
+    t.assert.strictEqual(E.resourceLive('SeasonalThing'), false);
+    H.host.game.gi.mEventManager.GetActiveEventNames = function () { return ['SeasonalThing_Shop']; };
+    t.assert.strictEqual(E.resourceLive('SeasonalThing'), true);
+    H.host.game.gi.mEventManager.GetActiveEventNames = function () { return ['Other']; };
+    t.assert.strictEqual(E.resourceLive('SeasonalThing'), false);
 });

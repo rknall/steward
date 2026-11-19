@@ -232,3 +232,55 @@ t.test('listRead is ok when every item is readable and unreadable without the ho
     t.assert.strictEqual(R.listRead().state, 'ok');
     t.assert.strictEqual(JSON.stringify(R.list()), '[]');
 });
+
+// ---- warehouse capacity and storehouse category ------------------------------
+
+t.test('capacity reads the warehouse cap with no argument', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withResources(H, {
+        GetWareHouseCapacity: function () { if (arguments.length) throw new Error('#1063'); return 2500; }
+    });
+    t.assert.strictEqual(H.Steward.core.resources.capacity(), 2500);
+    t.assert.strictEqual(warnsFor(H, 'resources').length, 0);
+});
+
+t.test('capacity is null on a missing host, a missing method or a non-number', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var R = H.Steward.core.resources;
+    H.host.game.getResources = undefined;
+    t.assert.strictEqual(R.capacity(), null);
+    withResources(H, {});
+    t.assert.strictEqual(R.capacity(), null);
+    withResources(H, { GetWareHouseCapacity: function () { return 'x'; } });
+    t.assert.strictEqual(R.capacity(), null);
+    t.assert.strictEqual(warnsFor(H, 'resources').length, 0);
+});
+
+t.test('a throwing capacity read returns null and warns once', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withResources(H, { GetWareHouseCapacity: function () { throw new Error('boom'); } });
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.capacity(), null);
+    t.assert.strictEqual(R.capacity(), null);
+    t.assert.strictEqual(warnsFor(H, 'resources').length, 1);
+});
+
+t.test('categoryOf gives the storehouse category, empty for none, null when unreadable', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withInventory(H, [['Wood', 1, 'Intermediates'], ['CollectibleWineBarrel', 1, '']]);
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.categoryOf('Wood'), 'Intermediates');
+    t.assert.strictEqual(R.categoryOf('CollectibleWineBarrel'), '');
+    t.assert.strictEqual(R.categoryOf('Mystery'), null);
+    t.assert.strictEqual(R.categoryOf(''), null);
+    H.host.game.def = function () { throw new Error('boom'); };
+    t.assert.strictEqual(R.categoryOf('Wood'), null);
+});
+
+t.test('categoryOf is empty when the definition has no category string', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    H.host.game.def = function () {
+        return { GetResourcesDefaultDefinition: function () { return { category_string: 5 }; } };
+    };
+    t.assert.strictEqual(H.Steward.core.resources.categoryOf('Wood'), '');
+});

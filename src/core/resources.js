@@ -8,13 +8,18 @@
  * must not look like an empty stock. This is the failure contract of the
  * action runner in core/actions.js.
  *
+ * capacity() is the warehouse capacity, the cap every storehouse resource
+ * shares, read the same way (a number or null).
+ *
  * It also names the population resource, which unit costs and the population
  * star buff both refer to.
  *
  * Enumeration: list() returns every resource the player holds, and
  * eventName(name) reads the host's own event flag of one resource (a
  * non-empty string for an event resource), so callers never keep a list of
- * event resources themselves. Both answer null when the host cannot be read.
+ * event resources themselves. categoryOf(name) reads the storehouse category
+ * of one resource ('' for none). All three answer null when the host cannot
+ * be read.
  * uncategorized() lists the held resources the storehouse does not show: the
  * ones whose economy default definition names no category. These are what
  * the mayor's house holds (collectibles such as Barrel or Grain Sacks, star
@@ -59,6 +64,13 @@
     function amount(resName) {
         if (typeof resName !== 'string' || !resName) return null;
         return read('GetResourceAmount', resName);
+    }
+
+    // Warehouse capacity: the host's GetWareHouseCapacity() value, the one cap
+    // every storehouse resource shares. The host method takes no parameter,
+    // so it is read with no argument (see read).
+    function capacity() {
+        return read('GetWareHouseCapacity');
     }
 
     // Free population: the host's GetFree() value. The host method takes no
@@ -198,6 +210,8 @@
     S.core.resources.list           = list;
     S.core.resources.listRead       = listRead;
     S.core.resources.eventName      = eventName;
+    S.core.resources.categoryOf     = categoryOf;
+    S.core.resources.capacity       = capacity;
     S.core.resources.uncategorized  = uncategorized;
 
 }(Steward));
