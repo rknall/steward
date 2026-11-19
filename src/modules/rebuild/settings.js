@@ -28,6 +28,11 @@
     S.modules.rebuild.depletedWell  = 'MineDepletedDepositWater';
     S.modules.rebuild.depletedField = 'MineDepletedDepositCorn';
 
+    // The deposit type a well or field stands on, read on the building's
+    // grid for its amount.
+    S.modules.rebuild.wellDeposit  = 'Water';
+    S.modules.rebuild.fieldDeposit = 'Corn';
+
     S.modules.rebuild.defaultSettings = {
         // Off by default: it spends resources and build-queue slots.
         enabled:     false,

@@ -297,3 +297,107 @@ t.test('an attempt in flight keeps the module busy and its grid blocked', functi
     assert.ok(steps > 1, 'the attempt ran several steps');
     assert.strictEqual(sends50(s).length, 1);
 });
+
+// ---- Dashboard registration ---------------------------------------------------
+
+t.test('rebuild registers its section on the Economy Advisor Rebuild tab, toggled in Production', function () {
+    var s = setup();
+    var S = s.S;
+    var reg = S.kernel.registry;
+    var ui = reg.get('rebuild').ui;
+    // validateUi drops the spec on a bad tab or section and logs a bad
+    // dashboard or toggleIn as General / null, so these values also show that
+    // the spec registered without a warning.
+    assert.ok(ui, 'ui spec kept');
+    assert.strictEqual(ui.dashboard, S.Dashboard.Economy);
+    assert.strictEqual(ui.tab, 'rebuild');
+    assert.strictEqual(ui.toggleIn, 'production');
+    assert.strictEqual(ui.section.title, 'Rebuild Wells and Fields');
+    assert.strictEqual(ui.section.heading, 'Rebuild wells and fields');
+    assert.strictEqual(ui.section.icon, '↻');
+    assert.strictEqual(typeof ui.section.render, 'function');
+    assert.strictEqual(reg.dashboardOf('rebuild'), S.Dashboard.Economy);
+    var ids = reg.onDashboard(S.Dashboard.Economy).map(function (m) { return m.id; });
+    assert.ok(ids.indexOf('rebuild') !== -1, 'rebuild on the Economy dashboard');
+    s.H.clearLogs();
+    s.H.module('rebuild').boot();
+    var warns = s.H.logs().filter(function (l) { return l.level === 'warn' && l.category === 'registry'; });
+    assert.strictEqual(warns.length, 0);
+});
+
+t.test('the breaker wording is the exported BREAKER', function () {
+    var s = setup();
+    var b = s.S.modules.rebuild.BREAKER;
+    assert.strictEqual(b.label, 'rebuild breaker');
+    assert.strictEqual(b.missText, 'rebuilds in a row were not seen on their grid');
+});
+
+// ---- scan ---------------------------------------------------------------------
+
+t.test('scan lists every well, field and shell with its rebuild facts', function () {
+    var s = setup({ shells: [
+        { name: WELL, grid: 10 },
+        { name: FIELD, grid: 12, constructing: true },
+        { name: WELL, grid: 13 },
+        { name: 'Well_03', grid: 14 }
+    ] });
+    var M = s.S.modules.rebuild;
+    // A send in flight on grid 13: one step sends it, its entry stays 'sent'.
+    s.place([13, 'Well_03']);
+    AC.drive(s.H, { max: 1 });
+    assert.strictEqual(sends50(s).length, 1);
+    assert.strictEqual(s.L.blocked('rebuild|home|13'), 'sent');
+
+    var cfg = M.readSettings();
+    var rows = M.scan(s.S.core.buildings.listRead().value, cfg);
+    var byGrid = {};
+    for (var i = 0; i < rows.length; i++) byGrid[rows[i].grid] = rows[i];
+    assert.deepStrictEqual(plain(rows.map(function (r) { return r.grid; })).sort(), [10, 12, 13, 14]);
+    assert.ok(!byGrid[99], 'unrelated building skipped');
+
+    var ready = byGrid[10];
+    assert.strictEqual(ready.kind, 'well');
+    assert.strictEqual(ready.shell, true);
+    assert.strictEqual(ready.name, WELL);
+    assert.strictEqual(ready.entry, null);
+    assert.strictEqual(ready.target.name, 'Well_03');
+    assert.strictEqual(ready.why, null);
+    assert.strictEqual(ready.blocked, null);
+
+    var building = byGrid[12];
+    assert.strictEqual(building.kind, 'field');
+    assert.strictEqual(building.shell, true);
+    assert.strictEqual(building.why, 'under construction');
+    assert.strictEqual(building.target.label, 'Wheatfield');
+
+    assert.strictEqual(byGrid[13].blocked, 'sent');
+
+    var live = byGrid[14];
+    assert.strictEqual(live.kind, 'well');
+    assert.strictEqual(live.shell, false);
+    assert.strictEqual(live.entry.label, 'Deep Well');
+    assert.strictEqual(live.target.label, 'Deep Well');
+    assert.strictEqual(live.why, null);
+    assert.strictEqual(live.blocked, null);
+});
+
+t.test('kindOf and targetOf name the kind and the configured rebuild', function () {
+    var s = setup();
+    var M = s.S.modules.rebuild;
+    assert.strictEqual(M.kindOf(WELL), 'well');
+    assert.strictEqual(M.kindOf('Well_04'), 'well');
+    assert.strictEqual(M.kindOf(FIELD), 'field');
+    assert.strictEqual(M.kindOf('Farmfield_03'), 'field');
+    assert.strictEqual(M.kindOf('Woodcutter'), null);
+    assert.strictEqual(M.targetOf('field', { fieldType: 'Farmfield_04' }).label, 'Tightly Sown Wheatfield');
+    assert.strictEqual(M.targetOf('well', { wellType: 'nope' }).name, 'Well');
+    assert.strictEqual(M.targetOf(null, {}), null);
+    assert.strictEqual(M.gridOfKey('rebuild|home|42'), 42);
+    assert.strictEqual(M.gridOfKey('rebuild|home|x'), null);
+    assert.strictEqual(M.key(42), 'rebuild|home|42');
+});
+
+t.test('a live well or field is listed by scan but never queued by plan', function () {
+    var s = setup({ shells: [{ name: 'Well_03', grid: 14 }, { name: 'Farmfield', grid: 15 }] });
+    assert.deepStrictEqual(plan(s), []);
+});

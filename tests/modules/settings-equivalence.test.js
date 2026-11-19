@@ -89,6 +89,18 @@ var OLD = {
         '    return merged;',
         '}'
     ],
+    // No `|| {}` on the defaults: rebuild's reader never had one.
+    rebuild: [
+        'function readSettings() {',
+        '    var stored = S.kernel.settings.read(\'rebuild\') || {};',
+        '    var defaults = S.modules.rebuild.defaultSettings;',
+        '    var merged = {};',
+        '    var key;',
+        '    for (key in defaults) merged[key] = defaults[key];',
+        '    for (key in stored)   merged[key] = stored[key];',
+        '    return merged;',
+        '}'
+    ],
     production: [
         'function has(o, k) { return S.kernel.is.has(o, k); }',
         'function readSettings() {',
@@ -236,6 +248,7 @@ var NEW = {
     geologists: function (S) { return S.modules.geologists.readSettings(); },
     mining:     function (S) { return S.modules.mining.readSettings(); },
     production: function (S) { return S.modules.production.readSettings(); },
+    rebuild:    function (S) { return S.modules.rebuild.readSettings(); },
     adventures: function (S) { return S.modules.adventures.templates.settings(); },
     updater:    function (S) { return S.modules.updater.config(); }
 };
@@ -318,6 +331,10 @@ function runFixtures(id, extra) {
 
 t.test('collect reads every fixture as before', function () {
     runFixtures('collect');
+});
+
+t.test('rebuild reads every fixture as before', function () {
+    runFixtures('rebuild', [['types and a flag', { enabled: true, wellType: 'Well_04', fieldType: 'x' }]]);
 });
 
 t.test('explorers reads every fixture as before', function () {
