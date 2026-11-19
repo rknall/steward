@@ -2,7 +2,7 @@
  * Production module.
  *
  * Keeps the timed production queues of the home zone busy. Each plan pass
- * runs two phases, each capped per pass and each in its own try/catch:
+ * runs three phases, each capped per pass and each in its own try/catch:
  *
  *   complete  (bookComplete) finishes the head entry of a queue that waits
  *             for completion (the Bookbinder), at most one per pass, and
@@ -18,14 +18,27 @@
  *             (buffs) Each order of an enabled row with a buff carries that
  *             buff when the producer shows no running production buff, at
  *             most buffsPerPass per pass. A buff is spent only on a
- *             building this module just gave work, never on one that
- *             already has a buff. The buff is queued only after the order
+ *             building that works on the row's item, either just given
+ *             work by this module or found producing it (reapply below),
+ *             never on one that already has a buff. A running buff of
+ *             another kind is left alone too: it is never replaced or
+ *             topped up. The order's buff is queued only after the order
  *             is verified, because S.core.actions.attempt queues its steps
  *             at the end of the kernel queue: a buff queued in the same
  *             pass would run before the order is sent, against an idle
  *             building. The shared S.core.buffing engine re-checks the
  *             building then, so each apply is verified on it. A row with a
  *             buff but no item is never buffed.
+ *   reapply   (tryReapply) gives the buff back to a building whose buff ran
+ *             out while it still works: the order rider reaches only idle
+ *             queues. It runs only while both buffs and standing are on,
+ *             for an enabled row with an item and a buff whose producer is
+ *             producing the row's own item (the queue's current entry,
+ *             unfinished) and shows no production buff of any kind. Each is
+ *             one verified apply through the buff engine, sharing
+ *             buffsPerPass, the stock count and the grid claims with the
+ *             order riders, which go first. An unreadable buff state, queue
+ *             head item or stock waits; it is never read as "expired".
  *
  * A row acts only while its own switch (enabled) is on. An item the host
  * would not let the player order now (S.core.production.isProducible gives
@@ -308,65 +321,91 @@
         }
     }
 
+    // The buffs one plan pass may choose, shared by the order riders and
+    // the reapply.
+    function buffCap(s) {
+        return s.buffsPerPass > 0 ? s.buffsPerPass : 0;
+    }
+
+    // The row gates both buff paths share: buffs on, a cap slot left, the
+    // row on and not hidden, a buff that targets a queue name this module
+    // owns, and stock above 0. Returns { cfg, buff, stock } or null. It
+    // claims nothing, so the caller decides when the slot and stock are
+    // spent.
+    function buffRow(s, ctx, names, name) {
+        if (!s.buffs) return null;
+        if (!(ctx.buffs < buffCap(s))) return null;
+        var cfg = (s.buildings || {})[name];
+        if (!rowOn(cfg)) return null;
+        if (hiddenName(name)) return null;   // refreshNeeds already said so
+        var buff = cfg.buff;
+        if (typeof buff !== 'string' || !buff) return null;
+        if (ownedByMining(name)) {
+            debugOnce('mining|' + name, name, 'is buffed by mining — skipping buff');
+            return null;
+        }
+        if (!has(names, name)) {
+            debugOnce('scope|' + name, name, 'has no production queue — its buff is not managed here');
+            return null;
+        }
+        if (!S.core.buffs.buildingBuffMatch(buff, name, false)) {
+            debugOnce('match|' + name + '|' + buff, 'buff', buff, 'does not target', name, '— skipping buff');
+            return null;
+        }
+        // Stock is read once per buff per pass and counted down locally,
+        // because the buffs chosen so far have not left the stock yet.
+        var stock = has(ctx.buffStock, buff) ? ctx.buffStock[buff] : S.core.buffs.stock(buff, '');
+        // An unreadable stock is not an empty one: skip, say so once, and
+        // leave ctx.buffStock alone so a null is never cached or counted down.
+        if (typeof stock !== 'number') {
+            debugOnce('stock|' + buff, 'buff', buff, 'stock unreadable — skipping buff');
+            return null;
+        }
+        if (!(stock > 0)) return null;
+        return { cfg: cfg, buff: buff, stock: stock };
+    }
+
+    // True only when the producer reads no running production buff of any
+    // kind. A running buff is never replaced or topped up, whatever its
+    // name, so only its presence is read. A running or unreadable state is
+    // said once under the caller's key prefix, and again only after a
+    // readable unbuffed read in between.
+    function unbuffed(b, name, key, tail) {
+        var on = S.core.buildings.hasProductionBuff(b);
+        if (on === true) {
+            debugOnce(key + 'buffed|' + name, name, 'already has a production buff — ' + tail);
+            return false;
+        }
+        if (on !== false) {
+            debugOnce(key + 'buffread|' + name, 'buff state of', name, 'unreadable — ' + tail);
+            return false;
+        }
+        delete said[key + 'buffed|' + name];
+        delete said[key + 'buffread|' + name];
+        return true;
+    }
+
     // The buff to send with the order this pass places for a name, or ''.
-    // A buff goes only with an own order and only to a producer that shows
-    // no running production buff, so none is spent on top of a running one.
-    // The engine is not asked here: the queue is idle by construction at
-    // plan time, so the building would always read "not producing"; the
-    // buff action asks it once the order has landed. A throw costs only the
-    // buff, never the order.
+    // A buff goes with an own order only to a producer that shows no
+    // running production buff, so none is spent on top of a running one.
+    // The row gates are buffRow's, shared with the reapply. The engine is
+    // not asked here: the queue is idle by construction at plan time, so
+    // the building would always read "not producing"; the buff action asks
+    // it once the order has landed. A throw costs only the buff, never the
+    // order.
     function buffFor(s, ctx, names, name) {
         try {
-            if (!s.buffs) return '';
-            if (!(ctx.buffs < (s.buffsPerPass > 0 ? s.buffsPerPass : 0))) return '';
-            var cfg = (s.buildings || {})[name];
-            if (!rowOn(cfg)) return '';
-            if (hiddenName(name)) return '';   // refreshNeeds already said so
-            var buff = cfg.buff;
-            if (typeof buff !== 'string' || !buff) return '';
-            if (ownedByMining(name)) {
-                debugOnce('mining|' + name, name, 'is buffed by mining — skipping buff');
-                return '';
-            }
-            if (!has(names, name)) {
-                debugOnce('scope|' + name, name, 'has no production queue — its buff is not managed here');
-                return '';
-            }
-            if (!S.core.buffs.buildingBuffMatch(buff, name, false)) {
-                debugOnce('match|' + name + '|' + buff, 'buff', buff, 'does not target', name, '— skipping buff');
-                return '';
-            }
-            // Stock is read once per buff per pass and counted down locally,
-            // because the buffs chosen so far have not left the stock yet.
-            var stock = has(ctx.buffStock, buff) ? ctx.buffStock[buff] : S.core.buffs.stock(buff, '');
-            // An unreadable stock is not an empty one: skip, say so once, and
-            // leave ctx.buffStock alone so a null is never cached or counted down.
-            if (typeof stock !== 'number') {
-                debugOnce('stock|' + buff, 'buff', buff, 'stock unreadable — skipping buff');
-                return '';
-            }
-            if (!(stock > 0)) return '';
+            var r = buffRow(s, ctx, names, name);
+            if (!r) return '';
             var b = highest(name);
             if (!b) return '';
-            var on = S.core.buildings.hasProductionBuff(b);
-            if (on === true) {
-                debugOnce('buffed|' + name, name, 'already has a production buff — no buff with this order');
-                return '';
-            }
-            if (on !== false) {
-                debugOnce('buffread|' + name, 'buff state of', name, 'unreadable — no buff with this order');
-                return '';
-            }
-            // Readable and unbuffed: the next running buff or unreadable
-            // state is said again.
-            delete said['buffed|' + name];
-            delete said['buffread|' + name];
+            if (!unbuffed(b, name, '', 'no buff with this order')) return '';
             var grid = S.core.buildings.grid(b);
             if (ctx.assigned[grid]) return '';
             ctx.assigned[grid] = true;
             ctx.buffs++;
-            ctx.buffStock[buff] = stock - 1;
-            return buff;
+            ctx.buffStock[r.buff] = r.stock - 1;
+            return r.buff;
         } catch (e) {
             S.kernel.error('production', 'buff choice threw:', e);
             return '';
@@ -458,13 +497,72 @@
         }
     }
 
+    // True when the entry producing now (the queue head) is unfinished and
+    // is the row's own item. A buff acts on current production, so one
+    // spent while the building works on another item (manual work) would
+    // go to that item; such a queue waits until the row's item is the head.
+    // An empty queue is the order path's case and a finished head waits for
+    // completion, so both are skipped silently. An unreadable queue or head
+    // item waits and is said once.
+    function headIsOwn(type, name, item) {
+        var list = S.core.production.entries(type);
+        if (!S.kernel.is.array(list)) {
+            debugOnce('entries|' + name, 'queue of', name, 'unreadable — buff not reapplied');
+            return false;
+        }
+        delete said['entries|' + name];
+        if (!list.length || list[0].finished) return false;
+        var head = list[0];
+        if (typeof head.item !== 'string' || !head.item) {
+            debugOnce('headitem|' + name, 'producing item of', name, 'unreadable — buff not reapplied');
+            return false;
+        }
+        delete said['headitem|' + name];
+        return head.item === item;
+    }
+
+    // Reapplies a row's buff that ran out while its queue still holds work:
+    // the order rider only reaches idle queues. Runs after the standing
+    // phase, so the riders take their cap slots first, and shares their
+    // cap, stock count and grid claims. The engine's eligible is the only
+    // check that admits through the breaker, so it is asked once per
+    // reapply, here, and never again by the action.
+    function tryReapply(s, ctx, names) {
+        if (!s.buffs || !s.standing) return;
+        var cfgs = s.buildings || {};
+        var keys = sortedKeys(cfgs);
+        for (var i = 0; i < keys.length; i++) {
+            var name = keys[i];
+            var cfg = cfgs[name];
+            // A row with a buff but no item is never buffed.
+            if (!rowOn(cfg) || typeof cfg.item !== 'string' || !cfg.item) continue;
+            if (!(ctx.buffs < buffCap(s))) return;
+            var r = buffRow(s, ctx, names, name);
+            if (!r) continue;
+            var b = highest(name);
+            if (!b) continue;
+            // The head is read before the buff state, so idle buildings and
+            // other-item heads log no buff-state lines.
+            if (!headIsOwn(names[name], name, cfg.item)) continue;
+            if (!unbuffed(b, name, 're', 'buff not reapplied')) continue;
+            var verdict = buffEngine.eligible(b, ctx.assigned);
+            if (verdict === S.BuffVerdict.Stop) return;   // open and no probe due
+            if (verdict !== S.BuffVerdict.Ok) continue;
+            var grid = S.core.buildings.grid(b);
+            ctx.assigned[grid] = true;
+            ctx.buffs++;
+            ctx.buffStock[r.buff] = r.stock - 1;
+            enqueue(ctx, 'production.rebuff', [grid, name, r.buff]);
+        }
+    }
+
     // The gap between queued actions; s defaults to the stored settings.
     function delayOf(s) {
         if (!s) s = readSettings();
         return typeof s.actionDelay === 'number' ? s.actionDelay : S.modules.production.defaultSettings.actionDelay;
     }
 
-    // The two phases share one read pass, so queueNames(), the phases and
+    // The phases share one read pass, so queueNames(), the phases and
     // the producer lookups read the queue types, each type's entries and the
     // building name index once per plan instead of once per caller. The pass
     // is safe because nothing in it sends: enqueue only adds to the kernel
@@ -480,6 +578,8 @@
         catch (e1) { S.kernel.error('production', 'complete phase threw:', e1); }
         try { tryStanding(s, ctx, names); }
         catch (e3) { S.kernel.error('production', 'standing phase threw:', e3); }
+        try { tryReapply(s, ctx, names); }
+        catch (e4) { S.kernel.error('production', 'reapply phase threw:', e4); }
         return ctx;
     }
 
@@ -575,6 +675,36 @@
         buffEngine.apply(grid, name, buff, false);
     }
 
+    // The reapply queued by tryReapply. Eligibility (and the breaker admit)
+    // was judged at plan time, so it is not asked again: a second admit
+    // would spend a probe twice. The switches, the row and the producer are
+    // re-read, since any may have changed since plan() queued. The queue
+    // head is not: that check is seconds old, and the engine's precheck
+    // re-reads the building ("already buffed" by any buff, stock, match)
+    // right before the send, so a buff that appeared in between is refused,
+    // never sent on top.
+    function rebuffAction(params) {
+        var grid = params[0];
+        var name = params[1];
+        var buff = params[2];
+
+        if (!switchOn('buffs') || !switchOn('standing')) {
+            S.kernel.debug('production', 'buffs or automatic queues are off — skipping reapply of', name);
+            return;
+        }
+        var cfg = (readSettings().buildings || {})[name];
+        if (!rowOn(cfg) || typeof cfg.item !== 'string' || !cfg.item || cfg.buff !== buff) {
+            S.kernel.debug('production', 'row of', name, 'is off — skipping reapply');
+            return;
+        }
+        var b = highest(name);
+        if (!b || S.core.buildings.grid(b) !== grid) {
+            S.kernel.debug('production', 'producer of', name, 'changed — skipping reapply on grid', grid);
+            return;
+        }
+        buffEngine.apply(grid, name, buff, false);
+    }
+
     // Completes the head entry of a type's queue. A failure holds the
     // queue, since what the message does is not confirmed live.
     function completeNow(type) {
@@ -608,6 +738,7 @@
         }
         S.kernel.queue.action('production.order', orderAction);
         S.kernel.queue.action('production.buff', buffAction);
+        S.kernel.queue.action('production.rebuff', rebuffAction);
         S.kernel.queue.action('production.complete', completeAction);
     }
 

@@ -10,12 +10,13 @@ function plain(v) { return JSON.parse(JSON.stringify(v)); }
 // A booted steward whose production, building and buff readers are replaced
 // by a small world, so each case states only the host facts it needs.
 //   world.types:   [{ type, buildings: [{ name, grid, level }] }]
-//   world.entries: type -> [{ item, finished, remainingMs }]
+//   world.entries: type -> [{ item, finished, remainingMs }], or null (unreadable)
 //   world.queued:  'type|item' -> runs in the queue
 //   world.costs:   item -> [{ name, amount }] per run
 //   world.res:     resource -> amount
 //   world.buffStock, world.block (grid -> reason), world.noMatch (buff names)
 //   world.buffed:  grid -> true/false/null (hasProductionBuff; absent is false)
+//   world.buffName: grid -> name of the running buff (display only)
 //   world.state:   grid -> production state (absent is 0, producing)
 //   world.unproducible: 'type|item' -> true or null (isProducible's answer;
 //                  absent items are producible)
@@ -37,6 +38,7 @@ function setup(o) {
         noMatch:   o.noMatch || {},
         unproducible: o.unproducible || {},
         buffed:    o.buffed || {},
+        buffName:  o.buffName || {},
         state:     o.state || {},
         attempts:  [],
         orders:    []
@@ -57,7 +59,11 @@ function setup(o) {
         }
         return null;
     };
-    P.entries = function (type) { return (world.entries[type] || []).slice(); };
+    // An own key holding null is an unreadable queue.
+    P.entries = function (type) {
+        if (Object.prototype.hasOwnProperty.call(world.entries, type) && world.entries[type] === null) return null;
+        return (world.entries[type] || []).slice();
+    };
     P.queuedIn = function (type, item) { return world.queued[type + '|' + item] || 0; };
     P.yieldIn = function () { return 1; };
     P.stockOf = function (type, item) { return world.res[item] || 0; };
@@ -104,6 +110,10 @@ function setup(o) {
     B.buffBlock = function (b) { return world.block[b.grid] || null; };
     B.hasProductionBuff = function (b) {
         return Object.prototype.hasOwnProperty.call(world.buffed, b.grid) ? world.buffed[b.grid] : false;
+    };
+    B.productionBuffInfo = function (b) {
+        if (world.buffed[b.grid] !== true) return null;
+        return { name: world.buffName[b.grid] || null, remainingMs: 60000 };
     };
     B.productionState = function (b) {
         return Object.prototype.hasOwnProperty.call(world.state, b.grid) ? world.state[b.grid] : 0;
@@ -298,6 +308,7 @@ t.test('a disabled row puts no need and no buff', function () {
     assert.strictEqual(ownNeeds(env).length, 0);
     env.world.entries[0] = [{ item: 'Rifleman', finished: false }];
     assert.strictEqual(named(env.plan(), 'production.buff').length, 0);
+    assert.strictEqual(named(env.plan(), 'production.rebuff').length, 0);
 });
 
 t.test('an enabled row orders Items runs into an empty queue and nothing while it holds any entry', function () {
@@ -506,7 +517,7 @@ t.test('ordersPerPass and buffsPerPass cap one pass', function () {
     assert.strictEqual(deferred.length, 1);
 });
 
-t.test('a buff only with an own order', function () {
+t.test('a buff-only row is never buffed; an item row gets the rider, then the reapply', function () {
     // A buff and no item: never buffed, even while its queue holds entries.
     var env = setup({
         types: [{ type: 30, buildings: [{ name: 'Workshop', grid: 30, level: 1 }] }],
@@ -524,9 +535,13 @@ t.test('a buff only with an own order', function () {
     var q2 = env2.plan();
     assert.strictEqual(named(q2, 'production.buff').length, 0);
     assert.deepStrictEqual(orderBuffs(q2), { Workshop: 'WorkBuff' });
-    // Once the queue holds an entry (Covered): no order and no buff.
+    // Once the queue holds the row's item: no order, and the reapply buffs it.
     env2.world.entries[30] = [{ item: 'Sword', finished: false }];
-    assert.strictEqual(env2.plan().length, 0);
+    var q3 = env2.plan();
+    assert.strictEqual(named(q3, 'production.order').length, 0);
+    assert.strictEqual(q3.length, 1);
+    assert.strictEqual(q3[0].name, 'production.rebuff');
+    assert.deepStrictEqual(plain(q3[0].params), [30, 'Workshop', 'WorkBuff']);
 });
 
 t.test('no buff when one is running or its state is unreadable', function () {
@@ -635,6 +650,227 @@ t.test('a configured buff on a building without a production queue is never buff
     });
     assert.strictEqual(env.plan().length, 0);
     assert.strictEqual(env.plan().length, 0);
+});
+
+// --- reapply ----------------------------------------------------------------
+
+// Appended reapply tests (inserted before the "holds, guards, scope" section).
+var WORKSHOP = [{ name: 'Workshop', grid: 30, level: 1 }];
+
+// A Workshop working on its row item, no buff running: the reapply case.
+function reapplyWorld(o) {
+    o = o || {};
+    var cfg = {
+        types: [{ type: 30, buildings: WORKSHOP }],
+        entries: { 30: [{ item: 'Sword', finished: false }] },
+        costs: { Sword: [] },
+        buildings: { Workshop: row('Sword', 1, 'WorkBuff') }
+    };
+    for (var k in o) cfg[k] = o[k];
+    return setup(cfg);
+}
+
+function rebuffs(env) { return named(env.plan(), 'production.rebuff'); }
+
+// Edits the stored settings (switches or the Workshop row) between passes.
+function edit(env, fn) {
+    var s = env.H.settings.read('production');
+    fn(s);
+    env.H.settings.write('production', s);
+}
+
+t.test('reapply: producing the row item at the head, no buff -> one rebuff, no order', function () {
+    var env = reapplyWorld();
+    var q = env.plan();
+    assert.deepStrictEqual(q.map(function (e) { return e.name; }), ['production.rebuff']);
+    assert.deepStrictEqual(plain(q[0].params), [30, 'Workshop', 'WorkBuff']);
+    assert.strictEqual(q[0].delay, 0);
+});
+
+t.test('reapply: a running buff of the same or another kind stays', function () {
+    ['OtherBuff', 'WorkBuff'].forEach(function (nm) {
+        var env = reapplyWorld({ buffed: { 30: true }, buffName: { 30: nm } });
+        assert.strictEqual(rebuffs(env).length, 0);
+        assert.strictEqual(rebuffs(env).length, 0);
+        assert.strictEqual(debugs(env, 'Workshop already has a production buff — buff not reapplied').length, 1);
+    });
+});
+
+t.test('reapply: unreadable buff state, production state or queue waits', function () {
+    var env = reapplyWorld({ buffed: { 30: null } });
+    assert.strictEqual(rebuffs(env).length, 0);
+    assert.strictEqual(debugs(env, 'buff state of Workshop unreadable — buff not reapplied').length, 1);
+    var env2 = reapplyWorld({ block: { 30: 'production state unreadable' } });
+    assert.strictEqual(rebuffs(env2).length, 0);
+    var env3 = reapplyWorld({ entries: { 30: null } });
+    assert.strictEqual(rebuffs(env3).length, 0);
+    rebuffs(env3);
+    assert.strictEqual(debugs(env3, 'queue of Workshop unreadable — buff not reapplied').length, 1);
+});
+
+t.test('reapply: idle buildings are left alone', function () {
+    var env = reapplyWorld({ entries: { 30: [] } });
+    assert.strictEqual(rebuffs(env).length, 0);
+    var env2 = reapplyWorld({ entries: { 30: [{ item: 'Sword', finished: true }] } });
+    assert.strictEqual(rebuffs(env2).length, 0);
+    var env3 = reapplyWorld({ block: { 30: 'not producing (state 1)' }, state: { 30: 1 } });
+    assert.strictEqual(rebuffs(env3).length, 0);
+});
+
+t.test('reapply: stock 0 or unreadable sends nothing', function () {
+    assert.strictEqual(rebuffs(reapplyWorld({ buffStock: { WorkBuff: 0 } })).length, 0);
+    var env = reapplyWorld({ buffStock: { WorkBuff: null } });
+    assert.strictEqual(rebuffs(env).length, 0);
+    assert.strictEqual(debugs(env, 'stock unreadable').length, 1);
+});
+
+t.test('reapply: gates (switches, row, match, hidden name, grid hold)', function () {
+    var env = reapplyWorld();
+    assert.strictEqual(rebuffs(env).length, 1);
+    edit(env, function (s) { s.buffs = false; });
+    assert.strictEqual(rebuffs(env).length, 0);
+    edit(env, function (s) { s.buffs = true; s.standing = false; });
+    assert.strictEqual(rebuffs(env).length, 0);
+    edit(env, function (s) { s.standing = true; s.buildings.Workshop.enabled = false; });
+    assert.strictEqual(rebuffs(env).length, 0);
+    edit(env, function (s) { s.buildings.Workshop.enabled = true; });
+    assert.strictEqual(rebuffs(env).length, 1);
+
+    assert.strictEqual(rebuffs(reapplyWorld({ noMatch: { WorkBuff: true } })).length, 0);
+
+    var env2 = reapplyWorld();
+    env2.mod.model.hiddenByName = function (n) { return n === 'Workshop'; };
+    assert.strictEqual(rebuffs(env2).length, 0);
+
+    var env3 = reapplyWorld();
+    env3.mod.buffEngine.holds()[30] = env3.T + 1000;
+    assert.strictEqual(rebuffs(env3).length, 0);
+});
+
+t.test('reapply: buffsPerPass is shared with order riders', function () {
+    var types = [{ type: 30, buildings: WORKSHOP },
+                 { type: 31, buildings: [{ name: 'Forge', grid: 31, level: 1 }] }];
+    var make = function (cap) {
+        return setup({
+            types: types,
+            // Workshop is idle (rider); Forge works on its item (reapply).
+            entries: { 31: [{ item: 'Axe', finished: false }] },
+            costs: { Sword: [], Axe: [] },
+            buildings: { Workshop: row('Sword', 1, 'BuffA'), Forge: row('Axe', 1, 'BuffB') },
+            extra: { buffsPerPass: cap, ordersPerPass: 2 }
+        });
+    };
+    var q = make(1).plan();
+    var riders = named(q, 'production.order').filter(function (e) { return e.params[5]; }).length;
+    assert.strictEqual(riders + named(q, 'production.rebuff').length, 1);
+    var q2 = make(2).plan();
+    assert.strictEqual(named(q2, 'production.order').filter(function (e) { return e.params[5]; }).length, 1);
+    assert.strictEqual(named(q2, 'production.rebuff').length, 1);
+});
+
+t.test('reapply: an open breaker sends nothing; one probe is spent once', function () {
+    var types = [{ type: 30, buildings: WORKSHOP },
+                 { type: 31, buildings: [{ name: 'Forge', grid: 31, level: 1 }] }];
+    var env = setup({
+        types: types,
+        entries: { 30: [{ item: 'Sword', finished: false }], 31: [{ item: 'Axe', finished: false }] },
+        costs: { Sword: [], Axe: [] },
+        buildings: { Workshop: row('Sword', 1, 'BuffA'), Forge: row('Axe', 1, 'BuffB') }
+    });
+    var br = env.mod.buffEngine.breaker;
+    for (var i = 0; i < br.MISSES; i++) br.miss();
+    assert.strictEqual(br.isOpen(), true);
+    assert.strictEqual(rebuffs(env).length, 0);
+    env.T += br.COOLDOWN_MS;
+    var q = rebuffs(env);
+    assert.strictEqual(q.length, 1);
+    // The queued action asks no second admit: one attempt.
+    env.mod.buffEngine.eligible = function () { throw new Error('eligible must not run'); };
+    env.handlers['production.rebuff'](q[0].params);
+    assert.strictEqual(env.world.attempts.length, 1);
+});
+
+t.test('rebuffAction: one attempt, re-checks, and no second eligible', function () {
+    var env = reapplyWorld();
+    var rebuff = env.handlers['production.rebuff'];
+    env.mod.buffEngine.eligible = function () { throw new Error('eligible must not run'); };
+    rebuff([30, 'Workshop', 'WorkBuff']);
+    assert.strictEqual(env.world.attempts.length, 1);
+    finish(env, 'Verified');
+    env.world.buffed[30] = true;
+    assert.strictEqual(rebuffs(env).length, 0);
+
+    // Producer grid changed.
+    rebuff([31, 'Workshop', 'WorkBuff']);
+    assert.strictEqual(env.world.attempts.length, 1);
+    assert.strictEqual(debugs(env, 'producer of Workshop changed').length, 1);
+
+    // Row buff changed, item emptied, row off, switches off.
+    var cases = [
+        function (s) { s.buildings.Workshop.buff = 'Other'; },
+        function (s) { s.buildings.Workshop.item = ''; },
+        function (s) { s.buildings.Workshop.enabled = false; },
+        function (s) { s.buffs = false; },
+        function (s) { s.standing = false; }
+    ];
+    cases.forEach(function (fn) {
+        var e = reapplyWorld();
+        edit(e, fn);
+        e.mod.buffEngine.eligible = function () { throw new Error('eligible must not run'); };
+        e.handlers['production.rebuff']([30, 'Workshop', 'WorkBuff']);
+        assert.strictEqual(e.world.attempts.length, 0);
+    });
+});
+
+t.test('reapply: only for the row own item at the queue head', function () {
+    // Another item at the head: nothing, and no buff-state line.
+    var env = reapplyWorld({ entries: { 30: [{ item: 'Axe', finished: false }] } });
+    assert.strictEqual(rebuffs(env).length, 0);
+    assert.strictEqual(debugs(env, 'production buff').length, 0);
+    assert.strictEqual(debugs(env, 'buff state of').length, 0);
+
+    // The row item at the head, another behind it: buffed.
+    var env2 = reapplyWorld({ entries: { 30: [{ item: 'Sword', finished: false }, { item: 'Axe', finished: false }] } });
+    var q = rebuffs(env2);
+    assert.strictEqual(q.length, 1);
+    assert.deepStrictEqual(plain(q[0].params), [30, 'Workshop', 'WorkBuff']);
+
+    // The row item only behind another one: waits.
+    var env3 = reapplyWorld({ entries: { 30: [{ item: 'Axe', finished: false }, { item: 'Sword', finished: false }] } });
+    assert.strictEqual(rebuffs(env3).length, 0);
+
+    // An unreadable head item waits and is said once.
+    var env4 = reapplyWorld({ entries: { 30: [{ item: null, finished: false }] } });
+    assert.strictEqual(rebuffs(env4).length, 0);
+    assert.strictEqual(rebuffs(env4).length, 0);
+    assert.strictEqual(debugs(env4, 'producing item of Workshop unreadable — buff not reapplied').length, 1);
+});
+
+t.test('reapply: a mining-owned name is never rebuffed', function () {
+    var env = setup({
+        types: [{ type: 50, buildings: [{ name: 'IronMine', grid: 7, level: 1 }] }],
+        entries: { 50: [{ item: 'Iron', finished: false }] },
+        costs: { Iron: [] },
+        buildings: { IronMine: row('Iron', 5, 'MineBuff') }
+    });
+    assert.strictEqual(env.mod.ownedByMining('IronMine'), true);
+    assert.strictEqual(rebuffs(env).length, 0);
+});
+
+t.test('user cases 4 and 5: empty queue with a running buff orders without a buff', function () {
+    ['OtherBuff', 'WorkBuff'].forEach(function (nm) {
+        var env = reapplyWorld({ entries: { 30: [] }, buffed: { 30: true }, buffName: { 30: nm } });
+        var q = env.plan();
+        assert.deepStrictEqual(orderBuffs(q), { Workshop: '' });
+        assert.strictEqual(named(q, 'production.rebuff').length, 0);
+    });
+});
+
+t.test('user case 1: empty queue, no buff -> order with the buff', function () {
+    var env = reapplyWorld({ entries: { 30: [] } });
+    var q = env.plan();
+    assert.deepStrictEqual(orderBuffs(q), { Workshop: 'WorkBuff' });
+    assert.strictEqual(named(q, 'production.rebuff').length, 0);
 });
 
 // --- holds, guards, scope -----------------------------------------------
