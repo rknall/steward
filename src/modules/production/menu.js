@@ -10,6 +10,9 @@
  *   ✓/✕ Automatic queues         flips standing
  *   ✓/✕ Building buffs           flips buffs
  *
+ * After a separator the kernel may append the quick toggles of modules that
+ * declare `ui.toggleIn: 'production'`; those rows are not built here.
+ *
  * The row set never changes with state, only the label functions do, so
  * the submenu is never rebuilt: every native rebuild leaks objects in AIR,
  * and a label is written in place only when its text changed.

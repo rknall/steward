@@ -139,3 +139,34 @@ t.test('byGrid finds a deposit by grid', function () {
     t.assert.strictEqual(s.H.Steward.core.deposits.byGrid(12), d);
     t.assert.strictEqual(s.H.Steward.core.deposits.byGrid(99), null);
 });
+
+t.test('amountsRead maps grid to amount and max, keeps an amount above max, null max without GetMaxAmount', function () {
+    var Z = harness.boot().zone;
+    var s = setup({ Corn: [
+        Z.deposit({ name: 'Corn', grid: 5, amount: 56, maxAmount: 45 }),
+        Z.deposit({ name: 'Corn', grid: 6, amount: 10 })
+    ] });
+    var r = s.H.Steward.core.deposits.amountsRead('Corn');
+    t.assert.strictEqual(r.state, s.H.Steward.kernel.read.OK);
+    t.assert.strictEqual(r.value[5].amount, 56);
+    t.assert.strictEqual(r.value[5].max, 45);
+    t.assert.strictEqual(r.value[6].amount, 10);
+    t.assert.strictEqual(r.value[6].max, null);
+});
+
+t.test('amountsRead gives a null amount for a throwing GetAmount', function () {
+    var Z = harness.boot().zone;
+    var d = Z.deposit({ name: 'Corn', grid: 7, maxAmount: 45 });
+    d.GetAmount = function () { throw new Error('boom'); };
+    var s = setup({ Corn: [d] });
+    var r = s.H.Steward.core.deposits.amountsRead('Corn');
+    t.assert.strictEqual(r.value[7].amount, null);
+    t.assert.strictEqual(r.value[7].max, 45);
+});
+
+t.test('amountsRead is unreadable where byTypeRead is', function () {
+    var s = setup({});
+    s.sdm.getDeposits_vectorByType = function () { throw new Error('down'); };
+    var r = s.H.Steward.core.deposits.amountsRead('Corn');
+    t.assert.strictEqual(r.state, s.H.Steward.kernel.read.UNREADABLE);
+});

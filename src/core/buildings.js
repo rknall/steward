@@ -637,6 +637,29 @@
         return bl.value ? true : false;
     }
 
+    // Whether the street map calls the building a depleted deposit. Null for
+    // no building. Depleted wells and fields are separate shell building types,
+    // so the name already says it; this is the host's own second opinion. When
+    // the street map lacks the method (present false) the name is the only fact
+    // left, and whether that is enough is the caller's decision. value is
+    // null when the method exists but its call threw.
+    function depletedRead(b) {
+        if (!b) return null;
+        var sdm = null;
+        try {
+            var z = S.core.zone.current();
+            sdm = z ? z.mStreetDataMap : null;
+        } catch (e) { sdm = null; }
+        if (!sdm || typeof sdm.IsADepletedDeposit !== 'function') {
+            return { present: false, value: null };
+        }
+        try {
+            return { present: true, value: !!sdm.IsADepletedDeposit(b) };
+        } catch (e2) {
+            return { present: true, value: null };
+        }
+    }
+
     // True/false when the building shows a running production buff, null when
     // the host cannot answer.
     function hasProductionBuff(b) {
@@ -693,6 +716,7 @@
         buffBlock:         buffBlock,
         inDestruction:     inDestruction,
         upgrading:         upgrading,
+        depletedRead:      depletedRead,
         hasProductionBuff: hasProductionBuff,
         productionBuffInfo: productionBuffInfo,
         BUFF_BLOCKERS:     BUFF_BLOCKERS,

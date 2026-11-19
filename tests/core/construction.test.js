@@ -296,6 +296,13 @@ t.test('upgrade: a missing or throwing IsUpgradeAllowed refuses as a read refusa
     assert.strictEqual(s2.host.upgrades.length, 0);
 });
 
+t.test('freeSlots counts the free build-queue slots', function () {
+    var s = setup();
+    var f = s.S.core.construction.freeSlots;
+    assert.strictEqual(f({ slotsTotal: 3, slotsUsed: 2 }), 1);
+    assert.strictEqual(f({ slotsTotal: 3, slotsUsed: 3 }), 0);
+});
+
 t.test('capacity: ok with the four counts, notReady without a player, unreadable for a non-number or throwing member', function () {
     var s = setup();
     var R = s.S.kernel.read;
@@ -325,4 +332,186 @@ t.test('capacity: ok with the four counts, notReady without a player, unreadable
 
     s.gi.mCurrentPlayer = null;
     assert.strictEqual(s.S.core.construction.capacity().state, R.NOT_READY);
+});
+
+var SHELL = 'DepletedWell';
+
+// A home zone with a depleted shell on grid 10 (constructing false unless
+// o.shell says otherwise), a street map that calls it depleted (o.dep) and a
+// build queue of o.used of o.slots.
+function rebuildSetup(o) {
+    o = o || {};
+    var shellOpts = { name: SHELL, grid: 10, level: 1, constructing: false };
+    for (var k in (o.shell || {})) shellOpts[k] = o.shell[k];
+    var s = setup({ mine: shellOpts, home: o.home });
+    s.shellOpts = shellOpts;
+    s.z.buildQueue(typeof o.used === 'number' ? o.used : 1, typeof o.slots === 'number' ? o.slots : 3);
+    var dep = o.dep === undefined ? function () { return true; } : o.dep;
+    if (dep) s.z.zone.mStreetDataMap.IsADepletedDeposit = dep;
+    return s;
+}
+
+function rebuildDef(s) {
+    return s.S.core.construction.rebuild(176, 10, 'Well_03', SHELL);
+}
+
+t.test('rebuild: label, category, timeout and no retry', function () {
+    var def = rebuildDef(rebuildSetup());
+    assert.strictEqual(def.label, 'rebuild Well_03 10');
+    assert.strictEqual(def.category, 'construction');
+    assert.strictEqual(def.timeoutMs, 30000);
+    assert.strictEqual(def.retries, 0);
+});
+
+t.test('rebuild: an idle depleted shell with a free slot passes the precheck', function () {
+    assert.strictEqual(rebuildDef(rebuildSetup()).precheck(), null);
+});
+
+t.test('rebuild: precheck refuses off home and on an unreadable zone first', function () {
+    var s = rebuildSetup({ home: false });
+    assert.strictEqual(s.S.core.construction.rebuild('x', 10, 'Well_03', SHELL).precheck(),
+                       'not on the home island');
+    var s2 = rebuildSetup();
+    s2.gi.mCurrentViewedZoneID = 'x';
+    var r = s2.S.core.construction.rebuild('x', 10, 'Well_03', SHELL).precheck();
+    assert.strictEqual(r, s2.S.core.zone.UNREADABLE);
+    assert.strictEqual(s2.S.kernel.read.isReadRefusal(r), true);
+});
+
+t.test('rebuild: precheck refuses a missing building id', function () {
+    var s = rebuildSetup();
+    var c = s.S.core.construction;
+    assert.strictEqual(c.rebuild(undefined, 10, 'Well_03', SHELL).precheck(), 'unknown building id');
+    assert.strictEqual(c.rebuild('176', 10, 'Well_03', SHELL).precheck(), 'unknown building id');
+    assert.strictEqual(c.rebuild(0, 10, 'Well_03', SHELL).precheck(), 'unknown building id');
+});
+
+t.test('rebuild: a throwing building list is a read refusal', function () {
+    var s = rebuildSetup();
+    s.z.zone.mStreetDataMap.GetBuildings_vector = function () { throw new Error('list gone'); };
+    var r = rebuildDef(s).precheck();
+    assert.strictEqual(r, 'buildings unreadable');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(r), true);
+});
+
+t.test('rebuild: shell gone, constructing and depleted false or throwing are refused', function () {
+    var s = rebuildSetup({ shell: { name: 'Well_03' } });
+    assert.strictEqual(rebuildDef(s).precheck(), 'shell gone');
+    var s2 = rebuildSetup({ shell: { constructing: true } });
+    assert.strictEqual(rebuildDef(s2).precheck(), 'under construction');
+    var s3 = rebuildSetup({ dep: function () { return false; } });
+    assert.strictEqual(rebuildDef(s3).precheck(), 'not depleted');
+    var s4 = rebuildSetup({ dep: function () { throw new Error('x'); } });
+    var r = rebuildDef(s4).precheck();
+    assert.strictEqual(r, s4.S.core.shells.DEPLETED_UNREADABLE);
+    assert.strictEqual(s4.S.kernel.read.isReadRefusal(r), true);
+});
+
+t.test('rebuild: an unreadable or full build queue is refused', function () {
+    var s = rebuildSetup();
+    s.gi.mCurrentPlayer.mBuildQueue = null;
+    var r = rebuildDef(s).precheck();
+    assert.strictEqual(r, 'build queue unreadable');
+    assert.strictEqual(s.S.kernel.read.isReadRefusal(r), true);
+    var s2 = rebuildSetup({ used: 3, slots: 3 });
+    var r2 = rebuildDef(s2).precheck();
+    assert.strictEqual(r2, 'build queue full');
+    assert.strictEqual(s2.S.kernel.read.isReadRefusal(r2), false);
+});
+
+t.test('rebuild: sends (50, id, grid, 0, null) once and verifies on another name', function () {
+    var s = rebuildSetup();
+    var r = run(s, rebuildDef(s), {
+        max: 300,
+        onStep: function () { if (s.sent.actions.length === 1) s.shellOpts.name = 'Well_03'; }
+    });
+    assert.strictEqual(r.status, s.S.ActionResult.Verified);
+    assert.strictEqual(r.sends, 1);
+    assert.deepStrictEqual(json(s.sent.actions), [{ id: 50, p1: 176, p2: 10, p3: 0, data: null }]);
+});
+
+t.test('rebuild: verifies when the shell goes under construction; log carries the diagnostic', function () {
+    var s = rebuildSetup();
+    var r = run(s, rebuildDef(s), {
+        max: 300,
+        onStep: function () {
+            if (s.sent.actions.length === 1 && !s.shellOpts.constructing) {
+                s.shellOpts.constructing = true;
+                s.z.buildQueue(2, 3);
+            }
+        }
+    });
+    assert.strictEqual(r.status, s.S.ActionResult.Verified);
+    assert.strictEqual(r.sends, 1);
+    var line = s.H.logs().filter(function (l) {
+        return l.category === 'construction' && String(l.args[0]).indexOf('rebuild Well_03 10') === 0;
+    }).pop();
+    var text = String(line.args[0]);
+    assert.ok(text.indexOf('preplace ') >= 0, text);
+    assert.ok(text.indexOf('lookup ') >= 0, text);
+    assert.ok(text.indexOf('queue 1/3 -> 2/3') >= 0, text);
+    assert.ok(text.indexOf('id 176') >= 0, text);
+});
+
+t.test('rebuild: a grid that empties or reads an empty name never verifies', function () {
+    var s = rebuildSetup();
+    var r = run(s, rebuildDef(s), {
+        max: 300,
+        onStep: function () { if (s.sent.actions.length === 1) s.shellOpts.grid = 99; }
+    });
+    assert.strictEqual(r.status, s.S.ActionResult.Failed);
+    assert.strictEqual(r.unseen, true);
+    assert.strictEqual(r.sends, 1);
+
+    var s2 = rebuildSetup();
+    var b = s2.S.core.buildings.byGrid(10);
+    var r2 = run(s2, rebuildDef(s2), {
+        max: 300,
+        onStep: function () {
+            if (s2.sent.actions.length === 1) b.GetBuildingName_string = function () { return ''; };
+        }
+    });
+    assert.strictEqual(r2.status, s2.S.ActionResult.Failed);
+    assert.strictEqual(r2.unseen, true);
+    assert.strictEqual(s2.sent.actions.length, 1);
+});
+
+t.test('rebuild: a grid already rebuilt is satisfied with zero sends', function () {
+    var s = rebuildSetup({ shell: { name: 'Well_03' } });
+    var r = run(s, rebuildDef(s));
+    assert.strictEqual(r.status, s.S.ActionResult.Verified);
+    assert.strictEqual(r.sends, 0);
+    assert.strictEqual(s.sent.actions.length, 0);
+});
+
+t.test('rebuild: never satisfied or observable off a readable home view', function () {
+    var s = rebuildSetup({ shell: { name: 'Well_03' } });
+    s.gi.mCurrentPlayerZone = null;
+    var def = rebuildDef(s);
+    assert.strictEqual(def.satisfied(), false);
+    assert.strictEqual(def.check(), false);
+    assert.strictEqual(def.observable(), false);
+});
+
+t.test('rebuild: failedProof only on the idle shell at home', function () {
+    var s = rebuildSetup();
+    var def = rebuildDef(s);
+    assert.strictEqual(def.failedProof(), 'grid 10 still shows ' + SHELL + ', not under construction');
+    s.shellOpts.constructing = true;
+    assert.strictEqual(def.failedProof(), null);
+    s.shellOpts.constructing = false;
+    s.shellOpts.name = 'Well_03';
+    assert.strictEqual(def.failedProof(), null);
+    s.shellOpts.name = SHELL;
+    s.z.zone.mStreetDataMap.IsADepletedDeposit = function () { throw new Error('x'); };
+    assert.strictEqual(def.failedProof(), null);
+    s.z.zone.mStreetDataMap.IsADepletedDeposit = function () { return true; };
+    s.gi.mCurrentPlayerZone = null;
+    assert.strictEqual(def.failedProof(), null);
+});
+
+t.test('rebuild: describe never throws without a baseline', function () {
+    var s = rebuildSetup();
+    var text = rebuildDef(s).describe(undefined);
+    assert.ok(text.indexOf('queue ? -> 1/3') >= 0, text);
 });

@@ -1,0 +1,72 @@
+<p class="ug-lead">Rebuilds exhausted wells and wheatfields on your home island with the type you choose, one at a time.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want exhausted wells and fields rebuilt.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Economy Advisor from the Steward menu (Open Economy Advisor&hellip;) and select the Rebuild tab.</li>
+      <li>Under "Rebuild wells and fields", turn on "Rebuild on the home island", then press Save. Or flip it at once from the Steward menu under Production, at "&#10005; Rebuild Wells and Fields".</li>
+      <li>Stay on your home island.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each depleted well or field (the game's <em>depleted water deposit</em> and <em>depleted corn deposit</em> shells) gets the chosen building, one per tick, whenever a build-queue slot is free. It only acts on the home island. Each rebuild is checked on its grid and recorded, so it is never sent twice, even across restarts. The module waits while the build list or the slots cannot be read, and does nothing while you are not on the home island. When the build queue is full the tab shows "(Waiting for rebuild...)" and the rebuild goes out once a slot frees up. The Overview tile shows how many entries are still waiting on their grid only while at least one shell is exhausted. A rebuild that never shows up on its grid is a note you check in the game, and it counts toward the rebuild breaker, which pauses rebuilding. The module is off until you turn it on.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want to see how much is left in each well and field.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Rebuild tab of the Economy Advisor and look at the Amount column of the table.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each row shows what is left in the shell as an amount and, where the game gives one, a maximum (amount / maximum). An amount can be above the maximum when you added to it yourself. A value that cannot be read yet shows as <code>reading...</code>, and some buildings may keep showing it because their amount is not always available.</dd>
+  </dl>
+</div>
+
+<div class="ug-story">
+  <p class="ug-want">You want a different well or field type.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>In the settings card of the Rebuild tab, pick the well type and the field type from the dropdowns.</li>
+      <li>Press Save.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>New rebuilds use that type. Rebuilds already made are not changed.</dd>
+  </dl>
+</div>
+
+<h2>Settings</h2>
+<p>The settings are in the settings card of the Rebuild tab in the Economy Advisor. They are stored under <code>steward.rebuild</code> in the host settings file.</p>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The module switch. When off, the module does nothing. It is off by default because rebuilding spends resources and build-queue slots.</p>
+  <p><em>Change it when</em> you want exhausted wells and fields rebuilt for you, or to stop.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>wellType</code></h3>
+  <p class="ug-def">Default: <code>Well</code></p>
+  <p>The building placed on an exhausted well. Allowed names: <code>Well</code> (Well), <code>Well_03</code> (Deep Well) and <code>Well_04</code> (Bottomless Well). An unknown name falls back to the first entry, <code>Well</code>.</p>
+  <p><em>Change it when</em> you want deeper wells than the plain one.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>fieldType</code></h3>
+  <p class="ug-def">Default: <code>Farmfield</code></p>
+  <p>The building placed on an exhausted field. Allowed names: <code>Farmfield</code> (Wheatfield), <code>Farmfield_03</code> (Medium Wheatfield) and <code>Farmfield_04</code> (Tightly Sown Wheatfield). An unknown name falls back to the first entry, <code>Farmfield</code>.</p>
+  <p><em>Change it when</em> you want a larger field than the plain one.</p>
+</div>
+
+<h2>Notes</h2>
+<ul>
+  <li>The record of what was sent lives in <code>steward/state/ledger.json</code> in the data folder, and the log category is <code>rebuild</code>.</li>
+  <li>If a rebuild is sent but neither shows up nor fails for a long time, its entry turns stale. The log says so once, and that grid stays blocked until the entry is resolved. Deleting <code>ledger.json</code> is the manual reset.</li>
+</ul>

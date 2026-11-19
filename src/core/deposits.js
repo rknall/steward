@@ -92,6 +92,31 @@
         }
     }
 
+    function num(d, method) {
+        try {
+            if (!d || typeof d[method] !== 'function') return null;
+            var v = d[method]();
+            return S.kernel.is.finite(v) ? v : null;
+        } catch (e) { return null; }
+    }
+
+    // Result form: a map from grid to { amount, max } for one deposit type.
+    // GetMaxAmount is the deposit's maximum, and the amount can exceed it when
+    // the player refilled the deposit. A value the host does not give is null,
+    // so "unknown" never reads as zero.
+    function amountsRead(typeName, opts) {
+        var R = S.kernel.read;
+        var r = byTypeRead(typeName, opts);
+        if (!R.isOk(r)) return r;
+        var map = {};
+        for (var i = 0; i < r.value.length; i++) {
+            var g = grid(r.value[i]);
+            if (g === null) continue;
+            map[g] = { amount: num(r.value[i], 'GetAmount'), max: num(r.value[i], 'GetMaxAmount') };
+        }
+        return R.ok(map);
+    }
+
     // Built from byType over the deposit-type enum, so a failed read of any
     // type propagates instead of shrinking the list.
     function list(opts) {
@@ -191,6 +216,7 @@
     S.core.deposits.byType   = byType;
     S.core.deposits.byTypeRead = byTypeRead;
     S.core.deposits.depletedManagedRead = depletedManagedRead;
+    S.core.deposits.amountsRead = amountsRead;
     S.core.deposits.byGrid   = byGrid;
     S.core.deposits.depleted = depleted;
     S.core.deposits.isManagedDepleted = isManagedDepleted;
