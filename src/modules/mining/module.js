@@ -154,7 +154,7 @@
         var slotsRemaining = 0;
         var licensesRemaining = 0;
         if (S.kernel.read.isOk(cap)) {
-            slotsRemaining    = cap.value.slotsTotal - cap.value.slotsUsed;
+            slotsRemaining    = S.core.construction.freeSlots(cap.value);
             licensesRemaining = cap.value.licMax - cap.value.licUsed;
         }
         return {

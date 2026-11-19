@@ -296,6 +296,13 @@ t.test('upgrade: a missing or throwing IsUpgradeAllowed refuses as a read refusa
     assert.strictEqual(s2.host.upgrades.length, 0);
 });
 
+t.test('freeSlots counts the free build-queue slots', function () {
+    var s = setup();
+    var f = s.S.core.construction.freeSlots;
+    assert.strictEqual(f({ slotsTotal: 3, slotsUsed: 2 }), 1);
+    assert.strictEqual(f({ slotsTotal: 3, slotsUsed: 3 }), 0);
+});
+
 t.test('capacity: ok with the four counts, notReady without a player, unreadable for a non-number or throwing member', function () {
     var s = setup();
     var R = s.S.kernel.read;

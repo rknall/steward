@@ -1070,3 +1070,113 @@ t.test('the economy entry is enabled with a module and opens the economy modal',
     item.onSelect();
     t.assert.strictEqual(s.rig.made[s.rig.made.length - 1].id, 'StewardEconomy');
 });
+
+// A host module with a ~Steward~ submenu and a module whose quick toggle
+// joins it through ui.toggleIn. `hostMenu: false` registers the host
+// without a menu, so the join has nowhere to go.
+function setupJoin(opts) {
+    opts = opts || {};
+    var H = harness.boot({ sections: ['kernel'] });
+    var M = installMenuStubs(H);
+    var host = {
+        id:       'host',
+        priority: 'PriorityNormal',
+        isReady:  function () { return true; },
+        plan:     function () {}
+    };
+    if (opts.hostMenu !== false) {
+        host.menu = { title: 'Host', items: [{ label: 'Open host', onSelect: function () {} }] };
+    }
+    H.Steward.kernel.register(host);
+    H.Steward.kernel.register({
+        id:       'joiner',
+        priority: 'PriorityNormal',
+        isReady:  function () { return true; },
+        plan:     function () {},
+        ui: {
+            tab: 'misc',
+            toggleIn: 'host',
+            section: { id: 'joiner', title: 'Joiner', render: function () {} }
+        }
+    });
+    H.settings.write('joiner', { enabled: true });
+    var cancelled = [];
+    H.Steward.kernel.queue.cancelByModule = function (id) { cancelled.push(id); return 0; };
+    H.Steward.kernel.ui.init();
+    return { H: H, counts: M.counts, rootMenu: M.rootMenu, cancelled: cancelled };
+}
+
+function stewardSub(rootMenu) { return rootMenu.getItemByName('StewardRoot').submenu; }
+
+function hostInner(rootMenu) { return stewardSub(rootMenu).getItemByName('StewardModuleMenu_host').submenu; }
+
+function joinWarns(H) {
+    return H.logs().filter(function (l) {
+        return l.level === 'warn' && l.args.join(' ').indexOf('toggleIn names no module submenu') >= 0;
+    });
+}
+
+t.test('a joined toggle is the last host submenu item, after a separator', function () {
+    var s = setupJoin();
+    var inner = hostInner(s.rootMenu);
+    var n = inner.items.length;
+    t.assert.strictEqual(inner.items[0].label, 'Open host');
+    t.assert.strictEqual(inner.items[n - 2].isSeparator, true);
+    t.assert.strictEqual(inner.items[n - 1].name, 'StewardModuleToggle_joiner');
+    t.assert.strictEqual(inner.items[n - 1].label, '✓ Joiner');
+    t.assert.strictEqual(stewardSub(s.rootMenu).getItemByName('StewardModuleToggle_joiner'), null);
+    t.assert.strictEqual(joinWarns(s.H).length, 0);
+});
+
+t.test('selecting a joined toggle flips enabled, cancels and writes one label', function () {
+    var s = setupJoin();
+    var inner = hostInner(s.rootMenu);
+    var item = inner.items[inner.items.length - 1];
+    settle(s);
+    var before = snapshot(s.counts);
+    item.onSelect();
+    t.assert.strictEqual(s.H.settings.read('joiner').enabled, false);
+    t.assert.deepStrictEqual(s.cancelled, ['joiner']);
+    t.assert.strictEqual(item.label, '✕ Joiner');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+    t.assert.deepStrictEqual(snapshot(s.counts), before);
+    item.onSelect();
+    t.assert.strictEqual(s.H.settings.read('joiner').enabled, true);
+    t.assert.deepStrictEqual(s.cancelled, ['joiner']);
+});
+
+t.test('an external flip refreshes a joined toggle in place', function () {
+    var s = setupJoin();
+    var inner = hostInner(s.rootMenu);
+    var item = inner.items[inner.items.length - 1];
+    settle(s);
+    s.H.settings.write('joiner', { enabled: false });
+    s.H.Steward.kernel.ui.status.refresh();
+    t.assert.strictEqual(hostInner(s.rootMenu), inner);
+    t.assert.strictEqual(item.label, '✕ Joiner');
+    t.assert.strictEqual(s.counts.labelWrites, 1);
+});
+
+t.test('refreshModuleMenu rebuilds the host with one joined toggle that still refreshes', function () {
+    var s = setupJoin();
+    t.assert.strictEqual(s.H.Steward.kernel.ui.refreshModuleMenu('host'), true);
+    var inner = hostInner(s.rootMenu);
+    var joined = inner.items.filter(function (it) { return it.name === 'StewardModuleToggle_joiner'; });
+    t.assert.strictEqual(joined.length, 1);
+    t.assert.strictEqual(inner.items[inner.items.length - 1], joined[0]);
+    t.assert.strictEqual(inner.items.filter(function (it) { return it.isSeparator; }).length, 1);
+    settle(s);
+    s.H.settings.write('joiner', { enabled: false });
+    s.H.Steward.kernel.ui.status.refresh();
+    t.assert.strictEqual(joined[0].label, '✕ Joiner');
+});
+
+t.test('a toggleIn naming a module without a submenu stays in the main list and warns once per build', function () {
+    var s = setupJoin({ hostMenu: false });
+    var item = stewardSub(s.rootMenu).getItemByName('StewardModuleToggle_joiner');
+    t.assert.ok(item);
+    t.assert.strictEqual(item.label, '✓ Joiner');
+    t.assert.strictEqual(joinWarns(s.H).length, 1);
+    s.H.Steward.kernel.ui.init();
+    t.assert.strictEqual(joinWarns(s.H).length, 2);
+});

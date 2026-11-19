@@ -65,7 +65,8 @@
         { id: 'mining',      label: 'Mining' },
         { id: 'buildings',   label: 'Collect' },
         { id: 'events',      label: 'Events' },
-        { id: 'production',  label: 'Production' }
+        { id: 'production',  label: 'Production' },
+        { id: 'rebuild',     label: 'Rebuild' }
     ];
 
     // Elements of the open dashboard that chrome() and activate() update.

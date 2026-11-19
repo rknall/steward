@@ -17,6 +17,8 @@
  *      (its `visible` function) and be moved in and out with showBarMenu.
  *      Module and bar menu items may nest one submenu level deeper; a
  *      nested submenu is built once with its parent and refreshed with it.
+ *      A module's quick toggle may sit at the end of another module's
+ *      submenu instead of in the main list (`ui.toggleIn`).
  *
  *   2. Dashboard modal ("Steward") — a header with the running state and a
  *      one-line summary, a tab bar (Overview, then one tab per registry tab
@@ -278,6 +280,10 @@
 
             appendDashboardItems(sub);
 
+            // Reset before the module submenus: a joined quick toggle is built
+            // inside its host's submenu and must survive into the main list's
+            // build and the label refresh.
+            toggleItems = {};
             appendModuleMenus(sub);
 
             // Per-module quick-toggles. Each enabled-aware module surfaces a
@@ -285,7 +291,6 @@
             // settings.<id>.enabled and updates the entry's label. autoTSO has the
             // equivalent under "Start/Stop X Auto".
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
-            toggleItems = {};
             appendModuleQuickToggles(sub);
 
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
@@ -332,12 +337,19 @@
     // `enabled` settings flag. Click the entry to flip it without opening
     // the modal. Mirrors autoTSO's "Start/Stop X Auto" entries. Modules
     // that don't expose `enabled` (e.g. diagnostics — read-only probes)
-    // are skipped automatically.
+    // are skipped automatically. A toggle joined into another module's
+    // submenu is left out here; one whose host has no submenu stays here, so
+    // a switch never disappears.
     function appendModuleQuickToggles(sub) {
         try {
             var mods = S.kernel.registry.withUi();
             for (var i = 0; i < mods.length; i++) {
-                appendOneToggle(sub, mods[i]);
+                var m = mods[i];
+                if (joinTarget(m) !== null) continue;
+                if (m.ui.toggleIn) {
+                    S.kernel.warn('ui', m.id, 'toggleIn names no module submenu:', m.ui.toggleIn);
+                }
+                appendOneToggle(sub, m);
             }
         } catch (e) {
             S.kernel.error('ui', 'appendModuleQuickToggles threw:', e);
@@ -389,9 +401,38 @@
     function appendOneModuleMenu(sub, mod) {
         var entry = new air.NativeMenuItem(mod.menu.title);
         entry.name = 'StewardModuleMenu_' + mod.id;
-        entry.submenu = buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+        entry.submenu = buildStewardSubmenu(mod);
         moduleEntries[mod.id] = entry;
         sub.addItem(entry);
+    }
+
+    // The module whose ~Steward~ submenu hosts mod's quick toggle, or null
+    // when mod joins none or names a module without a submenu.
+    function joinTarget(mod) {
+        var id = mod.ui ? mod.ui.toggleIn : null;
+        if (!id) return null;
+        var host = S.kernel.registry.get(id);
+        return (host && host.menu) ? id : null;
+    }
+
+    // A module's ~Steward~ submenu: its own items, then, after a separator,
+    // the quick toggles of the modules that join it. The toggles are the
+    // ordinary ones (same label, flip and refresh), only drawn here. Bar
+    // menus take no joins.
+    function buildStewardSubmenu(mod) {
+        var inner = buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+        var mods = S.kernel.registry.withUi();
+        var first = true;
+        for (var i = 0; i < mods.length; i++) {
+            var m = mods[i];
+            if (joinTarget(m) !== mod.id || toggleLabel(m) === null) continue;
+            if (first) {
+                try { inner.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
+                first = false;
+            }
+            appendOneToggle(inner, m);
+        }
+        return inner;
     }
 
     function barModules() {
@@ -654,7 +695,7 @@
         var entry = moduleEntries[id];
         if (!mod || !mod.menu || !entry) return false;
         return swapSubmenu('module menu', id, entry, function () {
-            return buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+            return buildStewardSubmenu(mod);
         });
     }
 

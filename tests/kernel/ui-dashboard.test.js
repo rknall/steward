@@ -502,6 +502,15 @@ t.test('a tab shared by both windows shows on each with only its sections', func
     assert.ok(ecoText.indexOf('gen') < 0);
 });
 
+t.test('an economy window with a module on tab rebuild shows the Rebuild tab', function () {
+    var s = setup();
+    modOn(s, 'rb', 'rebuild', s.S.Dashboard.Economy, {});
+    s.ui.openDashboard(null, s.S.Dashboard.Economy);
+    var $eco = body(s);
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.deepStrictEqual(tabIds($eco), ['overview', 'rebuild']);
+});
+
 t.test('an economy window with no module shows the hint', function () {
     var s = setup();
     s.ui.openDashboard(null, s.S.Dashboard.Economy);
