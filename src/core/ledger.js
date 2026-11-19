@@ -17,6 +17,8 @@
  *   sent    --window over-->         unseen   persisted; one breaker miss
  *   sent    --send false or threw--> unseen   it may have gone out; no miss
  *   sent    --NOT_SENT-->            (gone)   nothing went out, key free
+ *   sent    --refuted in the window-->
+ *                                    (gone)   turned down; key free, no miss
  *   unseen  --reread, check true-->  (gone)   observed late; breaker verifies
  *   unseen  --reread, age >= resolveAfterMs and a failure proof-->
  *                                    (gone)   failed; the key is free for
@@ -31,7 +33,9 @@
  * landed unseen and a second one would be paid twice. Observed and failed
  * are terminal and leave no entry. The miss is counted when the window runs
  * out (unseen), so the breaker reacts within one window; failed and stale
- * do not count again.
+ * do not count again. A refuted attempt (the def's refuted(base) named an
+ * observed rejection inside the window) is a proof as well: the send was
+ * answered and nothing is pending, so its key is freed with no miss.
  *
  * In memory the ledger also marks the keys whose attempt runs in this
  * session; reread() leaves those to their attempt. A 'sent' entry read back
@@ -427,7 +431,12 @@
         function done(r) {
             if (own()) delete flight[k];
             var R = S.ActionResult;
-            if (r.status === R.Verified && r.sends > 0) {
+            if (r.status === R.Failed && r.refuted === true) {
+                // The server answered with a rejection the def can read, so
+                // nothing is pending and the breaker has nothing to count.
+                drop(k);
+                S.kernel.log(category, label + ': ' + r.reason + '; ' + k + ' is free');
+            } else if (r.status === R.Verified && r.sends > 0) {
                 drop(k);
                 brk.verify(name);
                 S.kernel.log(category, label + ': observed');

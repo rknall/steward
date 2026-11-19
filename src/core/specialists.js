@@ -20,6 +20,9 @@
  * classifiable), unreadable or not ready, so "absent" is never read from a
  * lossy list. status() is Unknown, not Idle, when the task or in-use flag
  * cannot be read, and troopCapacityOf() is null when a getter throws.
+ *
+ * portraitTag() builds table portraits through the kernel's shared host image
+ * helper (S.kernel.ui.helpers.imageTag) instead of keeping its own cache.
  */
 
 (function (S) {
@@ -493,32 +496,21 @@
         return '';
     }
 
-    // Portrait <img> markup per icon id and size. Only real images are kept, so
-    // a placeholder handed out before the host decoded the bitmap is asked for
-    // again on the next call; a script reload starts with an empty cache.
-    var portraitCache = {};
-
-    // Portrait <img> markup for table views, '' when it cannot be built.
-    // getImageTag is a host global that does not exist early in boot, and the
-    // icon getter can throw on a half-initialised specialist, so every read is
-    // guarded and a miss simply means "no portrait". When the host returns a
-    // placeholder instead of an image, the placeholder is still returned and
-    // pass.portraitMissed is set so the caller can redraw once the bitmap exists.
+    // Portrait <img> markup for table views, '' when it cannot be built. The
+    // icon getter can throw on a half-initialised specialist, so it is guarded
+    // and a miss simply means "no portrait". Caching and the placeholder
+    // handling live in the shared kernel image helper; its imageMissed flag
+    // is reported as pass.portraitMissed so the caller can redraw once the
+    // bitmap exists.
     function portraitTag(spec, size, pass) {
         try {
-            if (typeof getImageTag !== 'function') return '';
             if (!spec || typeof spec.getIconID !== 'function') return '';
             var icon = spec.getIconID();
             if (!icon) return '';
-            var key = icon + '|' + (size || '20px');
-            if (portraitCache[key]) return portraitCache[key];
-            var tag = getImageTag(icon, size || '20px');
-            if (String(tag).indexOf('<img') === 0) {
-                portraitCache[key] = tag;
-                return tag;
-            }
-            if (pass && typeof pass === 'object') pass.portraitMissed = true;
-            return tag || '';
+            var img = {};
+            var tag = S.kernel.ui.helpers.imageTag(icon, size, img);
+            if (img.imageMissed && pass && typeof pass === 'object') pass.portraitMissed = true;
+            return tag;
         } catch (e) { return ''; }
     }
 

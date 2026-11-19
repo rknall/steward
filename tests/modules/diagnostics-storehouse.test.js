@@ -97,7 +97,10 @@ function setup() {
         GetResourceIcon: function () { return { bitmapData: { width: 32, height: 32 } }; },
         GetBitmapData: function () { return null; }
     };
-    H.ctx.ResourceGroupToWarehouseTab = { CL1: 'WarehouseTab1', Event: 'WarehouseTab6' };
+    H.ctx.ResourceGroupToWarehouseTab = {
+        CL1: 'WarehouseTab1', CL2: 'WarehouseTab2', CL3: 'WarehouseTab3', CL4: 'WarehouseTab4',
+        CL5: 'WarehouseTab8', Event: 'WarehouseTab6', Collectibles: 'WarehouseTab7'
+    };
     H.Steward.core.zone.isHome = function () { return true; };
     return {
         H: H, fs: fs, clock: clock, sent: sent,
@@ -137,6 +140,15 @@ t.test('record maps each definition to the trader tab', function () {
     });
 });
 
+t.test('record falls back to the raw group without the host tab map', function () {
+    withSetup(function (s) {
+        s.H.ctx.ResourceGroupToWarehouseTab = undefined;
+        var d = plain(s.sh.record()).definitions;
+        assert.strictEqual(byName(d, 'Wood').tabKey, 'CL1');
+        assert.strictEqual(byName(d, 'Barrel').tabKey, 'WarehouseTab7');
+    });
+});
+
 t.test('record reads the warehouse cap and cap-like getters', function () {
     withSetup(function (s) {
         var c = plain(s.sh.record()).capacity;
@@ -160,7 +172,10 @@ t.test('record lists held rows with vector and definition fields', function () {
         assert.deepStrictEqual(wood.icon.resourceIcon, { kind: 'bitmap', w: 32, h: 32 });
         assert.strictEqual(wood.icon.bitmapData, null);
         assert.ok(doc.heldItemKeys);
-        assert.deepStrictEqual(doc.hostTabMap, { CL1: 'WarehouseTab1', Event: 'WarehouseTab6' });
+        assert.deepStrictEqual(doc.hostTabMap, {
+            CL1: 'WarehouseTab1', CL2: 'WarehouseTab2', CL3: 'WarehouseTab3', CL4: 'WarehouseTab4',
+            CL5: 'WarehouseTab8', Event: 'WarehouseTab6', Collectibles: 'WarehouseTab7'
+        });
     });
 });
 

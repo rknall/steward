@@ -62,6 +62,41 @@ t.test('statusBadge is ok when idle and busy with the remaining time otherwise',
     assert.strictEqual(s.h.statusBadge(false, 0).text(), 'Busy');
 });
 
+// ---- Host images ------------------------------------------------------------
+
+t.test('imageTag caches a real image per id and size', function () {
+    var s = setup();
+    var calls = 0;
+    s.H.ctx.getImageTag = function (id, size) { calls++; return '<img ' + id + ' ' + size + '>'; };
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '<img Coin 24px>');
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '<img Coin 24px>');
+    assert.strictEqual(calls, 1, 'second read from the cache');
+    assert.strictEqual(s.h.imageTag('Coin'), '<img Coin 20px>', 'default size is its own key');
+    assert.strictEqual(calls, 2);
+});
+
+t.test('imageTag returns the placeholder uncached and marks the pass', function () {
+    var s = setup();
+    var ready = false;
+    s.H.ctx.getImageTag = function (id, size) { return ready ? '<img ' + id + '>' : '<span ph></span>'; };
+    var pass = {};
+    assert.strictEqual(s.h.imageTag('Coin', '24px', pass), '<span ph></span>');
+    assert.strictEqual(pass.imageMissed, true);
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '<span ph></span>', 'works without a pass');
+    ready = true;
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '<img Coin>', 'asked again, now cached');
+});
+
+t.test('imageTag is empty without the global, without an id or when the host throws', function () {
+    var s = setup();
+    s.H.ctx.getImageTag = undefined;
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '');
+    s.H.ctx.getImageTag = function () { throw new Error('host failure'); };
+    assert.strictEqual(s.h.imageTag('Coin', '24px'), '');
+    s.H.ctx.getImageTag = function () { return '<img x>'; };
+    assert.strictEqual(s.h.imageTag('', '24px'), '');
+});
+
 // ---- Parsers ----------------------------------------------------------------
 
 t.test('settingsParse sizeKB, whole and tickMs', function () {

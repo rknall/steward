@@ -350,3 +350,31 @@ t.test('idempotent: the def keeps its retries and a retry sends a second time', 
     assert.strictEqual(d2.retries, 0, 'a non-idempotent def never retries');
     assert.strictEqual(sends77(s2).length, 1);
 });
+
+t.test('attempt: a refuted attempt frees its key with no breaker miss', function () {
+    var s = setup();
+    var res = run(s, def(s, { refuted: function () { return 'stack came back'; } }));
+    assert.strictEqual(res.r.status, s.S.ActionResult.Failed);
+    assert.strictEqual(res.r.refuted, true);
+    assert.strictEqual(sends77(s).length, 1);
+    assert.deepStrictEqual(plain(fileEntries(s)), {});
+    assert.strictEqual(s.L.blocked(KEY), null);
+    assert.strictEqual(s.L.breaker('tester').snapshot().run, 0);
+    assert.strictEqual(logged(s, 'log', 'testcat', /^test send: stack came back; test\|home\|10 is free$/).length, 1);
+    assert.strictEqual(logged(s, 'warn', 'testcat', /stays blocked/).length, 0);
+
+    // The key is free: a new send goes out.
+    var again = run(s, def(s, { refuted: function () { return 'stack came back'; } }));
+    assert.strictEqual(again.r.refuted, true);
+    assert.strictEqual(sends77(s).length, 2);
+});
+
+t.test('attempt: an unseen attempt still counts a miss', function () {
+    var s = setup();
+    var res = run(s, def(s, { refuted: function () { return ''; } }));
+    assert.strictEqual(res.r.status, s.S.ActionResult.Failed);
+    assert.strictEqual(res.r.unseen, true);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(res.r, 'refuted'), false);
+    assert.strictEqual(s.L.blocked(KEY), 'unseen');
+    assert.strictEqual(s.L.breaker('tester').snapshot().run, 1);
+});

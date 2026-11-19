@@ -47,17 +47,13 @@
         return a < b ? -1 : (a > b ? 1 : 0);
     }
 
-    // Comparison label only: the tab the trader userscript (upstream
-    // getResourceList) files a resource under. The dump shows where it would
-    // put each item; steward does not use it to decide anything.
+    // The storehouse tab the host files a resource under
+    // (ResourceGroupToWarehouseTab through core). Where the host global is
+    // missing or has no such group, the raw group (or category) of the
+    // trader userscript stays as the value, so the dump still shows something.
     function traderTab(group, category) {
-        var t = group || category || 'WarehouseTab7';
-        var m = /^CL(\d+)$/.exec(t);
-        if (m) t = 'WarehouseTab' + m[1];
-        else if (t === 'Event') t = 'WarehouseTab6';
-        else if (t === 'Collectibles') t = 'WarehouseTab7';
-        if (t === 'WarehouseTab5') t = 'WarehouseTab8';
-        return t;
+        var t = group || category || '';
+        return S.core.resources.tabOfGroup(t) || t;
     }
 
     // Width and height of a returned bitmap, never its pixels.

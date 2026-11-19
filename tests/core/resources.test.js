@@ -284,3 +284,62 @@ t.test('categoryOf is empty when the definition has no category string', functio
     };
     t.assert.strictEqual(H.Steward.core.resources.categoryOf('Wood'), '');
 });
+
+function withGroups(H, groups) {
+    H.host.game.def = function (name) {
+        if (name !== 'ServerState::gEconomics') return null;
+        return {
+            GetResourcesDefaultDefinition: function (n) {
+                if (n === 'Odd') return { group_string: 7 };
+                if (n === 'NoGroup') return {};
+                return typeof groups[n] === 'string' ? { group_string: groups[n] } : null;
+            }
+        };
+    };
+}
+
+t.test('groupOf gives the group, empty when absent, null when unreadable', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withGroups(H, { Wood: 'CL1', Barrel: '' });
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.groupOf('Wood'), 'CL1');
+    t.assert.strictEqual(R.groupOf('Barrel'), '');
+    t.assert.strictEqual(R.groupOf('NoGroup'), '');
+    t.assert.strictEqual(R.groupOf('Odd'), '');
+    t.assert.strictEqual(R.groupOf('Mystery'), null);
+    t.assert.strictEqual(R.groupOf(''), null);
+});
+
+t.test('tabOfGroup maps through the host global', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.tabOfGroup(''), 'WarehouseTab7');
+    t.assert.strictEqual(R.tabOfGroup('CL5'), null);
+    H.ctx.ResourceGroupToWarehouseTab = { CL5: 'WarehouseTab8', Event: 'WarehouseTab6' };
+    t.assert.strictEqual(R.tabOfGroup('CL5'), 'WarehouseTab8');
+    t.assert.strictEqual(R.tabOfGroup(''), 'WarehouseTab7');
+    t.assert.strictEqual(R.tabOfGroup('DEF_MODE'), null);
+    t.assert.strictEqual(R.tabOfGroup(null), null);
+});
+
+t.test('tabOf chains the group and the tab', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    withGroups(H, { Wood: 'CL1', Barrel: '', Def: 'DEF_MODE' });
+    H.ctx.ResourceGroupToWarehouseTab = { CL1: 'WarehouseTab1' };
+    var R = H.Steward.core.resources;
+    t.assert.strictEqual(R.tabOf('Wood'), 'WarehouseTab1');
+    t.assert.strictEqual(R.tabOf('Barrel'), 'WarehouseTab7');
+    t.assert.strictEqual(R.tabOf('Def'), null);
+    t.assert.strictEqual(R.tabOf('Mystery'), null);
+});
+
+t.test('tabs lists the seven tabs in order with loca labels', function () {
+    var H = harness.boot({ sections: ['kernel', 'core'] });
+    H.host.loca.GetText = function (cat, key) { return cat === 'LAB' ? 'L:' + key : ''; };
+    var list = JSON.parse(JSON.stringify(H.Steward.core.resources.tabs()));
+    t.assert.deepStrictEqual(list.map(function (x) { return x.key; }), [
+        'WarehouseTab1', 'WarehouseTab2', 'WarehouseTab3', 'WarehouseTab4',
+        'WarehouseTab8', 'WarehouseTab6', 'WarehouseTab7'
+    ]);
+    t.assert.strictEqual(list[4].label, 'L:WarehouseTab8');
+});

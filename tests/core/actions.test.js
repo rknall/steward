@@ -609,3 +609,74 @@ t.test('HOLD_MAX_MS is exported', function () {
     var b = boot();
     assert.strictEqual(b.A.HOLD_MAX_MS, 60000);
 });
+
+t.test('refuted ends the attempt Failed with refuted true and no retry', function () {
+    var b = boot();
+    var world = { sends: 0, done: false, bases: [] };
+    var r = run(b, def(world, {
+        timeoutMs: 5 * gap(b),
+        baseline: function () { return { stock: 4 }; },
+        refuted: function (base) { world.bases.push(base); return 'came back'; }
+    }));
+    assert.strictEqual(r.results.length, 1);
+    var res = r.results[0];
+    assert.strictEqual(res.status, b.S.ActionResult.Failed);
+    assert.strictEqual(res.refuted, true);
+    assert.strictEqual(res.reason, 'came back');
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(res, 'unseen'), false);
+    assert.strictEqual(res.sends, 1, 'the default retry is not used');
+    assert.strictEqual(world.sends, 1);
+    assert.strictEqual(world.bases.length, 1);
+    assert.strictEqual(world.bases[0].stock, 4, 'refuted gets the baseline');
+    // The send step and the first poll, which ends the window early.
+    assert.strictEqual(r.drove.rounds, 2);
+});
+
+t.test('refuted is not called while held or inside checkAfterMs', function () {
+    var b = boot();
+    var world = { sends: 0, checks: 0, order: [] };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 6 * gap(b),
+        checkAfterMs: 3 * gap(b),
+        observable: falseFor(3, world),
+        check: function () { world.checks++; world.order.push('check'); return false; },
+        refuted: function () { world.order.push('refuted@' + world.obsCalls); return 'came back'; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Failed);
+    assert.strictEqual(r.results[0].refuted, true);
+    // Three held polls, two quiet ones, then the poll that reads both.
+    assert.deepStrictEqual(world.order, ['check', 'refuted@6']);
+    assert.strictEqual(r.drove.rounds, 7);
+});
+
+t.test('check true wins over refuted on the same poll', function () {
+    var b = boot();
+    var world = { sends: 0, done: true, refutes: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        refuted: function () { world.refutes++; return 'came back'; }
+    }));
+    assert.strictEqual(r.results[0].status, b.S.ActionResult.Verified);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(r.results[0], 'refuted'), false);
+    assert.strictEqual(world.refutes, 0);
+});
+
+t.test('a throwing refuted is no proof', function () {
+    var b = boot();
+    var world = { sends: 0, done: false, refutes: 0 };
+    var r = run(b, def(world, {
+        retries: 0,
+        timeoutMs: 2 * gap(b),
+        refuted: function () { world.refutes++; throw new Error('boom'); }
+    }));
+    var res = r.results[0];
+    assert.strictEqual(res.status, b.S.ActionResult.Failed);
+    assert.strictEqual(res.unseen, true);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(res, 'refuted'), false);
+    assert.strictEqual(world.refutes, 2, 'asked on every poll that checked');
+    var threw = logsAt(b, 'warn', 'testcat').filter(function (l) {
+        return String(l.args[0]).indexOf('refuted threw') !== -1;
+    });
+    assert.strictEqual(threw.length, 2);
+});

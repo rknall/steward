@@ -27,6 +27,9 @@
  * Escaping: every helper puts text in with .text(). The one exception is a
  * table cell given as `{ html: ... }`, which the caller has already escaped
  * (it may carry host image markup); escape() is there for that.
+ *
+ * Host images: imageTag(id, size, pass) is the one cached getImageTag reader
+ * (portraits, resource icons); a placeholder sets pass.imageMissed.
  */
 
 (function (S) {
@@ -685,6 +688,32 @@
         return empty(READING, text === undefined ? 'Retrying automatically.' : text, 'steward-muted');
     }
 
+    // Host image markup per id and size, '' when it cannot be built.
+    // getImageTag is a host global that does not exist early in boot and can
+    // throw on a half-initialised item, so every read is guarded and a miss
+    // simply means "no image". Only real images are cached: a placeholder
+    // handed out before the host decoded the bitmap is asked for again on the
+    // next call. The placeholder is still returned and pass.imageMissed is set
+    // so the caller can redraw once the bitmap exists. A script reload starts
+    // with an empty cache.
+    var imageCache = {};
+
+    function imageTag(id, size, pass) {
+        try {
+            if (typeof getImageTag !== 'function') return '';
+            if (!id) return '';
+            var key = id + '|' + (size || '20px');
+            if (imageCache[key]) return imageCache[key];
+            var tag = getImageTag(id, size || '20px');
+            if (String(tag).indexOf('<img') === 0) {
+                imageCache[key] = tag;
+                return tag;
+            }
+            if (pass && typeof pass === 'object') pass.imageMissed = true;
+            return tag || '';
+        } catch (e) { return ''; }
+    }
+
     // ---------------------------------------------------------------
 
     if (!S.kernel.ui) S.kernel.ui = {};
@@ -716,6 +745,7 @@
         redrawOnce: redrawOnce,
         unknown:   unknown,
         reading:   reading,
+        imageTag:  imageTag,
         READING:   READING,
         set:       set,
         get:       get,

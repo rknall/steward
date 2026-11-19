@@ -26,10 +26,21 @@
  * coins, manuscripts). The split is the game's own category, not a list kept
  * here.
  *
+ * Storehouse tabs: groupOf(name) reads the definition's group_string ('' when
+ * absent, null when unreadable), tabOfGroup(group) maps a group to its
+ * warehouse tab key through the host's own ResourceGroupToWarehouseTab ('' is
+ * the collectibles tab by the host's rule; null for DEF_MODE, an unknown group
+ * or a missing global), tabOf(name) chains the two, and tabs() lists the tab
+ * keys in display order with their loca labels. The tab is the group, not the
+ * category: a category-less resource is still in the storehouse, so
+ * uncategorized() is the mayor's house card and not "outside the storehouse".
+ *
  * Bundle slot: core, after packets.js and before specialists.js (core files
  * load in name order). Nothing here calls another core at load time; the top
  * level only assigns S.core.resources.
  */
+
+/* global ResourceGroupToWarehouseTab */
 
 (function (S) {
 
@@ -202,6 +213,58 @@
         return (readable || !held.length) ? out : null;
     }
 
+    // The storehouse tab keys in display order: the trader userscript's order
+    // (a display choice, the host defines none). The only ordered tab list.
+    var TAB_ORDER = ['WarehouseTab1', 'WarehouseTab2', 'WarehouseTab3', 'WarehouseTab4',
+                     'WarehouseTab8', 'WarehouseTab6', 'WarehouseTab7'];
+
+    // The definition's storehouse group: '' when it has none, null when the
+    // definition cannot be read.
+    function groupOf(resName) {
+        var def = defaultDefinition(resName);
+        if (!def) return null;
+        try {
+            var g = def.group_string;
+            return typeof g === 'string' ? g : '';
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // The tab key of a group. The mapping is the host's global, never a table
+    // here; an empty group is the collectibles tab by the host's rule, which
+    // the global has no key for.
+    function tabOfGroup(group) {
+        if (group === '') return 'WarehouseTab7';
+        if (typeof group !== 'string') return null;
+        try {
+            if (typeof ResourceGroupToWarehouseTab === 'undefined' || !ResourceGroupToWarehouseTab) return null;
+            var tab = ResourceGroupToWarehouseTab[group];
+            return typeof tab === 'string' ? tab : null;
+        } catch (e) {
+            if (!warnedThrow) {
+                warnedThrow = true;
+                S.kernel.warn('resources', 'ResourceGroupToWarehouseTab threw:', e);
+            }
+            return null;
+        }
+    }
+
+    // The storehouse tab key of a resource, null when unreadable or not a tab.
+    function tabOf(resName) {
+        var g = groupOf(resName);
+        return g === null ? null : tabOfGroup(g);
+    }
+
+    // The tabs in display order as [{ key, label }].
+    function tabs() {
+        var out = [];
+        for (var i = 0; i < TAB_ORDER.length; i++) {
+            out.push({ key: TAB_ORDER[i], label: S.core.locale.lab(TAB_ORDER[i]) });
+        }
+        return out;
+    }
+
     if (!S.core.resources) S.core.resources = {};
 
     S.core.resources.amount         = amount;
@@ -213,5 +276,9 @@
     S.core.resources.categoryOf     = categoryOf;
     S.core.resources.capacity       = capacity;
     S.core.resources.uncategorized  = uncategorized;
+    S.core.resources.groupOf        = groupOf;
+    S.core.resources.tabOfGroup     = tabOfGroup;
+    S.core.resources.tabOf          = tabOf;
+    S.core.resources.tabs           = tabs;
 
 }(Steward));

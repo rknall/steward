@@ -23,6 +23,15 @@
  *                Held polls are capped at HOLD_MAX_MS per attempt; after
  *                that every poll counts again. A throwing observable counts
  *                as observable
+ *   refuted(base)  a non-empty string when readable state shows the send
+ *                was processed and turned down (for example a stack the
+ *                server put back). Asked only on a poll whose check ran and
+ *                came back false; a string ends the attempt at once as
+ *                Failed with refuted: true and no retry, even when retries
+ *                allows one. Unlike a ledger failedProof ("the effect is
+ *                absent", safe only late), it names an observed rejection,
+ *                so it may end the window early. A throwing refuted counts
+ *                as no proof
  *   describe(base)  optional extra text for the final log line
  *   timeoutMs    verify window per send
  *   checkAfterMs no check runs before this much time has passed since the
@@ -46,7 +55,9 @@
  * the def allows (which first checks whether the effect arrived late), then a
  * named failure. A failure because the effect was never seen carries
  * unseen: true on its result, so a caller can tell it from a refusal or a send
- * that failed; the action may still have gone out.
+ * that failed; the action may still have gone out. A failure that refuted()
+ * proved carries refuted: true instead and no unseen: the send was answered
+ * with a rejection, so nothing is pending.
  * The window counts the polls that actually ran, not wall time: a check that
  * the modal guard or a queue backlog deferred does not use up the window,
  * and neither does a poll held because observable() returned false.
@@ -128,11 +139,18 @@
         return r.ok && r.value === true;
     }
 
+    // The def's proof that the send was turned down, or null. A throwing,
+    // missing or non-string answer, or an empty string, is no proof.
+    function refutation(state) {
+        var r = call(state, 'refuted', state.base);
+        return (r.ok && typeof r.value === 'string' && r.value !== '') ? r.value : null;
+    }
+
     function enqueue(state) {
         return S.kernel.queue.add(STEP, [state], pollGap()) === true;
     }
 
-    function finish(state, status, reason, unseen) {
+    function finish(state, status, reason, unseen, refuted) {
         var def = state.def;
         state.phase = 'done';
         var result = {
@@ -142,6 +160,7 @@
             sends:  state.sends
         };
         if (unseen === true) result.unseen = true;
+        if (refuted === true) result.refuted = true;
         var text = result.label + ': ' + status + ' after ' + state.sends + ' send(s)';
         if (result.reason) text += ' (' + result.reason + ')';
         var extra = call(state, 'describe', state.base);
@@ -254,9 +273,18 @@
             enqueue(state);
             return;
         }
-        if (!quiet(state) && observed(state)) {
-            finish(state, S.ActionResult.Verified, '');
-            return;
+        if (!quiet(state)) {
+            if (observed(state)) {
+                finish(state, S.ActionResult.Verified, '');
+                return;
+            }
+            // Only a poll that read the state may hear a rejection; a retry
+            // would only be turned down the same way.
+            var no = refutation(state);
+            if (no !== null) {
+                finish(state, S.ActionResult.Failed, no, false, true);
+                return;
+            }
         }
         state.polls++;
         if (state.polls * pollGap() >= state.def.timeoutMs) {
