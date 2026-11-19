@@ -15,8 +15,9 @@
  *
  * `pauseThreshold` is global: when a deposit type has `pause: true`,
  * tryPause only pauses producing mines once their deposit's remaining
- * amount drops below this threshold. Resume direction (pause: false →
- * setProduction(active)) is unconditional and ignores the threshold.
+ * amount drops below this threshold. tryPause never resumes a mine, and
+ * `pause: false` leaves mines (and manual pauses) alone. Resuming belongs
+ * to the refill phase (still a stub), after a refill Steward sent.
  *
  * The deposit rows are derived from the deposit types
  * (core/deposits/types.js), in their order. A type with a mine
