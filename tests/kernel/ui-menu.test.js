@@ -1013,3 +1013,60 @@ t.test('refreshRecords runs in one read pass', function () {
     t.assert.strictEqual(s.beta.passes.length, 1);
     t.assert.strictEqual(hr.inPass(), false);
 });
+
+// ---- Dashboard entries ------------------------------------------------------
+
+// Boots like setup() with an optional module on the Economy dashboard,
+// registered before init like every module.
+function setupWithEconomy(withEconomy) {
+    var H = harness.boot({ sections: ['kernel'] });
+    var M = installMenuStubs(H);
+    var rig = hostStubs.installModal(H);
+    H.Steward.kernel.ui.ensureStyle = function () {};
+    if (withEconomy) {
+        H.Steward.kernel.register({
+            id:       'eco',
+            priority: 'PriorityNormal',
+            isReady:  function () { return true; },
+            plan:     function () {},
+            ui: {
+                tab: 'production',
+                dashboard: H.Steward.Dashboard.Economy,
+                section: { id: 'eco', title: 'Eco', render: function () {} }
+            }
+        });
+    }
+    H.Steward.kernel.ui.init();
+    return { H: H, rootMenu: M.rootMenu, rig: rig };
+}
+
+function dashboardItems(rootMenu) {
+    var sub = rootMenu.getItemByName('StewardRoot').submenu;
+    var names = [];
+    for (var i = 0; i < sub.items.length; i++) names.push(sub.items[i].name);
+    return { sub: sub, names: names };
+}
+
+t.test('the economy entry follows the dashboard entry, once', function () {
+    var s = setupWithEconomy(true);
+    var names = dashboardItems(s.rootMenu).names;
+    var at = names.indexOf('StewardOpenDashboard');
+    t.assert.ok(at >= 0);
+    t.assert.strictEqual(names[at + 1], 'StewardOpenEconomy');
+    t.assert.strictEqual(names.filter(function (n) { return n === 'StewardOpenEconomy'; }).length, 1);
+});
+
+t.test('the economy entry is disabled while no module is on that window', function () {
+    var s = setupWithEconomy(false);
+    var d = dashboardItems(s.rootMenu);
+    t.assert.strictEqual(d.sub.getItemByName('StewardOpenEconomy').enabled, false);
+    t.assert.strictEqual(d.sub.getItemByName('StewardOpenDashboard').enabled, true);
+});
+
+t.test('the economy entry is enabled with a module and opens the economy modal', function () {
+    var s = setupWithEconomy(true);
+    var item = dashboardItems(s.rootMenu).sub.getItemByName('StewardOpenEconomy');
+    t.assert.strictEqual(item.enabled, true);
+    item.onSelect();
+    t.assert.strictEqual(s.rig.made[s.rig.made.length - 1].id, 'StewardEconomy');
+});

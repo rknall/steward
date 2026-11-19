@@ -1,9 +1,15 @@
 /*
- * Dashboard view ("Steward" modal).
+ * Dashboard view: one view, one window per dashboard category
+ * (S.kernel.ui.dashboards: the "Steward" modal for General, the "Economy
+ * Advisor" modal for Economy). Each module's ui.dashboard picks the window
+ * that shows its tab sections, its Overview tiles and its header count; a
+ * category is fixed at registration, so a window's contents never move
+ * while it is open.
  *
  * Layout, top to bottom:
- *   - header extras beside the modal title: a Running/Paused badge and a
- *     one-line summary (modules on, queue depth, build);
+ *   - header extras beside the modal title: a Running/Paused badge, a
+ *     one-line summary (modules on, queue depth, build) and a link to every
+ *     other window that has modules;
  *   - a tab bar: Overview always, then one tab per registry tab that has
  *     modules, in TAB_ORDER. A tab carries a dot when one of its modules has
  *     an enabled flag (lit while one is on and steward is not paused), a
@@ -97,8 +103,27 @@
         return [];
     }
 
+    // The category of the open window. The shell always stores a valid one;
+    // anything else (a state from an older caller) is the Steward dashboard.
+    function current() {
+        var d = state().dashboard;
+        return S.kernel.enumHas(S.Dashboard, d) ? d : S.Dashboard.General;
+    }
+
     function tabMods(tabId) {
-        return tabId === 'overview' ? [] : S.kernel.registry.byTab(tabId);
+        return tabId === 'overview' ? [] : S.kernel.registry.byTab(tabId, current());
+    }
+
+    // The first other category with a module on `tabId`, or null. Used to
+    // send a tile link to the window that shows that tab.
+    function otherWindowFor(tabId) {
+        var order = S.kernel.DASHBOARD_ORDER;
+        var here = current();
+        for (var i = 0; i < order.length; i++) {
+            if (order[i] === here) continue;
+            if (S.kernel.registry.byTab(tabId, order[i]).length > 0) return order[i];
+        }
+        return null;
     }
 
     function isShown(tabId) {
@@ -111,7 +136,7 @@
 
     function modulesOn() {
         var sc = screen();
-        var mods = S.kernel.registry.withUi();
+        var mods = S.kernel.registry.onDashboard(current());
         var n = 0;
         for (var i = 0; i < mods.length; i++) {
             if (sc.hasEnabledFlag(mods[i].id) && sc.isModuleEnabled(mods[i].id)) n++;
@@ -146,9 +171,32 @@
         $('.steward-head-extra', $head).remove();
         dom.$badge = $('<span>');
         dom.$sum = $('<span>', { 'class': 'steward-head-sum' });
-        $head.append($('<span>', { 'class': 'steward-head-extra' })
-            .append(dom.$badge).append(dom.$sum));
+        var $extra = $('<span>', { 'class': 'steward-head-extra' })
+            .append(dom.$badge).append(dom.$sum);
+        var links = crossLinks();
+        for (var i = 0; i < links.length; i++) $extra.append(links[i]);
+        $head.append($extra);
         updateHeader();
+    }
+
+    // One link per other window with at least one module, so a window
+    // nothing has chosen is never advertised. Opening it replaces this
+    // screen, which the shell refuses while edits are open.
+    function crossLinks() {
+        var order = S.kernel.DASHBOARD_ORDER;
+        var rows = S.kernel.ui.dashboards || {};
+        var here = current();
+        var out = [];
+        for (var i = 0; i < order.length; i++) {
+            if (order[i] === here || !rows[order[i]]) continue;
+            if (S.kernel.registry.onDashboard(order[i]).length === 0) continue;
+            (function (d) {
+                out.push($('<span>').text(' · ').append(helpers().link(rows[d].title + ' ›', function () {
+                    S.kernel.ui.openDashboard(null, d);
+                })));
+            }(order[i]));
+        }
+        return out;
     }
 
     function updateHeader() {
@@ -387,7 +435,7 @@
     }
 
     function tileModules() {
-        var mods = S.kernel.registry.withUi();
+        var mods = S.kernel.registry.onDashboard(current());
         var order = tileRanks();
         var out = [];
         var r, i;
@@ -423,8 +471,19 @@
         for (var i = 0; i < links.length; i++) {
             (function (ln) {
                 if (!ln) return;
+                // A tab shown here activates in place; a tab only another
+                // window shows opens that window on it. A tab no window
+                // shows gets no link: the shell would fall back to an empty
+                // tab on the Steward dashboard.
+                var other = null;
+                if (ln.tab && !isShown(ln.tab)) {
+                    other = otherWindowFor(ln.tab);
+                    if (!other) return;
+                }
                 out.push(h.link(ln.label, function () {
-                    if (ln.tab) {
+                    if (other) {
+                        S.kernel.ui.openDashboard(ln.tab, other);
+                    } else if (ln.tab) {
                         activate(ln.tab);
                     } else if (typeof ln.onClick === 'function') {
                         try { ln.onClick(); }
@@ -505,6 +564,10 @@
             }
         }
         if ($tiles.length) $stack.append(h.grid(screen().compact() ? 2 : 3, $tiles));
+        // Reachable only programmatically while the menu entry is greyed.
+        if (S.kernel.registry.onDashboard(current()).length === 0) {
+            $stack.append(h.empty('No modules on this dashboard', 'No module has chosen this dashboard yet.'));
+        }
         $panel.append($stack);
     }
 
