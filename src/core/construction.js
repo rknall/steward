@@ -97,7 +97,7 @@
                 return onHomeWith(grid, buildingName);
             },
             precheck: function () {
-                if (typeof buildingId !== 'number' || !(buildingId > 0)) return 'unknown building id';
+                if (!S.kernel.is.num(buildingId) || !(buildingId > 0)) return 'unknown building id';
                 var home = S.core.zone.homeRefusal();
                 if (home) return home;
                 S.core.buildings.invalidate();
@@ -246,7 +246,7 @@
             precheck: function () {
                 var home = S.core.zone.homeRefusal();
                 if (home) return home;
-                if (typeof buildingId !== 'number' || !(buildingId > 0)) return 'unknown building id';
+                if (!S.kernel.is.num(buildingId) || !(buildingId > 0)) return 'unknown building id';
                 S.core.buildings.invalidate();
                 if (!R.isOk(S.core.buildings.listRead({ live: true }))) return BUILDINGS_UNREADABLE;
                 var shell = S.core.shells.ready(S.core.buildings.byGrid(grid), shellName);

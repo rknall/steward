@@ -92,10 +92,6 @@
 
     function has(obj, key) { return S.kernel.is.has(obj, key); }
 
-    function isPlainObject(v) {
-        return v !== null && typeof v === 'object' && !Array.isArray(v);
-    }
-
     function positive(v) {
         return typeof v === 'number' && v > 0;
     }
@@ -199,7 +195,7 @@
         loaded = true;
         unread = false;
         warnedUnread = false;
-        if (!isPlainObject(data) || data.version !== FILE_VERSION || !isPlainObject(data.entries)) {
+        if (!S.kernel.is.plainObject(data) || data.version !== FILE_VERSION || !S.kernel.is.plainObject(data.entries)) {
             // The next write replaces the file.
             S.kernel.warn(CATEGORY, 'send ledger is invalid, starting empty');
             return true;
@@ -211,7 +207,7 @@
         for (k in data.entries) {
             if (!has(data.entries, k)) continue;
             e1 = data.entries[k];
-            if (!isPlainObject(e1) || typeof e1.state !== 'string' || !has(STATES, e1.state) ||
+            if (!S.kernel.is.plainObject(e1) || typeof e1.state !== 'string' || !has(STATES, e1.state) ||
                 typeof e1.sentAt !== 'number') {
                 changed = true;
                 continue;
@@ -226,7 +222,7 @@
             entries[k] = {
                 owner:          String(e1.owner),
                 label:          typeof e1.label === 'string' ? e1.label : k,
-                name:           typeof e1.name === 'string' ? e1.name : '',
+                name:           S.kernel.is.str(e1.name),
                 state:          e1.state,
                 sentAt:         sentAt,
                 base:           e1.base,
@@ -236,7 +232,7 @@
             count++;
         }
         if (count > 0) {
-            S.kernel.log(CATEGORY, 'read back ' + count + ' send ledger entr' + (count === 1 ? 'y' : 'ies') +
+            S.kernel.log(CATEGORY, 'read back ' + S.kernel.text.plural(count, 'send ledger entry', 'send ledger entries') +
                 ' from ' + S.kernel.files.stewardPath(SUBDIR) + '/' + FILE_NAME);
         }
         if (changed) write();
@@ -286,7 +282,7 @@
         if (has(owners, owner)) return true;
         var o = opts || {};
         var b = o.breaker || {};
-        var category = (typeof o.category === 'string' && o.category) ? o.category : CATEGORY;
+        var category = S.kernel.is.str(o.category) || CATEGORY;
         owners[owner] = {
             category: category,
             breaker:  S.core.breaker.create({
@@ -345,7 +341,7 @@
         }
         var category = owners[owner].category;
         var brk = owners[owner].breaker;
-        var label = (typeof def.label === 'string' && def.label) ? def.label : k;
+        var label = S.kernel.is.str(def.label) || k;
         var name = typeof it.name === 'string' ? it.name : label;
         var resolveAfterMs = positive(it.resolveAfterMs) ? it.resolveAfterMs :
             Math.max(3 * (positive(def.timeoutMs) ? def.timeoutMs : 0), RESOLVE_MIN_MS);
