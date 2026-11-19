@@ -986,3 +986,15 @@ t.test('a hidden-by-name row is never ordered or buffed, even when saved and ena
     assert.strictEqual(env.mod.hiddenName('StarfallAirship'), true);
     assert.strictEqual(env.mod.hiddenName('ProvisionHouse'), false);
 });
+
+t.test('production declares the Economy Advisor dashboard, fixed at registration', function () {
+    var H = harness.boot();
+    var S = H.Steward;
+    var m = S.kernel.registry.get('production');
+    assert.ok(m && m.ui);
+    assert.strictEqual(m.ui.dashboard, S.Dashboard.Economy);
+    assert.strictEqual(S.kernel.registry.dashboardOf('production'), S.Dashboard.Economy);
+    assert.ok(S.kernel.registry.onDashboard(S.Dashboard.Economy).some(function (x) {
+        return x.id === 'production';
+    }));
+});

@@ -399,7 +399,7 @@ function installModal(H, opts) {
     var doc = ensureDocument(H);
     doc._byId['steward-dashboard-style'] = {
         getAttribute: function (name) {
-            if (name === 'data-scopes') return 'StewardDashboard,StewardSettings,StewardAdventures';
+            if (name === 'data-scopes') return 'StewardDashboard,StewardSettings,StewardAdventures,StewardEconomy';
             if (name === 'data-rules') return H.ctx.Steward.kernel.ui.styleChecksum;
             return null;
         },
