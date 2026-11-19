@@ -425,3 +425,140 @@ t.test('a settled draw does not redraw', function () {
     assert.strictEqual(runRedraws(s), 0);
     assert.strictEqual(c.n, 1);
 });
+
+// ---- Dashboard windows ------------------------------------------------------
+
+// Registers a module on a tab and a dashboard category.
+function modOn(s, id, tab, dashboard, section) {
+    var sec = { id: id, title: id, heading: id, render: function () {} };
+    for (var k in section) sec[k] = section[k];
+    s.S.kernel.register({
+        id: id, priority: 'PriorityNormal',
+        isReady: function () { return true; }, plan: function () {},
+        ui: { tab: tab, dashboard: dashboard, section: sec }
+    });
+}
+
+function lastModalId(s) { return s.rig.made[s.rig.made.length - 1].id; }
+
+// The host Modal stub has no Title(); give the header a parent to hold the
+// cross-links, which the real host's title element has.
+function installTitle(s) {
+    s.H.ctx.Modal.prototype.Title = function () {
+        var $head = s.$('<div>');
+        var $title = s.$('<h4>');
+        $head.append($title);
+        s.head = $head;
+        return $title;
+    };
+}
+
+function twoWindows(s) {
+    modOn(s, 'gen', 'mining', s.S.Dashboard.General, { tiles: function () { return [{ lines: ['g'] }]; } });
+    modOn(s, 'eco', 'production', s.S.Dashboard.Economy, { tiles: function () { return [{ lines: ['e'] }]; } });
+}
+
+t.test('each window lists only its own tab, tiles and header count', function () {
+    var s = setup();
+    installTitle(s);
+    twoWindows(s);
+    s.H.settings.write('gen', { enabled: true });
+    s.H.settings.write('eco', { enabled: true });
+
+    var $gen = open(s);
+    assert.strictEqual(lastModalId(s), 'StewardDashboard');
+    assert.deepStrictEqual(tabIds($gen), ['overview', 'mining']);
+    assert.deepStrictEqual(tileTitles(s, $gen), ['gen']);
+    assert.ok(/^1 modules on/.test(s.head.find('.steward-head-sum').text()), s.head.find('.steward-head-sum').text());
+    s.ui.closeDashboard(false);
+
+    s.ui.openDashboard(null, s.S.Dashboard.Economy);
+    var $eco = body(s);
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.deepStrictEqual(tabIds($eco), ['overview', 'production']);
+    assert.deepStrictEqual(tileTitles(s, $eco), ['eco']);
+    assert.ok(/^1 modules on/.test(s.head.find('.steward-head-sum').text()), s.head.find('.steward-head-sum').text());
+});
+
+t.test('a tab shared by both windows shows on each with only its sections', function () {
+    var s = setup();
+    function marker(text) {
+        return { render: function ($el) { $el.append(s.$('<div>', { 'class': 'probe-' + text }).text(text)); } };
+    }
+    modOn(s, 'gen', 'mining', s.S.Dashboard.General, marker('gen'));
+    modOn(s, 'eco', 'mining', s.S.Dashboard.Economy, marker('eco'));
+    var $gen = open(s, 'mining');
+    assert.strictEqual(lastModalId(s), 'StewardDashboard');
+    assert.deepStrictEqual(tabIds($gen), ['overview', 'mining']);
+    var genHtml = $gen.text();
+    assert.ok(genHtml.indexOf('gen') >= 0);
+    assert.ok(genHtml.indexOf('eco') < 0);
+    s.ui.closeDashboard(false);
+
+    s.ui.openDashboard('mining', s.S.Dashboard.Economy);
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    var ecoText = body(s).text();
+    assert.ok(ecoText.indexOf('eco') >= 0);
+    assert.ok(ecoText.indexOf('gen') < 0);
+});
+
+t.test('an economy window with no module shows the hint', function () {
+    var s = setup();
+    s.ui.openDashboard(null, s.S.Dashboard.Economy);
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.strictEqual(body(s).find('.steward-empty-title').text(), 'No modules on this dashboard');
+});
+
+t.test('openDashboard routes a tab to the window that shows it', function () {
+    var s = setup();
+    twoWindows(s);
+    modOn(s, 'ev', 'events', s.S.Dashboard.General, {});
+    s.ui.openDashboard('events');
+    assert.strictEqual(lastModalId(s), 'StewardDashboard');
+    assert.strictEqual(s.ui.screen.state().tab, 'events');
+    s.ui.closeDashboard(false);
+    s.ui.openDashboard('production');
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.strictEqual(s.ui.screen.state().tab, 'production');
+});
+
+t.test('a tile link to the other window tab opens that window', function () {
+    var s = setup();
+    modOn(s, 'gen', 'mining', s.S.Dashboard.General, {
+        tiles: function () { return [{ lines: ['g'], links: [{ label: 'Prices', tab: 'production' }] }]; }
+    });
+    modOn(s, 'eco', 'production', s.S.Dashboard.Economy, {});
+    var $body = open(s);
+    var $a = tile(s, $body, 'gen').find('a.steward-link');
+    assert.strictEqual($a.length, 1);
+    $a.trigger('click');
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.strictEqual(s.ui.screen.state().tab, 'production');
+});
+
+t.test('the header cross-link appears only when the other window has modules', function () {
+    var s = setup();
+    installTitle(s);
+    modOn(s, 'gen', 'mining', s.S.Dashboard.General, {});
+    open(s);
+    assert.strictEqual(s.head.find('a.steward-link').length, 0);
+    s.ui.closeDashboard(false);
+
+    modOn(s, 'eco', 'production', s.S.Dashboard.Economy, {});
+    open(s);
+    assert.strictEqual(s.head.find('a.steward-link').length, 1);
+    assert.strictEqual(s.head.find('a.steward-link').text(), 'Economy Advisor ›');
+    s.head.find('a.steward-link').trigger('click');
+    assert.strictEqual(lastModalId(s), 'StewardEconomy');
+    assert.strictEqual(s.head.find('a.steward-link').text(), 'Steward ›');
+});
+
+t.test('every DASHBOARD_ORDER value has a row in the dashboards table', function () {
+    var s = setup();
+    var order = s.S.kernel.DASHBOARD_ORDER;
+    for (var i = 0; i < order.length; i++) {
+        var row = s.ui.dashboards[order[i]];
+        assert.ok(row, 'no row for ' + order[i]);
+        assert.ok(row.modalId && row.title && row.menuLabel && row.menuName);
+    }
+});

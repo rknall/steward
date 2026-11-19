@@ -419,3 +419,90 @@ t.test('a non-function visible is dropped with a warning', function () {
     });
     t.assert.strictEqual(warns.length, 1);
 });
+
+// ---- Dashboard category -----------------------------------------------------
+
+function ids(list) {
+    return list.map(function (m) { return m.id; }).join(',');
+}
+
+function dashSpec(id, tab, dashboard) {
+    var s = validSpec(id);
+    s.ui = { tab: tab, section: { id: id, title: id, render: function () {} } };
+    if (dashboard !== undefined) s.ui.dashboard = dashboard;
+    return s;
+}
+
+t.test('a module without a dashboard declaration is on General', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(dashSpec('plain', 'mining'));
+    t.assert.strictEqual(H.Steward.kernel.registry.get('plain').ui.dashboard, H.Steward.Dashboard.General);
+    t.assert.strictEqual(H.Steward.kernel.registry.dashboardOf('plain'), H.Steward.Dashboard.General);
+});
+
+t.test('a declared Economy dashboard is kept', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(dashSpec('eco', 'production', H.Steward.Dashboard.Economy));
+    t.assert.strictEqual(H.Steward.kernel.registry.dashboardOf('eco'), H.Steward.Dashboard.Economy);
+});
+
+t.test('an invalid dashboard warns and falls back to General with ui kept', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.clearLogs();
+    t.assert.strictEqual(H.Steward.kernel.register(dashSpec('bad', 'mining', 'Nope')), true);
+    var ui = H.Steward.kernel.registry.get('bad').ui;
+    t.assert.ok(ui);
+    t.assert.strictEqual(ui.dashboard, H.Steward.Dashboard.General);
+    var warns = H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'registry';
+    });
+    t.assert.strictEqual(warns.length, 1);
+});
+
+t.test('dashboardOf is null for an unknown id and for a module without ui', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(validSpec('noui'));
+    t.assert.strictEqual(H.Steward.kernel.registry.dashboardOf('noui'), null);
+    t.assert.strictEqual(H.Steward.kernel.registry.dashboardOf('missing'), null);
+});
+
+t.test('a stored dashboards namespace does not move a module', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(dashSpec('m', 'mining'));
+    // The removed override reader used the 'dashboards' namespace.
+    H.settings.write('dashboards', { m: H.Steward.Dashboard.Economy });
+    var reg = H.Steward.kernel.registry;
+    t.assert.strictEqual(reg.dashboardOf('m'), H.Steward.Dashboard.General);
+    t.assert.strictEqual(reg.byTab('mining').length, 1);
+    t.assert.strictEqual(reg.byTab('mining', H.Steward.Dashboard.Economy).length, 0);
+    t.assert.strictEqual(reg.onDashboard(H.Steward.Dashboard.Economy).length, 0);
+    t.assert.strictEqual(reg.onDashboard(H.Steward.Dashboard.General).length, 1);
+});
+
+t.test('byTab and onDashboard filter by dashboard', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var D = H.Steward.Dashboard;
+    H.Steward.kernel.register(dashSpec('g', 'mining'));
+    H.Steward.kernel.register(dashSpec('e', 'mining', D.Economy));
+    H.Steward.kernel.register(dashSpec('e2', 'production', D.Economy));
+    var reg = H.Steward.kernel.registry;
+    t.assert.strictEqual(reg.byTab('mining').length, 2);
+    t.assert.strictEqual(ids(reg.byTab('mining', D.General)), 'g');
+    t.assert.strictEqual(ids(reg.byTab('mining', D.Economy)), 'e');
+    t.assert.strictEqual(ids(reg.onDashboard(D.Economy)), 'e,e2');
+    t.assert.strictEqual(ids(reg.onDashboard(D.General)), 'g');
+});
+
+t.test('DASHBOARD_ORDER lists every Steward.Dashboard value once', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    var K = H.Steward.kernel;
+    var order = K.DASHBOARD_ORDER;
+    var n = 0;
+    for (var k in H.Steward.Dashboard) n++;
+    t.assert.strictEqual(order.length, n);
+    for (var i = 0; i < order.length; i++) {
+        t.assert.strictEqual(K.enumHas(H.Steward.Dashboard, order[i]), true);
+        t.assert.strictEqual(order.indexOf(order[i]), i);
+    }
+    t.assert.strictEqual(K.enumHas(H.Steward.Dashboard, 'DashboardNope'), false);
+});

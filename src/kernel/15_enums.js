@@ -43,6 +43,20 @@
         return S.kernel.enumKey(E, v) !== null;
     };
 
+    // Dashboard windows a module's ui section can appear on. General is the
+    // Steward dashboard, Economy the Economy Advisor window. Declared by the
+    // module as ui.dashboard.
+    S.Dashboard = {
+        General: 'DashboardGeneral',
+        Economy: 'DashboardEconomy'
+    };
+
+    // Window order in the native menu. General comes first: it is the default.
+    S.kernel.DASHBOARD_ORDER = [
+        S.Dashboard.General,
+        S.Dashboard.Economy
+    ];
+
     // Slots for domain enums populated by core files.
     if (!S.Building)            S.Building            = {};
     if (!S.SpecialistType)      S.SpecialistType      = {};
