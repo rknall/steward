@@ -18,7 +18,8 @@
  *   }
  *
  * `enabled` is the module switch. `standing` gates the automatic-queue
- * orders, `buffs` gates the buff sent with the orders, and `bookComplete`
+ * orders, `buffs` gates the buff sent with the orders and the reapply on
+ * running queues (which also needs `standing` on), and `bookComplete`
  * gates collecting the Bookbinder queue. Each gate is still checked per
  * row, so a row that is off never acts even when its gate is on.
  *
@@ -31,7 +32,10 @@
  *            to what the queue type allows, so a stored value is never
  *            trusted as is.
  *   buff     the production buff sent with each automatic-queue order of
- *            the row while the producer has none running; '' is off.
+ *            the row, and reapplied while the building produces the row's
+ *            own item (the queue's current entry), in both cases only with
+ *            no production buff of any kind running; '' is off. The reapply
+ *            needs `standing` on as well as `buffs`.
  *   enabled  the row's switch. It gates the order, the buff and, for the
  *            Bookbinder row, the collection. A new row starts off.
  *
