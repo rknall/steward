@@ -1,4 +1,4 @@
-<p class="ug-lead">Keeps your timed production queues busy: when a building's queue is empty it orders the item you chose, with a buff if you want one.</p>
+<p class="ug-lead">Keeps your timed production queues busy: when a building's queue is empty it orders the item you chose, and it gives the building a buff if you want one.</p>
 
 <h2 id="use-cases">What you can do</h2>
 
@@ -28,7 +28,7 @@
       <li>Keep <strong>Building buffs</strong> on in the <strong>Production</strong> submenu.</li>
     </ol></dd>
     <dt>Result</dt>
-    <dd>Each automatic order of that row carries the buff, but only when the building has none running. A buff is never spent on a building that already has one, and a row with a buff but no item is never buffed. Mines and masons stay with the Mining module.</dd>
+    <dd>Steward buffs a building only when it has no production buff running, whichever buff that is, and never replaces or tops up a running one. Both <strong>Building buffs</strong> and <strong>Automatic queues</strong> must be on. A row with a buff but no item is never buffed. Mines and masons stay with the Mining module. What happens depends on the queue:<ul><li>Queue empty and no buff running: the order is placed with the buff.</li><li>Queue empty and a buff running (the same or another): the order is placed without a buff.</li><li>The row's item is being produced (it is first in the queue and not finished) and no buff runs, for example because the buff ran out: the buff is applied to the running queue. At most <strong>Buffs per pass</strong> buffs go out per pass, shared with the order buffs, each using one buff from your stock.</li><li>Other items are being produced and no buff runs: no buff. If your item is queued behind them, the buff comes once your item is first in the queue.</li><li>If steward cannot read the buff, the queue or the item being produced, it waits and does not buff.</li></ul></dd>
   </dl>
 </div>
 
@@ -117,7 +117,7 @@
 <div class="ug-set">
   <h3><code>buffs</code></h3>
   <p class="ug-def">Default: On</p>
-  <p>The <strong>Building buffs</strong> switch. Gates the buff sent with the orders. Mines and masons stay with the Mining module.</p>
+  <p>The <strong>Building buffs</strong> switch. Gates the buff sent with the orders and the buff given back to a building that is producing the row's item. Mines and masons stay with the Mining module.</p>
   <p><em>Change it when</em> you want orders without buffs.</p>
 </div>
 
@@ -152,7 +152,7 @@
 <div class="ug-set">
   <h3><code>buildings.buff</code></h3>
   <p class="ug-def">Default: none (off)</p>
-  <p>The <strong>Buff</strong> column: the buff sent with each automatic order while the building has none running.</p>
+  <p>The <strong>Buff</strong> column: the buff sent with an automatic order, or given again to a building that is producing the row's item, while the building has no production buff running. Needs <strong>Automatic queues</strong> on.</p>
   <p><em>Change it when</em> you want that building buffed.</p>
 </div>
 
