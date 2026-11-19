@@ -3,7 +3,8 @@
  *
  * Finds exhausted wells and fields on the home island (the depleted shells
  * named in settings.js) and rebuilds each with the configured well or field
- * type. No UI; it is switched on through settings.json ('steward.rebuild').
+ * type. Its section is on the Economy Advisor's Rebuild tab (ui.js), and its
+ * switch sits in the ~Steward~ Production submenu.
  *
  * One rebuild is queued per plan. The queued action sends it through the
  * construction rebuild def, which refuses at fire time unless the grid still
@@ -37,13 +38,7 @@
     var RESOLVE_AFTER_MS = 1800000;
 
     function readSettings() {
-        var stored = S.kernel.settings.read('rebuild') || {};
-        var defaults = S.modules.rebuild.defaultSettings;
-        var merged = {};
-        var key;
-        for (key in defaults) merged[key] = defaults[key];
-        for (key in stored)   merged[key] = stored[key];
-        return merged;
+        return S.kernel.settings.merged('rebuild', S.modules.rebuild.defaultSettings);
     }
 
     function find(list, name) {
@@ -58,13 +53,27 @@
         return find(m.wells, name) || find(m.fields, name);
     }
 
-    // The building to place on a depleted shell of the given name, or null
-    // when the name is not an exhausted well or field.
-    function target(depletedName, s) {
+    // 'well' or 'field' for a well, a field or the shell either leaves
+    // behind, null for any other building.
+    function kindOf(name) {
         var m = S.modules.rebuild;
-        if (depletedName === m.depletedWell)  return find(m.wells,  s.wellType)  || m.wells[0];
-        if (depletedName === m.depletedField) return find(m.fields, s.fieldType) || m.fields[0];
+        if (name === m.depletedWell  || find(m.wells,  name)) return 'well';
+        if (name === m.depletedField || find(m.fields, name)) return 'field';
         return null;
+    }
+
+    // The building a shell of this kind is rebuilt as: the configured type,
+    // or the first of its list when the setting names none of them.
+    function targetOf(kind, s) {
+        var m = S.modules.rebuild;
+        if (kind === 'well')  return find(m.wells,  s.wellType)  || m.wells[0];
+        if (kind === 'field') return find(m.fields, s.fieldType) || m.fields[0];
+        return null;
+    }
+
+    function isShell(name) {
+        var m = S.modules.rebuild;
+        return name === m.depletedWell || name === m.depletedField;
     }
 
     // The shell a well or field entry is rebuilt on.
@@ -80,7 +89,7 @@
     function gridOfKey(k) {
         var parts = String(k).split('|');
         var g = Number(parts[parts.length - 1]);
-        return isFinite(g) ? g : null;
+        return S.kernel.is.finite(g) ? g : null;
     }
 
     function defFor(entry, grid) {
@@ -94,6 +103,32 @@
             S.kernel.warn('rebuild', text + ' unreadable: ' + (r && r.why) + '; no rebuilds until it reads');
         }
         return w === 'go';
+    }
+
+    // One row per well, field and depleted shell, in list order. The plan
+    // rebuilds the ready, unblocked shells among them and the view lists all,
+    // so both read the same rules. why and blocked are only read for shells.
+    function scan(buildings, s) {
+        var rows = [];
+        for (var i = 0; i < buildings.length; i++) {
+            var b = buildings[i];
+            var name = S.core.buildings.name(b);
+            var kind = kindOf(name);
+            if (kind === null) continue;
+            var grid = S.core.buildings.grid(b);
+            var shell = isShell(name);
+            rows.push({
+                grid:    grid,
+                name:    name,
+                kind:    kind,
+                shell:   shell,
+                entry:   shell ? null : entryOf(name),
+                target:  targetOf(kind, s),
+                why:     shell ? S.core.shells.ready(b, name) : null,
+                blocked: shell ? S.core.ledger.blocked(key(grid)) : null
+            });
+        }
+        return rows;
     }
 
     function isReady(ctx) {
@@ -126,22 +161,19 @@
         var list = S.core.buildings.listRead();
         if (!awaited('list', list, 'building list', { accept: R.PARTIAL })) return;
 
+        var rows = scan(list.value, s);
         var found = [];
-        for (var i = 0; i < list.value.length; i++) {
-            var b = list.value[i];
-            var name = S.core.buildings.name(b);
-            var entry = target(name, s);
-            if (!entry) continue;
-            var grid = S.core.buildings.grid(b);
-            var why = S.core.shells.ready(b, name);
-            if (why !== null) {
-                if (R.isReadRefusal(why)) {
-                    S.kernel.debug('rebuild', 'grid ' + grid + ' skipped: ' + why);
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            if (!row.shell) continue;
+            if (row.why !== null) {
+                if (R.isReadRefusal(row.why)) {
+                    S.kernel.debug('rebuild', 'grid ' + row.grid + ' skipped: ' + row.why);
                 }
                 continue;
             }
-            if (S.core.ledger.blocked(key(grid)) !== null) continue;
-            found.push({ grid: grid, entry: entry });
+            if (row.blocked !== null) continue;
+            found.push({ grid: row.grid, entry: row.target });
         }
         // A partial list still shows real shells, so those may be rebuilt;
         // finding none on it only means nothing to do on this pass.
@@ -150,7 +182,7 @@
 
         var cap = S.core.construction.capacity();
         if (!awaited('capacity', cap, 'build queue')) return;
-        if (!(cap.value.slotsTotal - cap.value.slotsUsed > 0)) {
+        if (!(S.core.construction.freeSlots(cap.value) > 0)) {
             S.kernel.debug('rebuild', 'build queue full, no rebuild');
             return;
         }
@@ -187,23 +219,63 @@
         }
         S.core.ledger.register(OWNER, {
             category: 'rebuild',
-            breaker: {
-                label:      'rebuild breaker',
-                missText:   'rebuilds in a row were not seen on their grid',
-                pausedText: 'rebuilding is paused',
-                resumeText: 'rebuilding resumes'
-            }
+            breaker:  S.modules.rebuild.BREAKER
         });
         S.core.ledger.load();
         S.kernel.queue.action('rebuild.place', place);
     }
+
+    // The breaker's wording, registered with the ledger at boot and quoted
+    // by the view's paused banner, so both say the same.
+    S.modules.rebuild.BREAKER = {
+        label:      'rebuild breaker',
+        missText:   'rebuilds in a row were not seen on their grid',
+        pausedText: 'rebuilding is paused',
+        resumeText: 'rebuilding resumes'
+    };
+
+    S.modules.rebuild.readSettings = readSettings;
+    S.modules.rebuild.scan         = scan;
+    S.modules.rebuild.kindOf       = kindOf;
+    S.modules.rebuild.targetOf     = targetOf;
+    S.modules.rebuild.entryOf      = entryOf;
+    S.modules.rebuild.gridOfKey    = gridOfKey;
+    S.modules.rebuild.key          = key;
 
     S.kernel.register({
         id:       'rebuild',
         priority: S.Priority.Normal,
         boot:     boot,
         isReady:  isReady,
-        plan:     plan
+        plan:     plan,
+        // Hooks are wrapped in closures so they resolve S.modules.rebuild.*
+        // at call time. ui.js loads AFTER module.js (alphabetical concat
+        // order), so a direct reference here would be undefined and
+        // validateUi would reject the spec. toggleIn draws the quick toggle
+        // in the Production submenu instead of the main ~Steward~ list.
+        ui: {
+            tab:       'rebuild',
+            dashboard: S.Dashboard.Economy,
+            toggleIn:  'production',
+            section: {
+                id:      'rebuild',
+                title:   'Rebuild Wells and Fields',
+                heading: 'Rebuild wells and fields',
+                icon:    '↻',
+                side: function ($side, h) {
+                    if (S.modules.rebuild.side) S.modules.rebuild.side($side, h);
+                },
+                render: function ($main, h) {
+                    if (S.modules.rebuild.render) S.modules.rebuild.render($main, h);
+                },
+                summary: function (h) {
+                    return S.modules.rebuild.summary ? S.modules.rebuild.summary(h) : '';
+                },
+                tiles: function (h) {
+                    return S.modules.rebuild.tiles ? S.modules.rebuild.tiles(h) : [];
+                }
+            }
+        }
     });
 
 }(Steward));
