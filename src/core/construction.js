@@ -21,6 +21,8 @@
  * S.core.buildings (upgrading, levelOf, isUpgradable). Whether a grid holds
  * an idle shell, and whether a rebuild reached it, is judged by
  * S.core.shells; the caller passes the shell name in.
+ * capacity() and freeSlots() are the build-queue surface for modules: they
+ * read and count the queue through these two, never from the host members.
  *
  * Failure contract: only positive reads count. A missing or unreadable
  * building never verifies a send and never clears the way for one: placing
@@ -212,8 +214,8 @@
         return R.get('construction.capacity', undefined, opts);
     }
 
-    // Free build-queue slots from a capacity value, as every caller of
-    // capacity() counts them.
+    // Free build-queue slots from a capacity value. Every caller counts them
+    // through this one, so the rule lives in one place.
     function freeSlots(c) {
         return c.slotsTotal - c.slotsUsed;
     }
@@ -284,7 +286,8 @@
         place:               place,
         upgrade:             upgrade,
         rebuild:             rebuild,
-        capacity:            capacity
+        capacity:            capacity,
+        freeSlots:           freeSlots
     };
 
 }(Steward));

@@ -108,6 +108,50 @@ t.test('ui.tab production is accepted', function () {
     t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
 });
 
+t.test('ui.tab rebuild is accepted', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.register(uiSpec('rb', 'rebuild')), true);
+    t.assert.ok(H.Steward.kernel.registry.get('rb').ui);
+    t.assert.strictEqual(H.Steward.kernel.registry.byTab('rebuild').length, 1);
+    t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
+});
+
+function toggleInSpec(id, toggleIn) {
+    var s = uiSpec(id, 'misc');
+    if (toggleIn !== undefined) s.ui.toggleIn = toggleIn;
+    return s;
+}
+
+function toggleInWarnings(H) {
+    return H.logs().filter(function (l) {
+        return l.level === 'warn' && l.category === 'registry' &&
+            l.args.join(' ').indexOf('ui.toggleIn must be a module id') >= 0;
+    });
+}
+
+t.test('ui.toggleIn naming a module id is kept', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(toggleInSpec('ti', 'production'));
+    t.assert.strictEqual(H.Steward.kernel.registry.get('ti').ui.toggleIn, 'production');
+    t.assert.strictEqual(toggleInWarnings(H).length, 0);
+});
+
+t.test('a non-string ui.toggleIn warns and gives null with the ui kept', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.register(toggleInSpec('ti', 5)), true);
+    var ui = H.Steward.kernel.registry.get('ti').ui;
+    t.assert.ok(ui);
+    t.assert.strictEqual(ui.toggleIn, null);
+    t.assert.strictEqual(toggleInWarnings(H).length, 1);
+});
+
+t.test('no ui.toggleIn gives null', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    H.Steward.kernel.register(toggleInSpec('ti'));
+    t.assert.strictEqual(H.Steward.kernel.registry.get('ti').ui.toggleIn, null);
+    t.assert.strictEqual(toggleInWarnings(H).length, 0);
+});
+
 t.test('ui.tab misc is accepted', function () {
     var H = harness.boot({ sections: ['kernel'] });
     var s = validSpec('m');

@@ -388,6 +388,9 @@ None of this was seen live; the first real rebuild's final log line records the 
   the list's number; `buildingGroup.GetNrFromName` is only logged as a check.
 - `mStreetDataMap.SetPrePlaceBuildingGridPos` exists but is not called: the rebuild is sent
   without a pre-place, and the log records whether the grid changed anyway. Not seen live.
+- A well or field's deposit is read with `getDeposits_vectorByType('Water')` or `('Corn')` on
+  the building's own grid. Not seen live. `GO::cDeposit` has `GetAmount()` and `GetMaxAmount()`,
+  seen live on an event field with amount 56 of maximum 45: the amount can exceed the maximum.
 - Verified when the grid's occupant has another name, is under construction, or the shell
   reads not depleted. An emptied grid does not count and the build queue is not a signal,
   because the construction site's name is not known. Not seen live.

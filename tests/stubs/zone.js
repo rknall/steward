@@ -18,11 +18,13 @@
 
 function deposit(opts) {
     opts = opts || {};
-    return {
+    var d = {
         GetName_string: function () { return opts.name || 'Stone'; },
         GetGrid:        function () { return typeof opts.grid === 'number' ? opts.grid : 0; },
         GetAmount:      function () { return typeof opts.amount === 'number' ? opts.amount : 0; }
     };
+    if (typeof opts.maxAmount === 'number') d.GetMaxAmount = function () { return opts.maxAmount; };
+    return d;
 }
 
 function building(opts) {
