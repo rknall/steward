@@ -903,7 +903,9 @@
     // Verified by one more open adventure of that name or the map stock
     // dropping below the baseline. The star menu is read once, in the
     // precheck, and the send uses that entry (see adventureItem); with no
-    // usable entry nothing goes out (NOT_SENT).
+    // usable entry nothing goes out (NOT_SENT). The final log line names the
+    // stock and open count before and after, so an unseen start shows what the
+    // game did.
     function map(name) {
         var found = null;
         return {
@@ -944,6 +946,12 @@
                 if (list && isNum(base.open) && countOpen(list, name) > base.open) return true;
                 var n = stock(ADVENTURE_MAP_TYPE, name);
                 return isNum(n) && isNum(base.stock) && n < base.stock;
+            },
+            describe: function (base) {
+                var list = S.core.adventures.own();
+                var n = stock(ADVENTURE_MAP_TYPE, name);
+                return 'stock ' + (base && isNum(base.stock) ? base.stock : '?') + ' -> ' + (isNum(n) ? n : '?') +
+                    ', open ' + (base && isNum(base.open) ? base.open : '?') + ' -> ' + (list ? countOpen(list, name) : '?');
             }
         };
     }

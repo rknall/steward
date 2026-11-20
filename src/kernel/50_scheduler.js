@@ -26,7 +26,8 @@
  * in its own try, and the next tick is armed from a finally. The tick writes a
  * heartbeat at most every HEARTBEAT_MS and a gap WARN when the timer was held
  * (e.g. by a locked or disconnected session). A missing heartbeat in the log
- * therefore means the timer itself stopped.
+ * therefore means the timer itself stopped. The heartbeat's busy list comes from
+ * busyModules(), the same read a module uses to see other modules' queue work.
  */
 
 (function (S) {
@@ -148,8 +149,24 @@
         } catch (e) { /* logging never stops the tick */ }
     }
 
+    // The one list of modules with pending or in-flight queue work, in registry
+    // order, for the heartbeat and for a module that must not send while other
+    // modules have writes in flight. exceptId leaves the caller out. Null when
+    // the loaded queue cannot tell (an older queue during a reload), so a caller
+    // never reads a failed check as "none busy".
+    function busyModules(exceptId) {
+        var Q = S.kernel.queue || {};
+        if (typeof Q.isModuleBusy !== 'function') return null;
+        var mods = S.kernel.registry.list();
+        var ids = [];
+        for (var i = 0; i < mods.length; i++) {
+            if (mods[i].id !== exceptId && Q.isModuleBusy(mods[i].id)) ids.push(mods[i].id);
+        }
+        return ids;
+    }
+
     // Each queue read is checked, since an older queue may be loaded during a
-    // reload; a missing read prints '?'.
+    // reload; a missing read prints '?'. The busy list comes from busyModules().
     function heartbeatLine() {
         var Q = S.kernel.queue || {};
         var depth = typeof Q.depth === 'function' ? Q.depth() : '?';
@@ -165,15 +182,8 @@
                     ? Q.dialogList(d.ids) : String(d.ids));
             }
         }
-        var busy = '?';
-        if (typeof Q.isModuleBusy === 'function') {
-            var mods = S.kernel.registry.list();
-            var ids = [];
-            for (var i = 0; i < mods.length; i++) {
-                if (Q.isModuleBusy(mods[i].id)) ids.push(mods[i].id);
-            }
-            busy = ids.length > 0 ? ids.join(', ') : 'none';
-        }
+        var ids = busyModules();
+        var busy = ids === null ? '?' : (ids.length > 0 ? ids.join(', ') : 'none');
         return 'heartbeat: tick ' + state.tickCount + ', queue ' + depth + ' (' + draining +
             '), deferring ' + deferring + ', busy ' + busy;
     }
@@ -315,6 +325,7 @@
         stop:      stop,
         tick:      tick,           // manual trigger (mostly for diagnostics)
         wake:      wake,           // one extra plan() of one module, between ticks
+        busyModules: busyModules,  // ids with pending or in-flight work, null if unknown
         configure: configure,
         state:     state
     };

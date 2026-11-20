@@ -78,7 +78,9 @@
  * Memory-only parts of runState, never written: loaded, round (the action
  * round in flight), cache (parsed wave lines), questRetry (quest key ->
  * time a failed claim may be retried), homeNote (the last wait the home
- * steps logged, so a repeated wait is logged once), quiet (the quiet clock of
+ * steps logged, so a repeated wait is logged once), othersSeen ({ tag, at }
+ * of the last pass of a home step that saw another module with queue work,
+ * so the map start keeps a quiet time after it), quiet (the quiet clock of
  * this step: { since, last, ms }), missing (general key -> { since, last } of
  * the reads that lacked it), unread (run id, step since and, per round key,
  * the tries and first time of first-step refusals that sent nothing), busy
@@ -924,6 +926,7 @@
         rs.cache = null;
         rs.questRetry = {};
         rs.homeNote = null;
+        rs.othersSeen = null;
         rs.quiet = null;
         rs.missing = {};
         rs.unread = null;
