@@ -346,6 +346,35 @@ t.test('heartbeat reports a deferral and busy modules', function () {
     t.assert.ok(b[0].indexOf('busy a') >= 0, b[0]);
 });
 
+t.test('busyModules lists busy ids in registry order, leaves the caller out, [] when none', function () {
+    var o = clockSetup();
+    var K = o.K;
+    K.register({
+        id: 'b', priority: o.H.Steward.Priority.Normal,
+        isReady: function () { return true; },
+        plan: function () {}
+    });
+    K.queue.isModuleBusy = function (id) { return id === 'a' || id === 'b'; };
+    t.assert.strictEqual(JSON.stringify(K.scheduler.busyModules()), '["a","b"]');
+    t.assert.strictEqual(JSON.stringify(K.scheduler.busyModules('a')), '["b"]');
+    K.queue.isModuleBusy = function () { return false; };
+    t.assert.strictEqual(JSON.stringify(K.scheduler.busyModules()), '[]');
+});
+
+t.test('busyModules is null and the heartbeat prints busy ? when the queue cannot tell', function () {
+    var o = clockSetup();
+    var K = o.K;
+    K.queue.isModuleBusy = undefined;
+    t.assert.strictEqual(K.scheduler.busyModules(), null);
+    K.scheduler.start();
+    o.H.clearLogs();
+    o.tickAt(0);
+    o.tickAt(K.TIMEOUTS.HEARTBEAT_MS);
+    var b = o.lines('log').filter(function (s) { return s.indexOf('heartbeat:') === 0; });
+    t.assert.strictEqual(b.length, 1);
+    t.assert.ok(b[0].indexOf('busy ?') >= 0, b[0]);
+});
+
 t.test('a held timer warns one tick gap, and a restart reports none', function () {
     var o = clockSetup();
     var K = o.K;

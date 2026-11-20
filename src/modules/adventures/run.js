@@ -810,6 +810,7 @@
     }
 
     S.modules.adventures.run = {
+        MODULE_ID:     MODULE_ID,  // the module's registry id, so callers never repeat it
         current:       current,
         statusText:    statusText,
         countFrom:     countFrom,

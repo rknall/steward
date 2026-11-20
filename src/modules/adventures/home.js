@@ -29,10 +29,17 @@
  * source is never taken for an empty one.
  *
  * The map start is also gated by the persisted map record of the run state:
- * the game locks out a map started within GAP_MS of the last map, so the
- * gap after the last map seen closed (or the last start of a run that is
- * gone) is checked at Muster and again right before every send, also before
- * the one resend after a failed send. Resume never sends a map start again:
+ * an earlier lockout followed a map started soon after the last one, so the
+ * gap of GAP_MS after the last map seen closed (or the last start of a run
+ * that is gone) is kept as a precaution, not as a known game rule. It is
+ * checked at Muster and again right before every send, also before the one
+ * resend after a failed send. A map start is further held while any other
+ * module has game work pending or in flight in the kernel queue, and for
+ * OTHERS_QUIET_MS after this step last saw such work, because a lockout
+ * followed a start sent while another home action was still unsettled. That
+ * is checked in the step and again in the attempt's precheck, since another
+ * module may enqueue a write between the two; the wait has no limit and never
+ * skips the start. Resume never sends a map start again:
  * a start that was sent but never seen is decided by the map stock read
  * before the send and kept on its mark, which tells a started map from a
  * lost packet.
@@ -66,13 +73,18 @@
     if (!S.modules.adventures) S.modules.adventures = {};
 
     // Starting values, to be tuned in game.
-    var GAP_MS                 = 180000;    // the game wants this long between two maps
+    var GAP_MS                 = 180000;    // kept this long between two maps
+    var OTHERS_QUIET_MS        = 10000;     // after another module's work, the map start waits this long
     var PRODUCTION_WAIT_MAX_MS = 21600000;  // the home load waits this long for queued troops
     // A failed placing round is tried again after this, so a host that keeps
     // refusing gets at most one move a minute.
     var DEPLOY_RETRY_MS        = 60000;
 
     var CATEGORY = 'adventures';
+
+    // The precheck refusal of a map start held back by another module's
+    // queue work: nothing is sent, the step waits and tries again.
+    var OTHERS_BUSY = 'another module has an action in flight';
 
     // Mark name prefixes: one mark per general sent and per unit ordered.
     var DEPART = 'depart:';
@@ -278,6 +290,59 @@
         if (last === null) return 0;
         var left = last + GAP_MS - now();
         return left > 0 ? left : 0;
+    }
+
+    // Other modules with pending or in-flight queue work, read through the
+    // scheduler's one busy list; null when the loaded queue cannot tell.
+    function othersBusy() {
+        return S.kernel.scheduler.busyModules(run().MODULE_ID);
+    }
+
+    // Records that this pass of the step saw another module busy, so the
+    // quiet time runs from here. Memory only: after a reload the kernel queue
+    // is empty, so no other module's work is in flight.
+    function seeOthers(r) {
+        st().current().othersSeen = { tag: r.id + ':' + r.step, at: now() };
+    }
+
+    // Holds the map start while another module has queue work, and for
+    // OTHERS_QUIET_MS after this step last saw it. A busy list that cannot be
+    // read counts as busy: a failed read is never taken for a clear queue.
+    // True when the step waits.
+    function othersWait(r) {
+        var ids = othersBusy();
+        if (ids === null) {
+            seeOthers(r);
+            ld().waitBusy(r, null, 'map start waits: busy modules not readable');
+            return true;
+        }
+        if (ids.length > 0) {
+            seeOthers(r);
+            ld().waitBusy(r, null, 'map start waits for ' + ids.join(', ') + ' to finish');
+            return true;
+        }
+        var seen = st().current().othersSeen;
+        if (seen && seen.tag === r.id + ':' + r.step && now() - seen.at < OTHERS_QUIET_MS) {
+            ld().waitBusy(r, null, 'map start waits ' + Math.round(OTHERS_QUIET_MS / 1000) +
+                ' s after other modules finished');
+            return true;
+        }
+        return false;
+    }
+
+    // The step's check and the send are apart in queue order: another
+    // module's plan may enqueue a write before this attempt runs. So the
+    // attempt asks once more in its precheck and refuses, sending nothing,
+    // while another module is busy.
+    function guardOthers(def) {
+        if (!def) return def;
+        var pre = def.precheck;
+        def.precheck = function () {
+            var ids = othersBusy();
+            if (ids === null || ids.length > 0) return OTHERS_BUSY;
+            return typeof pre === 'function' ? pre.apply(this, arguments) : null;
+        };
+        return def;
     }
 
     function muster(r, inv) {
@@ -681,6 +746,14 @@
             return;
         }
         var res = round && ld().complete(round) ? ld().resultOf(round, MAP) : null;
+        if (res && res.status === S.ActionResult.Refused && res.reason === OTHERS_BUSY) {
+            // The attempt found another module busy and sent nothing: the
+            // sighting starts the quiet time, then the step waits as above.
+            st().dropRound('map start: ' + res.reason);
+            seeOthers(r);
+            othersWait(r);
+            return;
+        }
         var unsent = res ? nothingSent(res) : null;
         if (unsent) {
             // Nothing went out: no failure, only a read to try again (#62).
@@ -708,6 +781,7 @@
             noteOnce(r, 'waiting ' + Math.round(GAP_MS / 1000) + ' s after the last map');
             return;
         }
+        if (othersWait(r)) return;
         var n = S.core.buffs.mapStock(r.adventure);
         if (n === null) {
             mapReadWait(r, 'map stock');
@@ -722,7 +796,8 @@
         mk.stock = n;
         if (again) mk.resentAt = now();
         st().save();
-        ld().attempt(nr, MAP, ld().wrapSend(r, MAP, S.core.buffs.map(r.adventure)), ld().seenOnVerified(MAP));
+        ld().attempt(nr, MAP, guardOthers(ld().wrapSend(r, MAP, S.core.buffs.map(r.adventure))),
+            ld().seenOnVerified(MAP));
     }
 
     // Whether this step already sent a map start again after a failed send:
@@ -1380,6 +1455,7 @@
 
     S.modules.adventures.home = {
         GAP_MS:                 GAP_MS,
+        OTHERS_QUIET_MS:        OTHERS_QUIET_MS,
         PRODUCTION_WAIT_MAX_MS: PRODUCTION_WAIT_MAX_MS,
         DEPLOY_RETRY_MS:        DEPLOY_RETRY_MS,
         shortText:              shortText,

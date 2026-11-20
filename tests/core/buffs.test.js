@@ -375,6 +375,42 @@ t.test('map start does not verify while own adventures cannot be read and stock 
     assert.strictEqual(res.status, s.S.ActionResult.Failed);
 });
 
+// The final log line of a map start names the stock and open count before and
+// after, so an unseen start shows what the game did.
+function mapLine(s, level) {
+    var lines = s.H.logs().filter(function (l) {
+        return l.level === level && l.category === 'buffs' && /start map AdvA/.test(l.args.join(' '));
+    });
+    assert.ok(lines.length >= 1, 'no start map line');
+    return lines[lines.length - 1].args.join(' ');
+}
+
+t.test('map start: an unseen start logs stock and open before and after, unchanged', function () {
+    var s = acting({ buffs: [{ type: 'Adventure', resource: 'AdvA', amount: 2 }] });
+    var res = run(s, s.buffs.map('AdvA'));
+    assert.strictEqual(res.status, s.S.ActionResult.Failed);
+    assert.ok(/; stock 2 -> 2, open 0 -> 0$/.test(mapLine(s, 'warn')), mapLine(s, 'warn'));
+});
+
+t.test('map start: a verified start logs the stock drop and the new open map', function () {
+    var buff = { type: 'Adventure', resource: 'AdvA', amount: 2 };
+    var s = acting({ buffs: [buff] });
+    s.env.onSend = function () {
+        buff.amount = 1;
+        s.env.own = [{ name: 'AdvA', zoneId: 1 }];
+    };
+    var res = run(s, s.buffs.map('AdvA'));
+    assert.strictEqual(res.status, s.S.ActionResult.Verified);
+    assert.ok(/; stock 2 -> 1, open 0 -> 1$/.test(mapLine(s, 'log')), mapLine(s, 'log'));
+});
+
+t.test('map start: a refused start logs without a baseline, with question marks', function () {
+    var s = acting({ buffs: [{ type: 'Adventure', resource: 'AdvA', amount: 0 }] });
+    var res = run(s, s.buffs.map('AdvA'));
+    assert.strictEqual(res.status, s.S.ActionResult.Refused);
+    assert.ok(/; stock [?] -> 0, open [?] -> 0$/.test(mapLine(s, 'warn')), mapLine(s, 'warn'));
+});
+
 t.test('population refuses when no single stack holds the amount', function () {
     var s = acting({ buffs: [
         { type: 'AddResource', resource: 'Population', amount: 20, uid: 'a' },

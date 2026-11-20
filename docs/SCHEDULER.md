@@ -156,6 +156,9 @@ S.kernel.queue.runningModule();     // moduleId of currently-executing action, o
 
 // 50_scheduler.js walkTier
 if (S.kernel.queue.isModuleBusy(mod.id)) continue;
+
+// 50_scheduler.js, read-only; the heartbeat's busy list comes from it
+S.kernel.scheduler.busyModules(exceptId); // ids with pending or in-flight work, null if unknown
 ```
 
 This contract supersedes any "auto-cancel-before-plan" idea — the same outcome is achieved more cleanly by simply not calling `plan()` until the previous cycle is done.
