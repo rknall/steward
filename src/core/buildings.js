@@ -5,7 +5,8 @@
  * via GetBuildingName_string() / GetGrid() directly.
  *
  * Buff eligibility: buffState reads every raw fact, buffBlock turns it into
- * null (eligible) or the first reason a production buff must not be applied.
+ * null (eligible) or the first reason a production buff must not be applied;
+ * a queue building without ResourceCreation is producing when its queue says so.
  * The upgrade state (upgrading), level (levelOf) and permission (isUpgradable)
  * answer null when the read failed, never a guessed false.
  *
@@ -555,12 +556,36 @@
         } catch (e) { return null; }
     }
 
+    // True when the building has no ResourceCreation: the method is missing or
+    // answers nothing. False when it answers an object or the call throws, so a
+    // throwing read stays unreadable instead of passing for a queue building.
+    function noResourceCreation(b) {
+        try { return !S.kernel.hostRead.call(b, 'GetResourceCreation'); }
+        catch (e) { return false; }
+    }
+
+    // Whether a queue building is producing, from the production core's queue
+    // reader, looked up at call time because that core loads after this file.
+    // True or false; null when the reader is missing, throws or answers
+    // anything else.
+    function queueProducing(b) {
+        try {
+            var P = S.core.production;
+            if (!P || typeof P.producing !== 'function') return null;
+            var v = P.producing(b);
+            return (v === true || v === false) ? v : null;
+        } catch (e) { return null; }
+    }
+
     // Every raw read that decides whether a production buff may be applied.
     // Unknown facts are null; presence flags tell a missing optional method
-    // from one that threw. Null for no building.
+    // from one that threw. queueBuilding is a shape fact only: no production
+    // state, a productionQueue and no ResourceCreation. No queue is read here,
+    // since many callers read this state in any zone. Null for no building.
     function buffState(b) {
         if (!b) return null;
-        var st = { productionBuff: null, buffsVector: null, productionState: null, blockers: [] };
+        var st = { productionBuff: null, buffsVector: null, productionState: null,
+            queueBuilding: false, blockers: [] };
         try { st.productionBuff = b.productionBuff ? true : false; }
         catch (e) { st.productionBuff = null; }
         try {
@@ -568,6 +593,11 @@
             st.buffsVector = (v && typeof v.length === 'number') ? v.length : null;
         } catch (e2) { st.buffsVector = null; }
         st.productionState = productionState(b);
+        if (st.productionState === null) {
+            var hasQueue = false;
+            try { hasQueue = !!b.productionQueue; } catch (e3) { hasQueue = false; }
+            st.queueBuilding = hasQueue && noResourceCreation(b);
+        }
         for (var i = 0; i < BUFF_BLOCKERS.length; i++) {
             var m = BUFF_BLOCKERS[i].method;
             var present = typeof b[m] === 'function';
@@ -595,8 +625,15 @@
         if (!st) return 'no building';
         if (st.productionBuff === null) return 'buff state unreadable';
         if (st.productionBuff) return 'already buffed';
-        if (st.productionState === null) return 'production state unreadable';
-        if (st.productionState !== PRODUCING_STATE) {
+        if (st.queueBuilding) {
+            // A queue building has no production state; its queue tells
+            // whether it is producing. Read only now, after the cheaper checks.
+            var q = queueProducing(b);
+            if (q === null) return 'queue state unreadable';
+            if (!q) return 'queue not producing';
+        } else if (st.productionState === null) {
+            return 'production state unreadable';
+        } else if (st.productionState !== PRODUCING_STATE) {
             return 'not producing (state ' + st.productionState + ')';
         }
         for (var i = 0; i < st.blockers.length; i++) {

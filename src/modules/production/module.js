@@ -545,10 +545,17 @@
             // other-item heads log no buff-state lines.
             if (!headIsOwn(names[name], name, cfg.item)) continue;
             if (!unbuffed(b, name, 're', 'buff not reapplied')) continue;
+            var grid = S.core.buildings.grid(b);
             var verdict = buffEngine.eligible(b, ctx.assigned);
             if (verdict === S.BuffVerdict.Stop) return;   // open and no probe due
-            if (verdict !== S.BuffVerdict.Ok) continue;
-            var grid = S.core.buildings.grid(b);
+            if (verdict !== S.BuffVerdict.Ok) {
+                // Said once per refusal so a building that never gets its
+                // buff back is not skipped without a trace.
+                debugOnce('reblock|' + name, name, 'grid', grid,
+                    'cannot take', r.buff, 'now:', S.core.buildings.buffBlock(b) || verdict);
+                continue;
+            }
+            delete said['reblock|' + name];
             ctx.assigned[grid] = true;
             ctx.buffs++;
             ctx.buffStock[r.buff] = r.stock - 1;

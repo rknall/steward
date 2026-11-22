@@ -362,6 +362,10 @@ Checked live on 2026-11-09 with the steward "Dump mine buffs" diagnostic
 - Eligibility of a building: `GetResourceCreation().GetProductionState()` is 0 when it is
   working. Confirmed live: all working mines and masons read 0. Paused (5) and other values
   not seen live, from an older client.
+- Queue buildings (`productionQueue`) answer `GetResourceCreation()` with null. Seen live on
+  every queue building in the production dump except the StarfallAirship (state 0). For them
+  steward reads "producing" from the type queue: the head entry is unfinished and the queue's
+  `productionBuilding.GetGrid()` equals the building's grid.
 - Upgrading, under construction and being destroyed are read from `IsUpgradeInProgress()`,
   `IsInConstructionMode()` and `IsInDestruction()`. All three are present live on every
   building, and all read false. A value of true was not seen. An absent method is skipped; a

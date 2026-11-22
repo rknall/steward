@@ -253,6 +253,7 @@ Several owners order into the same host queues, so none of them spends the wareh
 - Send each order with `Steward.core.production.orderIn`. The planner sends nothing.
 - `Steward.core.production.producer(name)` is the building a name's queue runs at (highest level, then lowest grid). Order into and buff only that one.
 - `Steward.core.production.isActive(b)` reads the on/off state and returns null when unknown.
+- `Steward.core.production.producing(b)` says whether a queue building is producing: true (unfinished head, queue runs at this building), false (empty queue, finished head, or the queue runs at another building of the type), null when unreadable. Queue buildings only. `Steward.core.buildings.buffBlock(b)` uses it for a building with a `productionQueue` and no ResourceCreation; never compare a queue building against `productionState`.
 - `Steward.core.buildings.productionState(b)` and `Steward.core.buildings.MISSING_INPUT_STATE` read the production state. Compare against the constant, never a bare number.
 
 ## Rule 7: wrap risky calls

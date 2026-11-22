@@ -22,6 +22,9 @@
  *     amountProduced the player's producedAmount of that book has reached;
  *     a finished head entry (VO producedItems 1) waits for message 141 with
  *     the type as data
+ *   - queue buildings have no ResourceCreation (GetResourceCreation() is
+ *     null), so whether one is producing is read from its type queue, not
+ *     from a production state
  *   - the culture building has a cooldown (getRemainingCooldown on the queue's
  *     productionBuilding), not a queue, and cannot be ordered into
  *   - any other type with a productionQueue is a timed workshop whose items
@@ -284,6 +287,36 @@
             }
         }
         return best;
+    }
+
+    // Whether a queue building is producing now: true when its type queue has an
+    // unfinished head and runs at this building, false when the queue is empty,
+    // the head is finished or the queue runs at another building of the type,
+    // null when any of it cannot be read. An unreadable produced count is null,
+    // not unfinished. Reads go through S.core.production, the readers every
+    // caller uses.
+    function producing(b) {
+        if (!b) return null;
+        var t;
+        try {
+            if (!b.productionQueue) return null;
+            t = buildingType(b);
+        } catch (e) { return null; }
+        if (t === null) return null;
+        var list = P().entries(t);
+        if (!S.kernel.is.array(list)) return null;
+        if (!list.length) return false;
+        var head = list[0];
+        if (!head) return null;
+        var pr = P().profile(t);
+        var books = !!pr && pr.kind === S.ProductionKind.Books;
+        var count = books ? head.producedItems : head.produced;
+        if (typeof count !== 'number') return null;
+        if (head.finished) return false;
+        var at = P().buildingGrid(P().queueOf(t));
+        var g = S.core.buildings.grid(b);
+        if (typeof at !== 'number' || typeof g !== 'number') return null;
+        return at === g;
     }
 
     function call(o, method) {
@@ -903,6 +936,7 @@
     P0.queueOf     = queueOf;
     P0.queueTypes  = queueTypes;
     P0.producer    = producer;
+    P0.producing   = producing;
     P0.entries     = entries;
     P0.remainingMs = remainingMs;
     P0.cooldownMs  = cooldownMs;
