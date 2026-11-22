@@ -257,3 +257,46 @@ t.test('the screen build label is the kernel one', function () {
     var s = setup();
     assert.strictEqual(s.ui.screen.buildLabel(), s.S.kernel.buildLabel());
 });
+
+// ---- Economy window ---------------------------------------------------------
+
+function ecoModule(s) {
+    s.S.kernel.register({
+        id: 'eco', priority: 'PriorityNormal',
+        isReady: function () { return true; }, plan: function () {},
+        ui: {
+            tab: 'production', dashboard: s.S.Dashboard.Economy,
+            section: { id: 'eco', title: 'Eco', render: function () {} }
+        }
+    });
+}
+
+t.test('economy and general open under their own modal ids', function () {
+    var s = setup();
+    ecoModule(s);
+    s.ui.openDashboard(null, s.S.Dashboard.Economy);
+    assert.strictEqual(s.rig.made[s.rig.made.length - 1].id, 'StewardEconomy');
+    assert.deepStrictEqual(s.rig.shownIds(), ['StewardEconomy']);
+    s.ui.closeDashboard(false);
+    s.rig.flushFades();
+    s.ui.openDashboard(null, s.S.Dashboard.General);
+    assert.strictEqual(s.rig.made[s.rig.made.length - 1].id, DASH);
+    assert.deepStrictEqual(s.rig.shownIds(), [DASH]);
+    assert.strictEqual(s.rig.balanced(), true);
+    assert.deepStrictEqual(errors(s), []);
+});
+
+t.test('the cross-link is refused while edits are open', function () {
+    var s = setup();
+    ecoModule(s);
+    s.ui.openSettings();
+    s.ui.helpers.update('logger', { keepRotated: 2 });
+    assert.strictEqual(s.ui.hasOpenEdits(), true);
+    var alerts = [];
+    s.H.ctx.showGameAlert = function (m) { alerts.push(m); };
+    var before = s.rig.made.length;
+    s.ui.openDashboard(null, s.S.Dashboard.Economy);
+    assert.strictEqual(s.rig.made.length, before);
+    assert.deepStrictEqual(s.rig.shownIds(), ['StewardSettings']);
+    assert.strictEqual(alerts.filter(function (a) { return /Save or close/.test(a); }).length, 1);
+});

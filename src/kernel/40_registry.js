@@ -13,6 +13,8 @@
  *
  *   ui: {
  *     tab: 'specialists',                    // one of TABS below
+ *     dashboard: Steward.Dashboard.Economy,  // optional; default General
+ *     toggleIn: 'production',                // optional: draw the quick toggle in that module's ~Steward~ submenu
  *     section: {
  *       id:      'explorers',                // unique section id (the settings buffer key is the module id)
  *       title:   'Explorers',                // native quick-toggle label; keep it stable
@@ -29,8 +31,15 @@
  *
  * `title` doubles as the native menu's quick-toggle label, so it must stay
  * stable once a module has an `enabled` flag; `heading` is for display only
- * and falls back to `title`. `summary`, `side` and `tiles` are kept only when
+ * and falls back to `title`. The title is also the label of the row a
+ * `toggleIn` joins into another module's submenu. `summary`, `side` and `tiles` are kept only when
  * they are functions, `runsNow` only when it is exactly true.
+ *
+ * `dashboard` picks the dashboard window that shows the section and its
+ * Overview tiles: a value of Steward.Dashboard, General when missing. An
+ * unknown value is logged and treated as General; the module keeps its ui.
+ * A misc section has one too, because it decides where its tiles go. It is
+ * fixed at registration.
  *
  * Menu spec (optional): a module can add a submenu to the native ~Steward~
  * menu via a `menu` field. `items` is an array, or a function returning
@@ -82,7 +91,8 @@
  * Steward.kernel.ui.showBarMenu(id, on). Without `visible` it is always shown.
  *
  * The `events` tab hosts read-only event tools. The `production` tab hosts
- * the production manager's side settings, summary and banners.
+ * the production manager's side settings, summary and banners. The `rebuild`
+ * tab hosts the rebuild section on the Economy Advisor.
  *
  * The Overview is not a registry tab: the dashboard builds it from the
  * sections' `tiles`. `misc` sections render as groups on the Settings screen,
@@ -103,6 +113,7 @@
         buildings:   true,
         events:      true,
         production:  true,
+        rebuild:     true,
         misc:        true
     };
 
@@ -125,8 +136,22 @@
             S.kernel.warn('registry', moduleId, 'ui.section requires id, title, render');
             return null;
         }
+        var dashboard = S.Dashboard.General;
+        if (raw.dashboard !== undefined && raw.dashboard !== null) {
+            if (S.kernel.enumHas(S.Dashboard, raw.dashboard)) dashboard = raw.dashboard;
+            else S.kernel.warn('registry', moduleId, 'ui.dashboard is not a known dashboard:', raw.dashboard);
+        }
+        // A bad toggleIn only loses the join: the toggle stays in the main
+        // list, so the spec is kept.
+        var toggleIn = null;
+        if (raw.toggleIn !== undefined && raw.toggleIn !== null) {
+            if (typeof raw.toggleIn === 'string' && raw.toggleIn !== '') toggleIn = String(raw.toggleIn);
+            else S.kernel.warn('registry', moduleId, 'ui.toggleIn must be a module id, ignoring');
+        }
         return {
             tab: raw.tab,
+            dashboard: dashboard,
+            toggleIn: toggleIn,
             section: {
                 id:      String(sec.id),
                 title:   String(sec.title),
@@ -299,12 +324,23 @@
 
     function count() { return modules.length; }
 
+    // Dashboard of module `id`, or null for an unknown id or one without a ui
+    // spec.
+    function dashboardOf(id) {
+        var entry = byId[id];
+        if (!entry || !entry.ui) return null;
+        return entry.ui.dashboard;
+    }
+
     // Modules registered against `tab`, ordered by registration time (which
     // matches build-order). The dashboard renders sections in this order.
-    function byTab(tab) {
+    // With `dashboard`, only the modules whose dashboard it is.
+    function byTab(tab, dashboard) {
         var out = [];
         for (var i = 0; i < modules.length; i++) {
-            if (modules[i].ui && modules[i].ui.tab === tab) out.push(modules[i]);
+            if (!modules[i].ui || modules[i].ui.tab !== tab) continue;
+            if (dashboard !== undefined && modules[i].ui.dashboard !== dashboard) continue;
+            out.push(modules[i]);
         }
         return out;
     }
@@ -313,6 +349,16 @@
         var out = [];
         for (var i = 0; i < modules.length; i++) {
             if (modules[i].ui) out.push(modules[i]);
+        }
+        return out;
+    }
+
+    // ui modules whose dashboard is `dashboard`, in registration
+    // order. Includes misc modules, whose tiles follow their dashboard.
+    function onDashboard(dashboard) {
+        var out = [];
+        for (var i = 0; i < modules.length; i++) {
+            if (modules[i].ui && modules[i].ui.dashboard === dashboard) out.push(modules[i]);
         }
         return out;
     }
@@ -341,6 +387,8 @@
         byTier:  byTier,
         byTab:   byTab,
         withUi:  withUi,
+        onDashboard: onDashboard,
+        dashboardOf: dashboardOf,
         withMenu: withMenu,
         withBarMenu: withBarMenu,
         menuItems: normalizeMenuItems,

@@ -3,7 +3,8 @@
  *
  * Three surfaces:
  *
- *   1. Native menu — pause toggle, status, "Open Dashboard…", module
+ *   1. Native menu — pause toggle, status, one "Open …" entry per
+ *      dashboard window ("Open Dashboard…", "Open Economy Advisor…"), module
  *      submenus declared via the register spec's `menu` field (read-only
  *      tools such as the event calculator), quick toggles, then
  *      "Settings…". The dashboard and the Settings modal are the
@@ -16,13 +17,18 @@
  *      (its `visible` function) and be moved in and out with showBarMenu.
  *      Module and bar menu items may nest one submenu level deeper; a
  *      nested submenu is built once with its parent and refreshed with it.
+ *      A module's quick toggle may sit at the end of another module's
+ *      submenu instead of in the main list (`ui.toggleIn`).
  *
  *   2. Dashboard modal ("Steward") — a header with the running state and a
  *      one-line summary, a tab bar (Overview, then one tab per registry tab
  *      that has modules) and one panel. The Overview shows the automation
  *      switch and one tile per module; a module tab shows each module as a
  *      settings column beside its main column, stacked in a short window.
- *      The view lives in 92_ui_dashboard.js.
+ *      The view lives in 92_ui_dashboard.js. The same view also serves the
+ *      "Economy Advisor" window: each dashboard category (S.Dashboard) has
+ *      its own modal, listed in S.kernel.ui.dashboards, and a module's
+ *      ui.dashboard picks the window its section and tile appear on.
  *
  *   3. Settings modal ("Steward settings") — a side nav with one group at a
  *      time: General (logging, scheduler, about), then the `misc` modules.
@@ -116,6 +122,29 @@
     // live id and removes a closed modal asynchronously, so one id reused
     // with another title and layout would race.
     var SETTINGS_MODAL_ID = 'StewardSettings';
+
+    // Its own id for the same reason as Settings: the economy window has
+    // another title and is opened while the dashboard may still be closing.
+    var ECONOMY_MODAL_ID = 'StewardEconomy';
+
+    // One window per dashboard category, keyed by S.Dashboard value. Callers
+    // walk S.kernel.DASHBOARD_ORDER and look the row up here, so a new
+    // category is one row. `label` names the window in error texts.
+    var DASHBOARDS = {};
+    DASHBOARDS[S.Dashboard.General] = {
+        modalId:   DASHBOARD_MODAL_ID,
+        title:     'Steward',
+        label:     'Dashboard',
+        menuLabel: 'Open Dashboard…',
+        menuName:  'StewardOpenDashboard'
+    };
+    DASHBOARDS[S.Dashboard.Economy] = {
+        modalId:   ECONOMY_MODAL_ID,
+        title:     'Economy Advisor',
+        label:     'Economy Advisor',
+        menuLabel: 'Open Economy Advisor…',
+        menuName:  'StewardOpenEconomy'
+    };
 
     // -----------------------------------------------------------------
     // Native menu plumbing
@@ -249,13 +278,12 @@
 
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
 
-            var openItem = new air.NativeMenuItem('Open Dashboard…');
-            openItem.name = 'StewardOpenDashboard';
-            openItem.enabled = true;
-            try { openItem.addEventListener(air.Event.SELECT, function () { openDashboard(); }); }
-            catch (e) { /* ignore */ }
-            sub.addItem(openItem);
+            appendDashboardItems(sub);
 
+            // Reset before the module submenus: a joined quick toggle is built
+            // inside its host's submenu and must survive into the main list's
+            // build and the label refresh.
+            toggleItems = {};
             appendModuleMenus(sub);
 
             // Per-module quick-toggles. Each enabled-aware module surfaces a
@@ -263,7 +291,6 @@
             // settings.<id>.enabled and updates the entry's label. autoTSO has the
             // equivalent under "Start/Stop X Auto".
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
-            toggleItems = {};
             appendModuleQuickToggles(sub);
 
             try { sub.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
@@ -310,16 +337,48 @@
     // `enabled` settings flag. Click the entry to flip it without opening
     // the modal. Mirrors autoTSO's "Start/Stop X Auto" entries. Modules
     // that don't expose `enabled` (e.g. diagnostics — read-only probes)
-    // are skipped automatically.
+    // are skipped automatically. A toggle joined into another module's
+    // submenu is left out here; one whose host has no submenu stays here, so
+    // a switch never disappears.
     function appendModuleQuickToggles(sub) {
         try {
             var mods = S.kernel.registry.withUi();
             for (var i = 0; i < mods.length; i++) {
-                appendOneToggle(sub, mods[i]);
+                var m = mods[i];
+                if (joinTarget(m) !== null) continue;
+                if (m.ui.toggleIn) {
+                    S.kernel.warn('ui', m.id, 'toggleIn names no module submenu:', m.ui.toggleIn);
+                }
+                appendOneToggle(sub, m);
             }
         } catch (e) {
             S.kernel.error('ui', 'appendModuleQuickToggles threw:', e);
         }
+    }
+
+    // One "Open …" item per dashboard window, in DASHBOARD_ORDER. General is
+    // the default window and hosts the automation switch, so it is always
+    // enabled; any other window is greyed while no module is on it. A
+    // module's category is fixed at registration, which precedes the menu
+    // build, so this state never needs a refresh.
+    function appendDashboardItems(sub) {
+        var order = S.kernel.DASHBOARD_ORDER;
+        for (var i = 0; i < order.length; i++) {
+            var row = DASHBOARDS[order[i]];
+            if (!row) continue;
+            var item = new air.NativeMenuItem(row.menuLabel);
+            item.name = row.menuName;
+            item.enabled = order[i] === S.Dashboard.General ||
+                           S.kernel.registry.onDashboard(order[i]).length > 0;
+            try { item.addEventListener(air.Event.SELECT, openDashboardHandler(order[i])); }
+            catch (e) { /* ignore */ }
+            sub.addItem(item);
+        }
+    }
+
+    // A closure per item, so each one opens its own window.
+    function openDashboardHandler(dashboard) {
+        return function () { openDashboard(null, dashboard); };
     }
 
     // One submenu per module that declares a `menu` in its register spec,
@@ -342,9 +401,38 @@
     function appendOneModuleMenu(sub, mod) {
         var entry = new air.NativeMenuItem(mod.menu.title);
         entry.name = 'StewardModuleMenu_' + mod.id;
-        entry.submenu = buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+        entry.submenu = buildStewardSubmenu(mod);
         moduleEntries[mod.id] = entry;
         sub.addItem(entry);
+    }
+
+    // The module whose ~Steward~ submenu hosts mod's quick toggle, or null
+    // when mod joins none or names a module without a submenu.
+    function joinTarget(mod) {
+        var id = mod.ui ? mod.ui.toggleIn : null;
+        if (!id) return null;
+        var host = S.kernel.registry.get(id);
+        return (host && host.menu) ? id : null;
+    }
+
+    // A module's ~Steward~ submenu: its own items, then, after a separator,
+    // the quick toggles of the modules that join it. The toggles are the
+    // ordinary ones (same label, flip and refresh), only drawn here. Bar
+    // menus take no joins.
+    function buildStewardSubmenu(mod) {
+        var inner = buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+        var mods = S.kernel.registry.withUi();
+        var first = true;
+        for (var i = 0; i < mods.length; i++) {
+            var m = mods[i];
+            if (joinTarget(m) !== mod.id || toggleLabel(m) === null) continue;
+            if (first) {
+                try { inner.addItem(new air.NativeMenuItem('', true)); } catch (e) { /* sep */ }
+                first = false;
+            }
+            appendOneToggle(inner, m);
+        }
+        return inner;
     }
 
     function barModules() {
@@ -607,7 +695,7 @@
         var entry = moduleEntries[id];
         if (!mod || !mod.menu || !entry) return false;
         return swapSubmenu('module menu', id, entry, function () {
-            return buildModuleInner(mod, mod.menu, mod.id, moduleLabels);
+            return buildStewardSubmenu(mod);
         });
     }
 
@@ -1024,9 +1112,27 @@
         }
     }
 
+    // The window for `tab` when the caller names none: General for no tab or
+    // a tab with a general module (so openDashboard('events') keeps opening
+    // the Steward dashboard), else the first category with a module on it,
+    // else General.
+    function dashboardForTab(tab) {
+        var reg = S.kernel.registry;
+        var general = S.Dashboard.General;
+        if (!tab || !reg || typeof reg.byTab !== 'function') return general;
+        if (reg.byTab(tab, general).length > 0) return general;
+        var order = S.kernel.DASHBOARD_ORDER;
+        for (var i = 0; i < order.length; i++) {
+            if (reg.byTab(tab, order[i]).length > 0) return order[i];
+        }
+        return general;
+    }
+
     // The view picks its own default tab or group for a null one.
-    function openDashboard(tab) {
-        openScreen(DASHBOARD_MODAL_ID, 'Steward', 'Dashboard', 'dashboard', { tab: tab || null });
+    function openDashboard(tab, dashboard) {
+        var d = S.kernel.enumHas(S.Dashboard, dashboard) ? dashboard : dashboardForTab(tab);
+        var row = DASHBOARDS[d] || DASHBOARDS[S.Dashboard.General];
+        openScreen(row.modalId, row.title, row.label, 'dashboard', { tab: tab || null, dashboard: d });
     }
 
     function openSettings(group) {
@@ -1288,6 +1394,7 @@
     S.kernel.ui.seedPaused       = function (v) { paused = v === true; refreshStatus(); };
 
     S.kernel.ui.openDashboard    = openDashboard;
+    S.kernel.ui.dashboards       = DASHBOARDS;
     S.kernel.ui.openSettings     = openSettings;
     S.kernel.ui.closeDashboard   = closeDashboard;
     S.kernel.ui.releaseDashboard = releaseDashboard;

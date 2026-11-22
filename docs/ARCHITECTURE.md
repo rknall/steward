@@ -41,19 +41,21 @@ Steward
 │   ├── deposits
 │   ├── packets
 │   ├── pickups        ← quest objects and collectibles, click action
+│   ├── ledger          ← persisted send-once ledger: sent, unseen, stale; one breaker per owner (rebuild)
 │   ├── locale
 │   ├── events
 │   ├── actions         ← send / verify / retry runner for write actions
 │   ├── adventures      ← adventure definitions, own adventures, close action
 │   ├── army            ← troop pool, squads, supply plan, raise and unload actions
 │   ├── battles         ← battle-file loader and validator
-│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, mining builds, production orders and buffs)
+│   ├── breaker         ← run counter and probe cooldown; named instances (send guard, mining buffs, mining builds, production orders and buffs, rebuild)
 │   ├── buffing         ← shared building-buff engine: verified apply, per-grid hold, breaker; one instance per owner (mining, production)
 │   ├── buffs           ← buff stock and definitions; actions speed, camp, population, map, building
-│   ├── construction    ← building placement and upgrade action defs, verified on the grid
+│   ├── construction    ← building placement, upgrade and rebuild action defs, verified on the grid
 │   ├── production      ← queue profiles and entries per type, generic order, complete, on/off, planner, demand ledger
 │   ├── quests          ← quest pool and claim action
 │   ├── resources       ← resource amount and free population reads
+│   ├── shells          ← depleted-shell reads: ready, changed, the rebuild diagnostic
 │   └── sound           ← pause alert sound
 ├── modules
 │   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
@@ -120,7 +122,7 @@ The numeric prefixes inside `src/kernel/` matter: `00_namespace.js` runs before 
 
 `17_files.js` follows the same rule and sits before `20_logger.js`, because the logger resolves its own log file through the file API.
 
-The kernel UI is five files that rely on that order. `89_ui_style.js` loads first: it creates `Steward.kernel.ui` and `ui.views`, and owns the colour tokens, the layout numbers, the generated stylesheet and `ensureStyle`. `90_ui_shell.js` owns the native menu, pause, the settings buffer with its change counting, the screen lifecycle (open, footer, Save, Close) and edit guards. `91_ui_helpers.js` holds the helper set modules draw with (`Steward.kernel.ui.helpers`) plus `settingsParse` and `settingsShow`. `92_ui_dashboard.js` registers the dashboard view and `93_ui_settings.js` the Settings view. A view is looked up only when a screen opens, so no file needs a later one at load time. The dashboard's Overview tab is built by the dashboard itself from the registry (tiles, adventure state, build row); it is not a module tab.
+The kernel UI is five files that rely on that order. `89_ui_style.js` loads first: it creates `Steward.kernel.ui` and `ui.views`, and owns the colour tokens, the layout numbers, the generated stylesheet and `ensureStyle`. `90_ui_shell.js` owns the native menu, pause, the settings buffer with its change counting, the screen lifecycle (open, footer, Save, Close) and edit guards. `91_ui_helpers.js` holds the helper set modules draw with (`Steward.kernel.ui.helpers`) plus `settingsParse` and `settingsShow`. `92_ui_dashboard.js` registers the dashboard view, which serves one window per `Steward.Dashboard` category: the Steward dashboard (General) and the Economy Advisor window (Economy). The window table `Steward.kernel.ui.dashboards` in `90_ui_shell.js` names each one, and each module's `ui.dashboard` picks its window. `93_ui_settings.js` registers the Settings view. A view is looked up only when a screen opens, so no file needs a later one at load time. The dashboard's Overview tab is built by the dashboard itself from the registry (tiles, adventure state, build row); it is not a module tab.
 
 `36_hostread.js` holds `Steward.kernel.hostRead`: the single member read (`call`), the host vector copy (`list`) and the read-pass memo (`pass`, `cached`, `inPass`). It sits after `35_host.js` and before `40_registry.js`, needs only the namespace, and core readers call it at run time, so no later file is needed at load time.
 
