@@ -1176,6 +1176,79 @@ t.test('plan(): one pass reads the building vector at most twice and each queue 
         JSON.stringify(b.w.counts.queue));
 });
 
+// The live shape of a queue building: no production state and no
+// ResourceCreation, so the queue alone says whether it is producing. The real
+// core readers and buffBlock run; only buff targeting and stock say yes.
+function liveHouse(queue, opts) {
+    opts = opts || {};
+    var w = PS.world({
+        enumNames: { 5: 'provisionhouse2' },
+        buffs: PS.buffDefs(4, ['3']),
+        stock: { Gold: 100 },
+        queues: { 5: queue },
+        queueGrids: opts.queueGrids || {},
+        buildings: [{ name: 'ProvisionHouse2', grid: 1005, level: 1, type: 5 }]
+    });
+    var H = harness.boot({ host: { swmmo: w.swmmo } });
+    PS.install(H, w);
+    var S = H.Steward;
+    S.core.buffs.buildingBuffMatch = function () { return true; };
+    S.core.buffs.stock = function () { return 5; };
+    H.settings.write('production', {
+        enabled: true, actionDelay: 100, ordersPerPass: 2, buffsPerPass: 2,
+        standing: true, buffs: true, bookComplete: false, settingsVersion: 2,
+        buildings: { ProvisionHouse2: row('AddResource_Manuscript', 1, 'BB_2') }
+    });
+    var reg = H.module('production');
+    reg.boot();
+    w.reset();
+    var env = { H: H, S: S, w: w, reg: reg };
+    env.plan = function () {
+        H.clearQueued();
+        reg.plan({ zone: { isHome: true } });
+        return H.queued();
+    };
+    return env;
+}
+
+function manuscript(produced) {
+    return { type: 'AddResource_Manuscript', amount: 3, produced: produced, timeMs: 1000, collectedMs: 0, bonus: 1 };
+}
+
+t.test('a producing queue building without ResourceCreation gets its buff reapplied', function () {
+    var env = liveHouse([manuscript(1)]);
+    var q = env.plan();
+    assert.deepStrictEqual(plain(named(q, 'production.rebuff').map(function (e) { return e.params; })),
+        [[1005, 'ProvisionHouse2', 'BB_2']]);
+    assert.strictEqual(named(q, 'production.order').length, 0);
+    // The order rider's gate and the precheck's last check both accept it.
+    var b = env.S.core.buildings.byName('ProvisionHouse2')[0];
+    assert.strictEqual(env.S.modules.production.buffEngine.eligible(b, null), env.S.BuffVerdict.Ok);
+    assert.strictEqual(env.S.core.buildings.buffBlock(b), null);
+});
+
+t.test('an idle or finished queue building is not reapplied', function () {
+    assert.strictEqual(named(liveHouse([]).plan(), 'production.rebuff').length, 0);
+    assert.strictEqual(named(liveHouse([manuscript(3)]).plan(), 'production.rebuff').length, 0);
+});
+
+t.test('a reapply skip says why once, and again after the building was eligible', function () {
+    // The queue runs at another building: the head is the row's item, but this
+    // building is not producing.
+    var env = liveHouse([manuscript(1)], { queueGrids: { 5: 2000 } });
+    var line = 'ProvisionHouse2 grid 1005 cannot take BB_2 now: queue not producing';
+    assert.strictEqual(named(env.plan(), 'production.rebuff').length, 0);
+    assert.strictEqual(named(env.plan(), 'production.rebuff').length, 0);
+    assert.strictEqual(debugs(env, line).length, 1);
+    // Eligible again: the reapply is queued and the refusal is forgotten.
+    env.w.queueGrids = {};
+    assert.strictEqual(named(env.plan(), 'production.rebuff').length, 1);
+    assert.strictEqual(debugs(env, line).length, 1);
+    env.w.queueGrids = { 5: 2000 };
+    assert.strictEqual(named(env.plan(), 'production.rebuff').length, 0);
+    assert.strictEqual(debugs(env, line).length, 2);
+});
+
 t.test('plan() runs in a read pass that is closed afterwards, also when a phase throws', function () {
     var b = countingSetup();
     var HR = b.S.kernel.hostRead;

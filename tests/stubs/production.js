@@ -22,9 +22,13 @@
  *   buffMap     { name: { target, group, type } } for map_BuffName_BuffDefinition
  *   groups      { group: [buildingName, ...] } for targetGroups.groupContains
  *   star        [{ type, amount }] star-menu buffs
- *   buildings   [{ name, grid, level, type, buff, state }]; type is the queue
- *               type (omit for continuous producers), buff a running buff
- *               name, state a GetProductionState number
+ *   buildings   [{ name, grid, level, type, buff, state, rcThrows }]; type is
+ *               the queue type (omit for continuous producers), buff a running
+ *               buff name, state a GetProductionState number. A building with
+ *               a type and no state has the live queue-building shape:
+ *               GetResourceCreation answers null (it throws when rcThrows)
+ *   queueGrids  { type: grid } for the grid of a queue's building, which is
+ *               1000 + type unless given
  *   books, timed, home, stock, free   as in the production queue tests; a
  *               timed def is { name, yield, costs } plus, optionally, group
  *               (served by GetGroup()), requiresEvent, requiresQuest,
@@ -95,6 +99,7 @@ function world(opts) {
     var w = {
         enumNames: opts.enumNames || {},
         queues: opts.queues || {},
+        queueGrids: opts.queueGrids || {},
         buffs: opts.buffs || [],
         buffMap: opts.buffMap || {},
         groups: opts.groups || {},
@@ -184,6 +189,12 @@ function buildingFake(spec, index) {
         b.GetResourceCreation = function () {
             return { GetProductionState: function () { return spec.state; } };
         };
+    } else if (typeof spec.type === 'number') {
+        // A queue building has no ResourceCreation: the call answers null.
+        b.GetResourceCreation = function () {
+            if (spec.rcThrows) throw new Error('bridge');
+            return null;
+        };
     }
     return b;
 }
@@ -204,7 +215,7 @@ function install(H, w) {
         var list = w.queues[type];
         return {
             mProductionType: type,
-            productionBuilding: { GetGrid: function () { return 1000 + type; } },
+            productionBuilding: { GetGrid: function () { return has(w.queueGrids, type) ? w.queueGrids[type] : 1000 + type; } },
             get mTimedProductions_vector() { return list.map(entryFake); }
         };
     }
