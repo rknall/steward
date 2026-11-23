@@ -193,7 +193,7 @@ Sinks fail safely — if the file write throws, the console write still happens.
 
 ## Conventions
 
-- Use the module ID as the category. Don't reuse another module's category. The production module and the production core (queue readers, planner, demand ledger, complete and on/off actions) log under `production`; the diagnostics dump of the production queues logs under `diag:production`.
+- Use the module ID as the category. Don't reuse another module's category. The economy module and the star-to-store transfer in `core/buffs.js` log under `economy` and `buffs` (a stack that bounced back marks its item full: `<name> is full: <n> came back to the star menu`). The production module and the production core (queue readers, planner, demand ledger, complete and on/off actions) log under `production`; the diagnostics dump of the production queues logs under `diag:production`.
 - Reserve `kernel:*` prefixes for internal kernel logging (`scheduler`, `queue`, `lifecycle`).
 - Don't `try/catch` around `Steward.kernel.log` — the logger swallows its own failures.
 - Don't log at INFO level inside hot loops. The scheduler tick writes no INFO line per cycle; its only INFO line is the rate-limited heartbeat.

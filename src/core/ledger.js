@@ -39,7 +39,8 @@
  *
  * In memory the ledger also marks the keys whose attempt runs in this
  * session; reread() leaves those to their attempt. A 'sent' entry read back
- * from the file has no attempt any more and is treated as unseen.
+ * from the file has no attempt any more and is treated as unseen; so is one
+ * whose attempt was cancelled, once its owner calls release(owner).
  *
  * Without a writable folder, or while the file cannot be read, nothing that
  * goes through attempt() is sent and blocked() reports 'unread': an
@@ -537,6 +538,29 @@
         return true;
     }
 
+    // Drops the in-flight marks of owner's keys after its attempts were
+    // cancelled (S.kernel.queue.cancelByModule): a cancelled attempt never
+    // reaches its done, so its mark would block reread() and resolve() for
+    // the rest of the session. The entries stay; reread() then settles them
+    // as it does after a reload. Only for an owner whose queued steps are
+    // gone, since a running attempt and reread() must not both settle a key.
+    // Returns how many marks were dropped.
+    function release(owner) {
+        var n = 0;
+        var k;
+        for (k in flight) {
+            if (!has(flight, k)) continue;
+            if (!has(entries, k) || entries[k].owner !== owner) continue;
+            delete flight[k];
+            n++;
+        }
+        if (n > 0) {
+            S.kernel.debug(categoryOf(owner), 'released ' + n + ' send ledger key' + (n === 1 ? '' : 's') +
+                ' of cancelled ' + owner + ' attempts');
+        }
+        return n;
+    }
+
     // Copies of the entries for owner (every owner when omitted), sorted by
     // key; base stays out.
     function snapshot(owner) {
@@ -572,6 +596,7 @@
     api.attempt      = attempt;
     api.reread       = reread;
     api.resolve      = resolve;
+    api.release      = release;
     api.snapshot     = snapshot;
     api.breaker      = breakerOf;
 

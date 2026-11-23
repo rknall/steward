@@ -29,6 +29,13 @@
  *                  window header).
  *   emptyStatus()  the status shape with nothing read.
  *
+ * A row's fits is what of the whole star stock fits the storehouse
+ * (min of star and room, floored); 0 when the item or the warehouse is full,
+ * null when star or room is unread or nothing is in the star menu. next stays
+ * the first transfer's amount. The status adds none (selected rows with
+ * nothing in the star menu) and fullItems (the selected full rows as
+ * { name, label, back, at }, by label) for the words of the views.
+ *
  * Row state, first match wins:
  *   unknown    a read the decision needs failed (a read refusal from
  *              storeNext, or an unread send ledger);
@@ -90,11 +97,23 @@
         return selected ? 'ready' : 'idle';
     }
 
+    // What of the whole star stock fits in the storehouse, which is what a
+    // tile counts (next is only the first transfer). An item or warehouse
+    // that is full takes nothing; an unread star or room, or nothing in the
+    // star menu, is unknown.
+    function fitsOf(state, p) {
+        if (state === 'full' || state === 'warehouse') return 0;
+        if (state === 'none') return null;
+        if (!p.star || typeof p.star.total !== 'number' || typeof p.room !== 'number' || !(p.room > 0)) return null;
+        return Math.floor(Math.min(p.star.total, p.room));
+    }
+
     function row(name, selected) {
         var p = safe(function () { return S.core.buffs.storeNext(name); }, null) ||
             { amount: 0, room: null, stock: null, star: null, full: null, reason: 'star stock unreadable' };
         var live = safe(function () { return S.core.events.resourceLive(name); }, null);
         var pending = safe(function () { return S.core.ledger.blocked(M().key(name)); }, 'unread');
+        var state = stateOf(selected, live, p, pending);
         return {
             name:     name,
             label:    safe(function () { return S.core.locale.res(name); }, name) || name,
@@ -106,10 +125,10 @@
             store:    p.stock,
             room:     p.room,
             next:     p.amount,
-            fits:     p.amount,
+            fits:     fitsOf(state, p),
             full:     p.full || safe(function () { return S.core.buffs.storeFull(name); }, null),
             pending:  pending,
-            state:    stateOf(selected, live, p, pending)
+            state:    state
         };
     }
 
@@ -184,7 +203,7 @@
     var cache = null;
 
     function emptyPart() {
-        return { selected: 0, ready: 0, pending: 0, full: 0, warehouse: 0, offline: 0, unknown: 0, readable: false };
+        return { selected: 0, ready: 0, pending: 0, full: 0, warehouse: 0, offline: 0, unknown: 0, none: 0, fullItems: [], readable: false };
     }
 
     function hostPart() {
@@ -198,11 +217,21 @@
             var st = rows[i].state;
             if (st === 'ready') part.ready++;
             else if (st === 'pending') part.pending++;
-            else if (st === 'full') part.full++;
+            else if (st === 'full') {
+                part.full++;
+                part.fullItems.push({
+                    name:  rows[i].name,
+                    label: rows[i].label,
+                    back:  rows[i].full ? rows[i].full.back : null,
+                    at:    rows[i].full ? rows[i].full.at : null
+                });
+            }
+            else if (st === 'none') part.none++;
             else if (st === 'warehouse') part.warehouse++;
             else if (st === 'offline') part.offline++;
             else if (st === 'unknown') part.unknown++;
         }
+        part.fullItems.sort(byLabel);
         return part;
     }
 
@@ -218,6 +247,8 @@
             warehouse: part.warehouse,
             offline:   part.offline,
             unknown:   part.unknown,
+            none:      part.none,
+            fullItems: part.fullItems,
             readable:  part.readable,
             lastPass:  last,
             lastMoved: lastMoved,

@@ -105,6 +105,8 @@ Host calls behind the core write actions (each is wrapped by `Steward.core.packe
 | `quest.SetQuestMode(1)`, then `SendMessagetoServer(100, dServerAction, responder)` with `type = 1`, `data = quest.GetUniqueId()` and `responder = game.createResponder(onResult, onFault)` (`ServerState::ResponderSimple`). The claim is verified by the server's result callback for the current send, or by the quest leaving the zone's pool (a claimed quest stays in the pool for a while). A fault, a stale callback or `isFinished` turning false is never a success | `quests.claim` |
 | `quest.SetQuestMode(3)`, then `SendMessagetoServer(100, dServerAction, responder)` with `type = 0` (`SERVER_STACK_QUEST_BUTTON_OK`) and `data = quest.GetUniqueId()`. This is what the client's `QuestOkButtonPressedFromGui` sends when the player opens a quest in mode 2 ("New Quest", unread). The read is verified by the server's result callback for the current send, or by new quests entering the zone's pool. Mode 3 alone is never proof | `quests.read` |
 | `AdventureManager.removeAdventure(zoneId)` | `adventures.close` |
+| `game.getResources().GetWareHouseCapacity()`, no argument: the one capacity every storehouse resource shares | `resources.capacity` |
+| `SendServerAction(61, 0, grid, amount, uid)` with `grid` the player's own island grid (8825) and `uid` the star-menu entry: moves that amount of a resource stack from the star menu into the storehouse (the same packet as a buff, which targets a building grid). The storehouse answers nothing. A stack it cannot take (full for that item) returns to the star menu 5-10 s later, so a stack seen back in the menu inside the settle window proves the send did not land; a store rise alone is not proof, since the same item may be produced meanwhile | `buffs.toStore` (`buffs.storeNext`, `buffs.storeFull`), used by `modules/economy` |
 | `game.getResources().GetResourceAmount(name)` and `.GetFree()` | `resources.amount`, `resources.freePopulation` |
 | `game.getResources().GetPlayerResources_vector('')`, entries with `name_string` and `amount` (not yet confirmed in steward logs beyond the April 2026 storehouse dump) | `resources.list`, `events.heldResources` |
 | `game.def('ServerState::gEconomics').GetResourcesDefaultDefinition(name).requiredEventName_string`, non-empty for an event resource (not yet confirmed in steward logs beyond the April 2026 storehouse dump) | `resources.eventName`, `events.heldResources` |
@@ -320,6 +322,10 @@ new window.runtime.Date(timestamp);                 // game's Date constructor
 `GetClientTime()` is the same time base as a buff appliance's `GetStartTime()` and
 `mBuildingCreationTime`. It is not epoch milliseconds, so only differences between two
 values from this base are meaningful.
+
+### Item images
+
+`getImageTag(resourceName, size)` is a host global that returns an `<img>` markup string with the bitmap as a data URI; `size` is a CSS length such as `'20px'`. It does not exist early in boot and can throw on a half-initialised item. Until the host has decoded the bitmap it returns a placeholder instead of an `<img`, so only a result starting with `<img` is cached. Steward reads it through `S.kernel.ui.helpers.imageTag(id, size, pass)`, which caches real images per id and size and sets `pass.imageMissed` for a placeholder so the caller can redraw.
 
 ## Building production buffs
 

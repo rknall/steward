@@ -285,6 +285,56 @@ t.test('module off cancels the queued transfers', function () {
     assert.deepStrictEqual(cancelled, ['economy', 'economy']);
 });
 
+// The attempt's steps carry the economy tag, so module off drops them with
+// the queued transfers and releases the key's flight mark; the entry stays
+// 'sent'. The first pass after re-enabling rereads it like an entry read back
+// after a reload: inside the window it turns 'unseen' and stays blocked. The
+// harness queue has no cancel, so the spy clears the queued steps where the
+// kernel would.
+function sentThenOff() {
+    var w = EC.world({ star: [star('Wood', 100, 'w1')], store: { Wood: 0 }, items: { Wood: true } });
+    w.env.apply = false;
+    w.handlers['economy.transfer'](['Wood']);
+    w.drain(2);
+    var e = w.fileEntries()['store|home|Wood'];
+    assert.strictEqual(e.state, 'sent');
+    var cancelled = [];
+    w.S.kernel.queue.cancelByModule = function (id) {
+        cancelled.push(id);
+        w.H.clearQueued();
+    };
+    w.S.kernel.settings.write('economy', { enabled: false });
+    w.S.kernel.lifecycle.applySettings.economy();
+    assert.deepStrictEqual(cancelled, ['economy']);
+    assert.deepStrictEqual(w.plan(), []);
+    assert.strictEqual(w.fileEntries()['store|home|Wood'].state, 'sent');
+    w.S.kernel.settings.write('economy', { enabled: true });
+    assert.ok(w.env.now < e.sentAt + 60000);
+    assert.deepStrictEqual(w.plan(), []);
+    assert.strictEqual(w.S.core.ledger.blocked('store|home|Wood'), 'unseen');
+    return { w: w, sentAt: e.sentAt };
+}
+
+t.test('module off with a send in flight: the key stays blocked, and the reread after re-enabling settles it', function () {
+    // Landed: the stack arrived while the module was off.
+    var a = sentThenOff();
+    var w = a.w;
+    w.stack('w1').amount = 0;
+    w.env.store.Wood = 100;
+    w.env.now = a.sentAt + 60001;
+    assert.deepStrictEqual(w.plan(), []);
+    assert.strictEqual(w.fileEntries()['store|home|Wood'], undefined);
+    assert.strictEqual(w.S.core.ledger.blocked('store|home|Wood'), null);
+    assert.strictEqual(w.S.core.ledger.breaker('economy').snapshot().run, 0);
+
+    // Unmoved: the stack is still in the star menu, so the proof frees the
+    // key and the same pass queues Wood again.
+    var b = sentThenOff();
+    b.w.env.now = b.sentAt + 60001;
+    assert.deepStrictEqual(names(b.w.plan()), ['Wood']);
+    assert.strictEqual(b.w.fileEntries()['store|home|Wood'], undefined);
+});
+
 // ---- register spec -------------------------------------------------------------------
 
 // Kernel and core from the harness, then the economy files in bundle order,
@@ -323,6 +373,10 @@ t.test('the module registers on the economy tab with its section kept and no reg
 
 t.test('the delegating section and menu return safe empties while ui.js and menu.js are absent', function () {
     var L = loadEconomy();
+    // The bundle may already carry ui.js or menu.js; take them out so this
+    // case sees the namespace as it is before they load.
+    delete L.S.modules.economy.menu;
+    delete L.S.modules.economy.ui;
     var sec = L.S.kernel.registry.get('economy').ui.section;
     assert.strictEqual(sec.render({}, {}), undefined);
     assert.strictEqual(sec.side({}, {}), undefined);

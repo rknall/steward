@@ -59,6 +59,7 @@ Steward
 │   └── sound           ← pause alert sound
 ├── modules
 │   ├── adventures      ← run templates and scenario runs (see [SCENARIOS.md](SCENARIOS.md) and [WAVES.md](WAVES.md)), the run series (home, travel, waves, end of map, return, retrain) and its executors; template steps (unload, send home, pause, timed wait) and Send all to the star run on `loader.runStep`, the one step driver
+│   ├── economy         ← selected star items to the storehouse (one send per item, ledger-guarded) and the economy grid window with one storehouse tab at a time
 │   ├── production      ← automatic queues (one order while a queue is idle), producer buffs, Bookbinder completion and the "Steward production" window (Production Manager, Queues, Settings)
 │   ├── updater         ← release check, verified install, settings backups and restore (see RELEASING.md)
 │   └── <id>            ← exposed only if the module chooses to publish state

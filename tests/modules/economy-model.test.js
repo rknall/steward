@@ -41,9 +41,59 @@ t.test('a row carries the star, store, room, next send, full mark and ledger sta
     var r = plain(model(w).items()[0]);
     assert.deepStrictEqual(r, {
         name: 'Wood', label: 'Wood', tab: 'WarehouseTab1', selected: true, live: true,
-        star: 150, entries: 2, store: 400, room: 600, next: 100, fits: 100,
+        star: 150, entries: 2, store: 400, room: 600, next: 100, fits: 150,
         full: null, pending: null, state: 'ready'
     });
+});
+
+t.test('fits is what of the whole star stock fits', function () {
+    var w = EC.world({
+        star: [star('Stone', 60, 's1'), star('Stone', 25, 's2')],
+        store: { Stone: 940 },
+        capacity: 1000,
+        items: { Stone: true }
+    });
+    var r = plain(model(w).items()[0]);
+    assert.strictEqual(r.room, 60);
+    assert.strictEqual(r.fits, 60);
+    assert.strictEqual(r.next, 60);
+    w.env.store.Stone = 800;
+    r = plain(model(w).items()[0]);
+    assert.strictEqual(r.room, 200);
+    assert.strictEqual(r.fits, 85);
+    assert.strictEqual(r.next, 60);
+});
+
+t.test('fits is 0 for item full and warehouse full', function () {
+    var w = EC.world({
+        star: [star('Coal', 10, 'c1'), star('Dust', 10, 'd1')],
+        store: { Coal: 1000, Dust: 0 },
+        bounce: { Dust: { after: 7000 } },
+        items: { Coal: true, Dust: true }
+    });
+    w.fire('Dust');
+    var rows = byName(plain(model(w).items()));
+    assert.strictEqual(rows.Dust.state, 'full');
+    assert.strictEqual(rows.Dust.fits, 0);
+    assert.strictEqual(rows.Coal.state, 'warehouse');
+    assert.strictEqual(rows.Coal.fits, 0);
+});
+
+t.test('fits is null with star or room unreadable and for none in star', function () {
+    var w = EC.world({
+        star: [star('Stone', 10, 's1'), star('Wood', 10, 'w1')],
+        store: { Wood: 0, Gold: 5 },
+        items: { Stone: true, Wood: true, Gold: true }
+    });
+    // Stone: its store stock does not read, so there is no room.
+    var rows = byName(plain(model(w).items()));
+    assert.strictEqual(rows.Stone.fits, null);
+    assert.strictEqual(rows.Gold.state, 'none');
+    assert.strictEqual(rows.Gold.fits, null);
+    assert.strictEqual(rows.Wood.fits, 10);
+    w.H.host.game.gi.mCurrentPlayer.getAvailableBuffs_vector = function () { throw new Error('gone'); };
+    rows = byName(plain(model(w).items()));
+    assert.strictEqual(rows.Wood.fits, null);
 });
 
 t.test('every row state, one item each', function () {
@@ -190,6 +240,26 @@ t.test('status counts the selected rows by state and carries pass, moved, breake
     assert.strictEqual(st.readAt, w.env.now);
 });
 
+t.test('status counts none and lists full items by label', function () {
+    var w = EC.world({
+        star: [star('Dust', 10, 'd1'), star('Brick', 10, 'b1')],
+        store: { Dust: 0, Brick: 0, Gold: 0 },
+        bounce: { Dust: { after: 7000 }, Brick: { after: 7000 } },
+        items: { Dust: true, Brick: true, Gold: true }
+    });
+    w.fire('Dust');
+    w.fire('Brick');
+    var st = plain(model(w).status());
+    assert.strictEqual(st.none, 1);
+    assert.strictEqual(st.full, 2);
+    assert.deepStrictEqual(st.fullItems.map(function (f) { return f.name; }), ['Brick', 'Dust']);
+    var mark = plain(w.S.core.buffs.storeFull('Dust'));
+    var d = st.fullItems[1];
+    assert.strictEqual(d.label, 'Dust');
+    assert.strictEqual(d.back, mark.back);
+    assert.strictEqual(d.at, mark.at);
+});
+
 t.test('status reuses a fresh host part and snapshot gives one object per read pass', function () {
     var w = EC.world({ star: [star('Wood', 10, 'w1')], store: { Wood: 0 }, items: { Wood: true } });
     var M = model(w);
@@ -214,6 +284,8 @@ t.test('emptyStatus has the status shape with nothing read', function () {
     assert.deepStrictEqual(Object.keys(e).sort(), Object.keys(s).sort());
     assert.strictEqual(e.enabled, false);
     assert.strictEqual(e.selected, 0);
+    assert.strictEqual(e.none, 0);
+    assert.deepStrictEqual(e.fullItems, []);
     assert.strictEqual(e.readAt, null);
 });
 

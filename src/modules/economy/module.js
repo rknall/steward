@@ -33,8 +33,10 @@
  * Guards: a queued transfer re-checks the module switch, the selection and
  * the event liveness when it runs, because any of them may have changed
  * since the pass queued it. Off (enabled false) cancels this module's
- * queued transfers at once (applySettings); a send already in flight runs
- * to its end under the ledger.
+ * queued transfers at once (applySettings), the steps of a send already
+ * made included, and releases those sends' ledger marks: the entry stays
+ * and blocks its item until the next pass after re-enabling rereads it,
+ * as after a reload.
  *
  * The dashboard section and the ~Steward~ submenu are registered here in
  * full and delegate to ui.js and menu.js at call time, because those files
@@ -234,11 +236,14 @@
     // The one off path, called after a dashboard Save, a submenu flip and a
     // tile click. The module off stops its queued transfers at once; a
     // deselected item needs no cancel, since its queued transfer re-checks
-    // the selection when it runs.
+    // the selection when it runs. A cancelled send never finishes its
+    // attempt, so its ledger mark is released here; otherwise its key would
+    // stay blocked as in flight for the rest of the session.
     function applySettings() {
         var s = readSettings();
         if (!s.enabled && S.kernel.queue && S.kernel.queue.cancelByModule) {
             S.kernel.queue.cancelByModule(OWNER);
+            S.core.ledger.release(OWNER);
         }
     }
 

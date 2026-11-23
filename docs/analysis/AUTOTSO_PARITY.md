@@ -51,7 +51,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | `Buildings` | aBuildings.manage (auto-toggle production) | — (#18) | ✗ | must |
 | `Mail` | aMail.manage (loot mail + pending trades + invites) | — (#6, invites #7) | ✗ | must |
 | `OpenMysteryBoxs` | aBuffs.openLootables (open inventory mystery boxes) | — (#19) | ✗ | should |
-| `FromStarToStore` | aResources.transferFromStarToStore (move buffed resources to warehouse) | — (#20) | ✗ | should |
+| `FromStarToStore` | aResources.transferFromStarToStore (move buffed resources to warehouse) | `core/buffs.toStore`, `modules/economy` | ✓ | should |
 | `CollectPickups` | aBuildings.collectibles.manage | `modules/collect` | ✓ | must |
 
 ## Subsystems
@@ -126,7 +126,7 @@ These are the master on/off switches autoTSO surfaces in the menu (`aUI.menu.fea
 | `runProduction(resource, total)` (start production runs) | `core.production.order` covers troop orders only; production manager is #18, one-off orders #36, queue cancel #37 | ~ |
 | `productionBuildings(resource)` | partial via `core/buildings` predicates and `core.production.queueIdFor` | ~ |
 | `getResourceFormStar` (transfer from star menu) | — (#20) | ✗ |
-| `transferFromStarToStore` | — (#20) | ✗ |
+| `transferFromStarToStore` | `core/buffs.toStore`, `modules/economy` | ✓ |
 | `gather.byTrade(friendId)` (inter-player trade gathering) | n/a — trade is won't do (#21) | n/a |
 | `Has(name, amount)` | `core.resources.amount` | ✓ |
 | `remainingCapacity(name)` | — (#20) | ✗ |

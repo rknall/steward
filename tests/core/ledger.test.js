@@ -256,6 +256,34 @@ t.test('reread: nothing changes while observable() is false or the key is in fli
     assert.strictEqual(s2.L.blocked(KEY), 'sent');
 });
 
+t.test('release: a cancelled attempt\'s key settles by reread; other owners keep theirs', function () {
+    var s = setup();
+    s.L.register('other', { category: 'othercat' });
+    var OTHER = 'test|home|11';
+    s.L.attempt(def(s), { key: KEY, owner: 'tester', name: 'x' });
+    s.L.attempt(def(s), { key: OTHER, owner: 'other', name: 'y' });
+    var q = s.H.queued();
+    s.H.clearQueued();
+    s.S.core.actions.step(q[0].params);     // tester's send
+    s.S.core.actions.step(q[1].params);     // other's send
+    assert.strictEqual(s.L.blocked(KEY), 'sent');
+    assert.strictEqual(s.L.blocked(OTHER), 'sent');
+    // The queued follow-up steps are dropped, as cancelByModule does.
+    s.H.clearQueued();
+
+    assert.strictEqual(s.L.release('nobody'), 0);
+    assert.strictEqual(s.L.release('tester'), 1);
+    assert.strictEqual(s.L.release('tester'), 0, 'a second release finds nothing');
+    assert.strictEqual(s.L.blocked(KEY), 'sent', 'the entry stays until reread');
+
+    s.flag.done = true;
+    s.clock.now += 5000;
+    assert.strictEqual(s.L.reread(KEY, def(s)), null, 'observed once the mark is gone');
+    assert.ok(!fileEntries(s)[KEY]);
+    assert.strictEqual(s.L.reread(OTHER, def(s)), 'sent', 'still left to its own attempt');
+    assert.strictEqual(s.L.resolve(OTHER, 'x'), false);
+});
+
 t.test('no file API: refused as unavailable and nothing sent', function () {
     var s = setup({ noFs: true });
     var res = run(s, def(s));

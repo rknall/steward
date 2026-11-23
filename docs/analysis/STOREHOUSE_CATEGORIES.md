@@ -92,7 +92,8 @@ a real bitmap (25-30 px) for all 163 items.
 
 ## Gap in Steward
 
-- `group_string` is not read in `src` yet.
+- `group_string` is read since the economy work: `resources.groupOf(name)`, `resources.tabOf(name)` and `resources.tabs()` give the group, its tab and the ordered tab list.
+- The storehouse has one capacity for every item. When it is full for one item, a star-to-store stack bounces back to the star menu 5-10 s later; `core/buffs.toStore` reads that bounce as proof of failure and `buffs.storeFull(name)` remembers it for 30 min (own caps are not readable, so the bounce is the only signal).
 - `S.core.resources.list()` keeps name and amount only.
 - `buildStorehousePayload` and `docs/superpowers/ecoadvisor/` are not on main.
 - The `src/core/resources.js` header says the storehouse does not show uncategorized items. That is
@@ -103,6 +104,6 @@ a real bitmap (25-30 px) for all 163 items.
 1. Settings > Diagnostics > Dump storehouse writes `steward/dumps/storehouse-<zone>-<ms>.json`
    with definitions, held and star rows, caps, icon sizes and the trader-vs-mayor differences
    (run at home on 2026-11-13; the facts above come from it).
-2. A core tab reader derived from `group_string`: one ordered list of the seven tab keys, labels
-   from loca, no English tier map.
+2. Done: the core tab reader derived from `group_string` (`resources.tabs`, `tabOf`, `groupOf`):
+   one ordered list of the seven tab keys, labels from loca, no English tier map.
 3. The economic advisor is deferred.

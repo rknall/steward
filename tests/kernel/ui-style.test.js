@@ -250,6 +250,45 @@ t.test('a muted span in a stat value is styled like the small text', function ()
     t.assert.ok(/font-weight:400/.test(rule), rule);
 });
 
+var STORE_CLASSES = [
+    'steward-store-strip', 'steward-store-grid', 'steward-store-item', 'steward-store-icon',
+    'steward-store-name', 'steward-store-star', 'steward-store-fit', 'steward-store-badge',
+    'is-on', 'is-full', 'is-warehouse', 'is-pending', 'is-stale', 'is-none', 'is-offline',
+    'is-unknown'
+];
+
+function storeRules(rules) {
+    return rules.filter(function (r) {
+        return r.indexOf('.steward-store-') >= 0;
+    });
+}
+
+t.test('the store grid rules use theme tokens', function () {
+    // Built from marker tokens, so any colour left in the text was typed
+    // into a rule instead of taken from a token.
+    var u = ui();
+    var sent = sentinels(u);
+    var text = storeRules(u.buildRules(sent.tokens, sent.layout)).join('\n');
+    var missing = STORE_CLASSES.filter(function (c) {
+        return text.indexOf('.' + c) < 0;
+    });
+    t.assert.deepStrictEqual(missing, []);
+    t.assert.ok(!/#[0-9a-f]{3,6}\b/i.test(text), 'a literal hex colour');
+    t.assert.ok(!/rgba?\(/.test(text), 'a literal rgb colour');
+    t.assert.ok(text.indexOf(sent.tokens.brass) >= 0);
+    t.assert.ok(text.indexOf(sent.tokens.confirmBg) >= 0);
+});
+
+t.test('no sections head or glow rule', function () {
+    var text = ui().STYLE_RULES.join('\n');
+    t.assert.ok(text.indexOf('.steward-store-tab') < 0);
+    t.assert.ok(text.indexOf('.is-greyed') < 0);
+    t.assert.ok(text.indexOf('.bd-glow') < 0);
+    storeRules(ui().STYLE_RULES).forEach(function (r) {
+        if (r.indexOf('.is-on') >= 0) t.assert.ok(r.indexOf('box-shadow') < 0, r);
+    });
+});
+
 t.test('the modal footer stretches the host frame image over its full width', function () {
     var rule = ui().STYLE_RULES.filter(function (r) {
         return r.indexOf('.modal-footer{') === 0;

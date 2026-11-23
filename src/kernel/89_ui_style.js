@@ -131,6 +131,8 @@
 
         // control and row sizes (px)
         tileMin:      118,
+        storeIcon:    32,
+        storeFitH:    13,
         btnH:         33,
         btnSmH:       26,
         scrollbar:    5,
@@ -157,6 +159,7 @@
         narrow:           620,
         fieldCtl:         122,
         fieldCtlWide:     220,
+        storeTile:        104,
         compactMaxHeight: 700,
         minPanel:         240,
         chrome:           { dashboard: 270, settings: 226 }
@@ -463,6 +466,38 @@
             '.steward-tile-foot{position:absolute;left:12px;right:12px;bottom:10px;overflow:hidden;}',
             '.steward-tile-foot .steward-badge{margin-right:8px;}',
             '.steward-tile-foot .steward-link{float:right;margin-left:8px;}',
+
+            // ---- economy storehouse grid: floated tiles (no flex or grid in
+            // AIR 32), overflow clears the row; state classes only restyle ----
+            '.steward-store-strip{margin-bottom:8px;}',
+            '.steward-store-grid{overflow:hidden;padding:4px 0 0 4px;}',
+            '.steward-store-item{position:relative;float:left;width:' + px(l.storeTile) + ';' +
+                'margin:0 8px 8px 0;padding:6px 6px 5px;border:2px solid transparent;' +
+                'border-radius:' + px(t.radiusLg) + ';background:' + t.shadeCard + ';' +
+                'text-align:center;cursor:pointer;color:' + t.text + ';' +
+                'font-size:' + px(t.fontBadge) + ';line-height:1.25;}',
+            '.steward-store-item.is-on{border-color:' + t.brass + ';background:' + t.brassTint + ';}',
+            '.steward-store-icon{display:block;width:' + px(t.storeIcon) + ';' +
+                'height:' + px(t.storeIcon) + ';margin:0 auto 3px;overflow:hidden;' +
+                'border-radius:' + px(t.radiusSm) + ';background:' + t.avatarBg + ';' +
+                'border:1px solid ' + t.avatarLine + ';}',
+            '.steward-store-name{display:block;font-weight:600;}',
+            '.steward-store-star{display:block;color:' + t.bannerInk + ';}',
+            '.steward-store-fit{display:block;min-height:' + px(t.storeFitH) + ';' +
+                'color:' + t.muted + ';font-size:' + px(t.fontXs) + ';}',
+            '.steward-store-badge{display:block;margin-top:3px;padding:0 4px;' +
+                'border-radius:' + px(t.radiusSm) + ';background:' + t.bandSub + ';' +
+                'color:' + t.text + ';font-size:' + px(t.fontXs) + ';line-height:1.3;}',
+            '.steward-store-item.is-full,.steward-store-item.is-warehouse{border-style:dashed;}',
+            '.steward-store-item.is-full .steward-store-badge,' +
+                '.steward-store-item.is-warehouse .steward-store-badge{' +
+                'background:' + t.confirmBg + ';color:' + t.white + ';}',
+            '.steward-store-item.is-pending .steward-store-badge{' +
+                'background:' + t.brassBusy + ';color:' + t.busyInk + ';}',
+            '.steward-store-item.is-stale .steward-store-badge{' +
+                'background:' + t.brassEdge + ';color:' + t.white + ';}',
+            '.steward-store-item.is-none,.steward-store-item.is-offline{opacity:.55;}',
+            '.steward-store-item.is-unknown{opacity:.7;border-style:dotted;}',
 
             // ---- banner, empty state, compact strip ----
             '.steward-banner{padding:9px 12px;overflow:hidden;border-radius:' + px(t.radiusLg) + ';' +
