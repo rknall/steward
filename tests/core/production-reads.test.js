@@ -160,6 +160,28 @@ t.test('a def whose name throws and a def without a name are skipped', function 
     assert.strictEqual(String(lines[0].args[0]).indexOf('2 '), 0);
 });
 
+t.test('the produceable list is copied through toArray when the vector offers it', function () {
+    var b = setup({ buffs: PS.buffDefs(3, ['3']) });
+    var base = b.H.host.game.def('BuffSystem::cBuff');
+    var orig = base.GetProduceableBuffDefinitions;
+    b.sent.registerDef('BuffSystem::cBuff', {
+        GetProduceableBuffDefinitions: function (gi) {
+            return { length: 0, toArray: function () { return orig.call(base, gi); } };
+        }
+    });
+    var items = b.P.itemsOf(1);
+    assert.ok(items !== null, 'itemsOf is not null');
+    assert.strictEqual(names(items), 'BB_0,BB_1,BB_2');
+});
+
+t.test('a produceable list that is not array-like reads as unreadable', function () {
+    var b = setup({ buffs: PS.buffDefs(3, ['3']) });
+    b.sent.registerDef('BuffSystem::cBuff', {
+        GetProduceableBuffDefinitions: function () { return {}; }
+    });
+    assert.strictEqual(b.P.itemsOf(1), null);
+});
+
 t.test('a flaky GetAmount is read once by entries and once by queuedIn', function () {
     var b = setup({ buffs: PS.buffDefs(2, ['3']) });
     var e1 = flakyEntry('BB_0', 4);
