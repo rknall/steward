@@ -214,13 +214,30 @@
         }
     }
 
+    // The mail service's host operations object, or null.
+    function mailOperations() {
+        try {
+            return game.def('ServerState::cConnectionManager').GetInstance().mMailService.operations || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // The host's mail utilities, or null.
+    function mailUtils() {
+        try {
+            return game.def('com.bluebyte.tso.util::MailUtils') || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     // The mail service's last GetHeaders result, or null. The game's own mail
     // window fills it too, which is why an answer read here is only trusted
     // as complete while that window is closed.
     function passiveResult() {
         try {
-            var inst = game.def('ServerState::cConnectionManager').GetInstance();
-            var op = inst.mMailService.operations['GetHeaders'];
+            var op = mailOperations()['GetHeaders'];
             return (op && op.lastResult) || null;
         } catch (e) {
             return null;
@@ -252,6 +269,17 @@
             function () { return lr.data.data.headers_collection; },
             function () { return lr.data.headers_collection; }
         ]);
+    }
+
+    // Read-only probe view for diagnostics. Modules read mail through
+    // headers(); these are host objects and must not be written.
+    function passive() {
+        var lr = passiveResult();
+        return {
+            operations: mailOperations(),
+            lastResult: lr,
+            collection: lr ? passiveCollection(lr) : null
+        };
     }
 
     function copyHeader(h) {
@@ -807,14 +835,14 @@
 
     // The host's collect check for a raw header: null when it may be
     // collected, else the refusal.
+    function collectCheckAvailable() {
+        var mu = mailUtils();
+        return !!mu && typeof mu.CanCollectMail === 'function';
+    }
+
     function collectRefusal(raw) {
-        var mu;
-        try {
-            mu = game.def('com.bluebyte.tso.util::MailUtils');
-        } catch (e) {
-            mu = null;
-        }
-        if (!mu || typeof mu.CanCollectMail !== 'function') return COLLECT_CHECK_MISSING;
+        if (!collectCheckAvailable()) return COLLECT_CHECK_MISSING;
+        var mu = mailUtils();
         try {
             return mu.CanCollectMail(raw) === true ? null : NOT_COLLECTABLE;
         } catch (e2) {
@@ -1016,6 +1044,8 @@
         body:          body,
         parseItems:    parseItems,
         windowOpen:    windowOpen,
+        passive:       passive,
+        collectCheckAvailable: collectCheckAvailable,
         isHold:        isHold,
         subscribe:     subscribe,
         unsubscribe:   unsubscribe,

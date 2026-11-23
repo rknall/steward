@@ -145,3 +145,29 @@ t.test('no body text, subject or sender name appears in the document', function 
         assert.ok(doc.firstRaw.indexOf('body_string') >= 0, 'member names only');
     });
 });
+
+t.test('service part reads the passive answer through the core', function () {
+    withSetup(null, function (s) {
+        s.M.setPassive([MS.mail(1, 6), MS.mail(2, 7)]);
+        s.mail.dump();
+        var doc = JSON.parse(s.fs.disk[files(s)[0]]);
+        assert.strictEqual(doc.service.hasLastResult, true);
+        assert.strictEqual(doc.service.hasCollection, true);
+        assert.strictEqual(doc.service.length, 2);
+        assert.ok(doc.service.operations.indexOf('GetHeaders') >= 0);
+    });
+});
+
+t.test('mailUtils availability agrees with the core lookup', function () {
+    withSetup(null, function (s) {
+        s.mail.dump();
+        var doc = JSON.parse(s.fs.disk[files(s)[0]]);
+        assert.strictEqual(doc.mailUtils.available, true);
+    });
+    withSetup(null, function (s) {
+        s.M.missing['com.bluebyte.tso.util::MailUtils'] = true;
+        s.mail.dump();
+        var doc = JSON.parse(s.fs.disk[files(s)[0]]);
+        assert.strictEqual(doc.mailUtils.available, false);
+    });
+});

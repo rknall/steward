@@ -54,35 +54,13 @@
         };
     }
 
-    function connection() {
-        return game.def('ServerState::cConnectionManager').GetInstance();
-    }
-
-    // The passive header answer, the same object the core read adopts from.
-    function lastResult() {
-        return connection().mMailService.operations['GetHeaders'].lastResult;
-    }
-
-    function collectionOf(lr) {
-        var c = null;
-        try { c = lr.data.data.headers_collection; } catch (e) { c = null; }
-        if (c === null || c === undefined) {
-            try { c = lr.data.headers_collection; } catch (e2) { c = null; }
-        }
-        return (c === undefined) ? null : c;
-    }
-
     function serviceRecord() {
-        var ops = connection().mMailService.operations;
-        var lr = null;
-        var c = null;
-        try { lr = ops['GetHeaders'].lastResult; } catch (e) { lr = null; }
-        if (lr) c = collectionOf(lr);
-        var items = c ? S.kernel.hostRead.list(c) : null;
+        var p = S.core.mail.passive();
+        var items = p.collection ? S.kernel.hostRead.list(p.collection) : null;
         return {
-            operations:    names(ops),
-            hasLastResult: !!lr,
-            hasCollection: c !== null,
+            operations:    names(p.operations),
+            hasLastResult: p.lastResult !== null,
+            hasCollection: p.collection !== null,
             length:        items ? items.length : null
         };
     }
@@ -114,20 +92,16 @@
     }
 
     // The API keeps raw headers private, so the first one comes from the
-    // passive collection. Member names only, never values.
+    // core's passive view of the collection. Member names only, never values.
     function firstRawRecord() {
-        var c = collectionOf(lastResult());
+        var c = S.core.mail.passive().collection;
         if (c === null) return null;
         var items = S.kernel.hostRead.list(c);
         return (items && items.length > 0) ? names(items[0]) : null;
     }
 
     function mailUtilsRecord() {
-        var mu = game.def('MailUtils');
-        return {
-            present:        !!mu,
-            canCollectMail: !!mu && typeof mu.CanCollectMail
-        };
+        return { available: S.core.mail.collectCheckAvailable() };
     }
 
     // The whole document. The refresh runs last so every other part shows

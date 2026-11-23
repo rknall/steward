@@ -640,3 +640,41 @@ t.test('kindOf maps known types, others are Unknown; typesOf is a copy', functio
     assert.strictEqual(b.api.typesOf(K.TradeResult).join(','), '4,5');
     assert.strictEqual(b.api.typesOf(K.Unknown).length, 0);
 });
+
+t.test('passive before any answer has no result; with an answer it exposes the collection', function () {
+    var b = boot();
+    var p = b.api.passive();
+    assert.strictEqual(p.lastResult, null);
+    assert.strictEqual(p.collection, null);
+    assert.ok(p.operations && p.operations.GetHeaders);
+    var lr = b.M.setPassive([b.M.mail(1, 6)]);
+    p = b.api.passive();
+    assert.strictEqual(p.lastResult, lr);
+    assert.strictEqual(b.S.kernel.hostRead.list(p.collection).length, 1);
+    b.M.passive = { data: { headers_collection: b.M.passive.data.data.headers_collection } };
+    p = b.api.passive();
+    assert.strictEqual(b.S.kernel.hostRead.list(p.collection).length, 1);
+});
+
+t.test('passive without the connection manager returns nulls and does not throw', function () {
+    var b = boot();
+    b.M.missing['ServerState::cConnectionManager'] = true;
+    var p = b.api.passive();
+    assert.strictEqual(p.operations, null);
+    assert.strictEqual(p.lastResult, null);
+    assert.strictEqual(p.collection, null);
+});
+
+t.test('collectCheckAvailable reflects the host collect check', function () {
+    var b = boot();
+    assert.strictEqual(b.api.collectCheckAvailable(), true);
+    b.M.missing['com.bluebyte.tso.util::MailUtils'] = true;
+    assert.strictEqual(b.api.collectCheckAvailable(), false);
+    delete b.M.missing['com.bluebyte.tso.util::MailUtils'];
+    var orig = b.H.host.game.def;
+    b.H.host.game.def = function (name) {
+        if (name === 'com.bluebyte.tso.util::MailUtils') return {};
+        return orig(name);
+    };
+    assert.strictEqual(b.api.collectCheckAvailable(), false);
+});

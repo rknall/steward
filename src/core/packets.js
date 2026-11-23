@@ -64,7 +64,7 @@
     // zone other than the viewed one. A non-numeric zone is refused before the
     // host is called.
     function sendTo(messageId, zoneId, data, responder) {
-        if (typeof zoneId !== 'number' || !isFinite(zoneId)) {
+        if (!S.kernel.is.finite(zoneId)) {
             S.kernel.warn('packets', 'sendTo: zone id is not a finite number:', zoneId);
             return false;
         }
