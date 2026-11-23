@@ -4,7 +4,7 @@ Steward is a userscript for the Adobe AIR–based TSO client. It is structured a
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  modules/   ← opt-in automation (collect, mining, …)         │
+│  modules/   ← opt-in automation (collect, mining, …)        │
 │      ▲                                                      │
 │      │ depends on                                           │
 │      ▼                                                      │
@@ -128,7 +128,7 @@ The kernel UI is five files that rely on that order. `89_ui_style.js` loads firs
 
 `37_read.js` holds `Steward.kernel.read`: the Result type (`ok`, `partial`, `unreadable`, `notReady`), the source registry (`source`, `get`) and the bounded `wait`. It sits after `36_hostread.js` and before `40_registry.js`. At load it needs the namespace, `TIMEOUTS`, `LIMITS` and `hostRead`; the zone reader, the registry and the scheduler are called only at run time, so every core file can register its sources while it loads.
 
-`core/mail.js` sorts among the other core files by name. At load it fills `Steward.MailKind` (declared in the kernel enums) and registers the read sources `mail.headers` and `mail.body` and the queue actions `core.mail.headers` and `core.mail.body`; it needs `kernel.read`, `kernel.hostRead`, `kernel.text`, `kernel.is`, `core.packets` and `core.actions`, and reaches the host only at run time.
+`core/mail.js` sorts among the other core files by name. At load it fills `Steward.MailKind` (declared in the kernel enums) and registers the read sources `mail.headers` and `mail.body` and the queue actions `core.mail.headers` and `core.mail.body`; it needs only the kernel (`kernel.read`, `kernel.hostRead`, `kernel.text`, `kernel.is`), so it sits after `locale.js` and before `packets.js`; `core.packets`, `core.zone`, `core.actions` and the host are read at call time.
 
 `16_text.js` holds the host-string cleaner and the shared time, duration and count formatters (`pad2`, `date`, `clock`, `dateTime`, `seconds`, `minutes`, `minText`, `hoursMinutes`, `plural`, all under `Steward.kernel.text`). It has no kernel dependencies, so it sits before everything that reads names or writes log lines.
 

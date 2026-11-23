@@ -833,13 +833,15 @@
         return true;
     }
 
-    // The host's collect check for a raw header: null when it may be
-    // collected, else the refusal.
+    // True when the host exposes MailUtils.CanCollectMail, so a collect
+    // check can run; false on a client that lacks it.
     function collectCheckAvailable() {
         var mu = mailUtils();
         return !!mu && typeof mu.CanCollectMail === 'function';
     }
 
+    // The host's collect check for a raw header: null when it may be
+    // collected, else the refusal.
     function collectRefusal(raw) {
         if (!collectCheckAvailable()) return COLLECT_CHECK_MISSING;
         var mu = mailUtils();

@@ -263,7 +263,7 @@ Several owners order into the same host queues, so none of them spends the wareh
 
 - The module owns the refresh cadence. It calls `mail.refresh()` (single-flight, floored by `MIN_REFRESH_GAP_MS`) and reads `mail.headers()`, a Result with `notReady`, `unreadable` and `partial` as for any other read (Rule 3.8).
 - `mail.news()` and `subscribe` are a hint that something new arrived, never proof. Re-read the headers before acting. `unsubscribe` when the owner stops.
-- Bodies come from `requestBody(id)` and `body(id)`. `acceptInvite` refuses until the body was read; the item list of a loot mail comes from `parseItems`, which returns null for a malformed one.
+- Bodies come from `requestBody(id)` and `body(id)`. `acceptInvite` refuses until the body was read; the item list of a trade mail's body comes from `parseItems`, which returns null for a malformed one.
 - Every write (`dismiss`, `trade`, `completeTrade`, `acceptInvite`) is refused with `HELD` while the game's mail window is open, and with `WINDOW_UNREADABLE` when that cannot be told. `mail.isHold(reason)` is true for those reasons: try again later, do not count it as a failure.
 - A one-shot mail def (a trade or an invite) is sent at most once per mail. After an unseen failure the same mail is never rebuilt: refusal `ALREADY_SENT`. Dismiss is repeatable because the headers show whether the mail is gone.
 - The inbox is read only at home; elsewhere the refusal is `NOT_HOME`.
