@@ -161,12 +161,12 @@ Buffs on continuous (non-queue) production buildings, such as sawmills and farms
 ### aMail — Mail Automation
 | autoTSO | Steward | Status |
 |---|---|---|
-| `getHeaders` | — (#6) | ✗ |
-| `handleHeaders` | — (#6) | ✗ |
-| `acceptLootMails` | — (#6) | ✗ |
+| `getHeaders` | `core/mail.js` `refresh`, `headers` (base API only) | ~ |
+| `handleHeaders` | `core/mail.js` `kindOf`, `match` (loot automation still open, #6) | ~ |
+| `acceptLootMails` | base `dismiss` in `core/mail.js`; loot automation still open (#6) | ✗ |
 | Pending trade tracking (`aSession.mail.pendingTrades`) | — (#21, won't do) | ✗ |
-| Pending invite tracking | — (#7) | ✗ |
-| `getMailBody`, `setMonitor`, `manage` periodic check | — (#6) | ✗ |
+| Pending invite tracking | base `acceptInvite` in `core/mail.js`; invite automation still open (#7) | ✗ |
+| `getMailBody`, `setMonitor`, `manage` periodic check | `requestBody`, `body`, `subscribe`/`news` in `core/mail.js`; the periodic check is still open (#6) | ~ |
 | Trade-log saved trades modal | — (#21, won't do) | ✗ |
 
 ### aTrade — Trade Automation

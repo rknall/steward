@@ -4,7 +4,7 @@ Steward is a userscript for the Adobe AIR–based TSO client. It is structured a
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  modules/   ← opt-in automation (collect, mail, …)         │
+│  modules/   ← opt-in automation (collect, mining, …)       │
 │      ▲                                                      │
 │      │ depends on                                           │
 │      ▼                                                      │
@@ -42,6 +42,7 @@ Steward
 │   ├── packets
 │   ├── pickups        ← quest objects and collectibles, click action
 │   ├── locale
+│   ├── mail            ← inbox headers, bodies, subscribe/news, verified mail actions
 │   ├── events
 │   ├── actions         ← send / verify / retry runner for write actions
 │   ├── adventures      ← adventure definitions, own adventures, close action
@@ -79,6 +80,7 @@ Steward
     ├── UpdateState     ← declared in the kernel, used by modules/updater
     ├── UpdateFailure   ← declared in the kernel, used by modules/updater
     ├── InstallStep     ← declared in the kernel, used by modules/updater
+    ├── MailKind        ← declared in the kernel, filled by core/mail.js
     ├── FileError
     ├── FileLocation
     └── LogLevel
@@ -125,6 +127,8 @@ The kernel UI is five files that rely on that order. `89_ui_style.js` loads firs
 `36_hostread.js` holds `Steward.kernel.hostRead`: the single member read (`call`), the host vector copy (`list`) and the read-pass memo (`pass`, `cached`, `inPass`). It sits after `35_host.js` and before `40_registry.js`, needs only the namespace, and core readers call it at run time, so no later file is needed at load time.
 
 `37_read.js` holds `Steward.kernel.read`: the Result type (`ok`, `partial`, `unreadable`, `notReady`), the source registry (`source`, `get`) and the bounded `wait`. It sits after `36_hostread.js` and before `40_registry.js`. At load it needs the namespace, `TIMEOUTS`, `LIMITS` and `hostRead`; the zone reader, the registry and the scheduler are called only at run time, so every core file can register its sources while it loads.
+
+`core/mail.js` sorts among the other core files by name. At load it fills `Steward.MailKind` (declared in the kernel enums) and registers the read sources `mail.headers` and `mail.body` and the queue actions `core.mail.headers` and `core.mail.body`; it needs only the kernel (`kernel.read`, `kernel.hostRead`, `kernel.text`, `kernel.is`), so it sits after `locale.js` and before `packets.js`; `core.packets`, `core.zone`, `core.actions` and the host are read at call time.
 
 `16_text.js` holds the host-string cleaner and the shared time, duration and count formatters (`pad2`, `date`, `clock`, `dateTime`, `seconds`, `minutes`, `minText`, `hoursMinutes`, `plural`, all under `Steward.kernel.text`). It has no kernel dependencies, so it sits before everything that reads names or writes log lines.
 

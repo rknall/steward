@@ -151,18 +151,6 @@
         return !!q && typeof q.isFinished === 'function';
     }
 
-    // The host responder for a read or claim, or null when the host has none.
-    // Called as a method on game because createResponder reads its own this.
-    function triggerResponder(onResult, onFault) {
-        try {
-            if (typeof game === 'undefined' || !game || typeof game.createResponder !== 'function') return null;
-            return game.createResponder(onResult, onFault) || null;
-        } catch (e) {
-            S.kernel.warn('quests', 'createResponder threw:', e);
-            return null;
-        }
-    }
-
     // The quest's definition: the getter first, the raw field when the getter
     // is absent, throws or returns nothing. source tells which one answered,
     // so a dump can show where a definition came from.
@@ -614,14 +602,6 @@
         return null;
     }
 
-    // Send state of one def: whether it has sent at all, and a per-send
-    // token. sendTrigger numbers each message, and a result callback records
-    // its own number only while that send is still the latest one, so a late
-    // answer to an earlier send never verifies a later one.
-    function sendState() {
-        return { sent: false, seq: 0, ack: 0 };
-    }
-
     // Sets the quest's mode on the client and sends message 100 with the
     // given server-action type and the quest uid, as the client does. False
     // when the quest or the server action is missing or the send fails.
@@ -631,39 +611,11 @@
         var sa = game.def('Communication.VO::dServerAction', true);
         if (!sa) return false;
         q.SetQuestMode(mode);
-        ss.sent = true;
         sa.type = type;
         sa.data = q.GetUniqueId();
-        ss.seq++;
-        var seq = ss.seq;
-        // Both callbacks run inside the host's dispatch loop, so nothing may
-        // escape them.
-        var responder = triggerResponder(
-            function () {
-                try {
-                    if (seq === ss.seq) ss.ack = seq;
-                    S.kernel.debug('quests', label + ': server result for send ' + seq +
-                        (seq === ss.seq ? '' : ' (stale, ignored)'));
-                } catch (e) {
-                    S.kernel.error('quests', label + ': result callback threw:', e);
-                }
-            },
-            function (f) {
-                try {
-                    S.kernel.warn('quests', label + ': server fault for send ' + seq, f);
-                } catch (e) {
-                    S.kernel.error('quests', label + ': fault callback threw:', e);
-                }
-            }
-        );
-        if (!responder) S.kernel.debug('quests', label + ': no host responder, verifying by absence only');
+        // Sets ss.sent before the send; see packets.trackedResponder.
+        var responder = S.core.packets.trackedResponder(ss, 'quests', label);
         return S.core.packets.sendMessage(TRIGGER_MESSAGE, sa, responder) === true;
-    }
-
-    // True when the server answered the latest send. That send carried the
-    // zone id at send time, so no zone guard is needed with it.
-    function answered(ss) {
-        return ss.seq > 0 && ss.ack === ss.seq;
     }
 
     // Def that claims the finished quest with this uid key. opts.allowLast
@@ -680,7 +632,7 @@
         var label = 'claim quest ' + key;
         // ss.sent is set by send. The retry must not refuse because the quest
         // no longer reads finished after our own SetQuestMode.
-        var ss = sendState();
+        var ss = S.core.packets.sendState();
 
         return {
             label:     label,
@@ -711,7 +663,7 @@
 
             check: function (base) {
                 if (!base || base.found !== true) return false;
-                if (answered(ss)) return true;
+                if (S.core.packets.answered(ss)) return true;
                 var zoneId = S.core.zone.id();
                 if (typeof zoneId !== 'number' || zoneId !== base.zoneId) return false;
                 // Only a complete pool proves the quest has left it.
@@ -734,7 +686,7 @@
         var label = 'read quest ' + key;
         // ss.sent is set by send. The retry must not refuse because the quest
         // no longer reads unread after our own SetQuestMode.
-        var ss = sendState();
+        var ss = S.core.packets.sendState();
 
         return {
             label:     label,
@@ -774,7 +726,7 @@
 
             check: function (base) {
                 if (!base || base.found !== true) return false;
-                if (answered(ss)) return true;
+                if (S.core.packets.answered(ss)) return true;
                 var zoneId = S.core.zone.id();
                 if (typeof zoneId !== 'number' || zoneId !== base.zoneId) return false;
                 if (base.keys === null) return false;
