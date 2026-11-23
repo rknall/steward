@@ -82,7 +82,8 @@
  * Steward.kernel.ui.showBarMenu(id, on). Without `visible` it is always shown.
  *
  * The `events` tab hosts read-only event tools. The `production` tab hosts
- * the production manager's side settings, summary and banners.
+ * the production manager's side settings, summary and banners. The `economy`
+ * tab hosts the economy manager (selected star items moved to the storehouse).
  *
  * The Overview is not a registry tab: the dashboard builds it from the
  * sections' `tiles`. `misc` sections render as groups on the Settings screen,
@@ -103,6 +104,7 @@
         buildings:   true,
         events:      true,
         production:  true,
+        economy:     true,
         misc:        true
     };
 

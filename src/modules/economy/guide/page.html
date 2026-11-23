@@ -1,0 +1,38 @@
+<p class="ug-lead">Keeps the resource items you select moving from your star menu into the storehouse, one star entry at a time, until the storehouse takes no more of them.</p>
+
+<h2 id="use-cases">What you can do</h2>
+
+<div class="ug-story">
+  <p class="ug-want">You want resources from your star menu moved into the storehouse without clicking each stack.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the economy manager: in the <strong>~Steward~</strong> menu choose <strong>Economy</strong>, then <strong>Open economy manager…</strong>.</li>
+      <li>In the window <strong>Steward economy</strong>, on the <strong>Star to store</strong> tab, click the icon of each item you want moved. A border around an icon means it is selected; a second click removes the border.</li>
+      <li>Turn on <strong>Economy</strong> in the <strong>Economy</strong> submenu, or on the <strong>Economy</strong> tab of the dashboard.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Every selected item goes into the storehouse on its own, one star entry per send and never more than the storehouse still takes, until the star menu holds none of it or the storehouse is full. A click takes effect at once; there is no Save. Event items move only while their event runs. The module is off until you turn it on, and it only works on your home island.</dd>
+  </dl>
+</div>
+
+<h2 id="settings">Settings</h2>
+
+<div class="ug-set">
+  <h3><code>enabled</code></h3>
+  <p class="ug-def">Default: Off</p>
+  <p>The module switch. When off, nothing is moved, and transfers already waiting are dropped.</p>
+  <p><em>Change it when</em> you want your selected star-menu items moved into the storehouse, or to stop.</p>
+</div>
+
+<div class="ug-set">
+  <h3><code>items</code></h3>
+  <p class="ug-def">Default: nothing selected</p>
+  <p>The items selected in the economy manager grid, by resource name. A selected item is moved on its own; an item that is not selected stays in the star menu.</p>
+  <p><em>Change it when</em> you want another item kept supplied, or one left in the star menu. Click its icon in the grid rather than editing this by hand.</p>
+</div>
+
+<h2 id="notes">Notes</h2>
+<ul>
+  <li>Some items have a storehouse limit of their own that the game does not report. When the storehouse cannot take a stack, the game puts it back into the star menu a few seconds later. Steward then marks the item as full and sends no more of it for up to 30 minutes, or until the storehouse has room again.</li>
+</ul>

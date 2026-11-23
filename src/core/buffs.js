@@ -9,7 +9,21 @@
  * resource items (AddResource entries bound to a resource other than
  * population): starResources lists them, storeNext says how much the next
  * transfer of one would move, and toStore moves one entry into the warehouse,
- * never past its capacity. Every reader reports an unreadable host as null, and
+ * never past its capacity. A stack the storehouse cannot take (an item with
+ * its own cap and no getter, Star Dust or Star Shards) is not refused at the
+ * send: the server returns it to the star menu 5-10 s later. So toStore counts
+ * a send as landed only once STORE_SETTLE_MS has passed, and a stack seen to
+ * leave the star menu and come back is a bounce: refuted() names it, which
+ * ends the attempt Failed as a proof (the send was answered, so the ledger
+ * frees its key and the breaker counts no miss), and the item is marked full
+ * in memory. storePick then gives ITEM_FULL for it until FULL_HOLD_MS has
+ * passed, the store dropped by the returned amount, or the warehouse capacity
+ * rose. The marks are not saved: after a reload one probe per full item may
+ * bounce once more, which costs nothing. Known false mark: a new star entry
+ * of the same item collected while a stack is out reads as a bounce and marks
+ * the item full for up to FULL_HOLD_MS; the next probe after the hold, or a
+ * store drop, clears it.
+ * Every reader reports an unreadable host as null, and
  * a def treats null as not observed: an unreadable stock never counts as
  * "the stock dropped". The star menu is the buffs.menu source of
  * S.kernel.read (inventoryRead gives its Result): partial while an entry is
@@ -56,6 +70,16 @@
     var STAR_UNREADABLE = S.kernel.read.readRefusal('star stock unreadable');
     var CAPACITY_UNREADABLE = S.kernel.read.readRefusal('capacity unreadable');
     var STORE_UNREADABLE = S.kernel.read.readRefusal('store stock unreadable');
+
+    // Star to store. The server returns a stack the storehouse cannot take
+    // 5-10 s after the send, so a send counts as landed only once it stayed
+    // out this long. The verify window must outlast it.
+    var STORE_SETTLE_MS = 15000;
+    var STORE_TIMEOUT_MS = 45000;
+    // How long a full mark is trusted; after it one probe send may go.
+    var FULL_HOLD_MS = 1800000;
+    // A plain refusal, not a read refusal: the bounce was read, nothing failed.
+    var ITEM_FULL = 'item full';
 
     var BUFF_TIMEOUT_MS = 15000;
     // A camp buff has no retry, so it gets the window of a send and a retry.
@@ -905,18 +929,69 @@
         return out;
     }
 
+    // The ledger's wall clock: a base outlives the session in the ledger file,
+    // and tests replace this one clock.
+    function clock() {
+        return S.core.ledger.clock();
+    }
+
+    // Full marks of items whose stack came back: name -> { at, back, stock,
+    // capacity }. Memory only.
+    var fullMarks = {};
+
+    function markFull(name, back) {
+        var held = S.core.resources.amount(name);
+        var cap = S.core.resources.capacity();
+        fullMarks[name] = {
+            at:       clock(),
+            back:     back,
+            stock:    isNum(held) ? held : null,
+            capacity: isNum(cap) ? cap : null
+        };
+        S.kernel.log('buffs', name + ' is full: ' + back + ' came back to the star menu');
+    }
+
+    // The live mark of one item, or null. A mark clears after FULL_HOLD_MS,
+    // when the store dropped enough to take the returned stack, or when the
+    // warehouse capacity rose. An unreadable value never clears it early.
+    function fullOf(name) {
+        if (!Object.prototype.hasOwnProperty.call(fullMarks, name)) return null;
+        var m = fullMarks[name];
+        var clear = clock() - m.at >= FULL_HOLD_MS;
+        if (!clear && isNum(m.stock)) {
+            var held = S.core.resources.amount(name);
+            clear = isNum(held) && held <= m.stock - m.back;
+        }
+        if (!clear && isNum(m.capacity)) {
+            var cap = S.core.resources.capacity();
+            clear = isNum(cap) && cap > m.capacity;
+        }
+        if (clear) {
+            delete fullMarks[name];
+            return null;
+        }
+        return m;
+    }
+
+    // A copy of the full mark of one item, { at, back, stock }, or null.
+    function storeFull(name) {
+        var m = typeof name === 'string' ? fullOf(name) : null;
+        return m ? { at: m.at, back: m.back, stock: m.stock } : null;
+    }
+
     // The one transfer rule: how much of one resource the next star-to-store
     // send moves, from one star-menu Result. One send spends one entry and
     // never more than the warehouse still takes, so the amount is the smaller
     // of the first in-stock entry and capacity - stock; the rest stays in the
-    // star menu. Returns { amount, room, capacity, stock, star, entry, reason }:
-    // reason is null when a send may go out, and amount is 0 whenever it is
-    // set. A failed read gives its read refusal; 'none in star' needs a
-    // complete menu, since a partial one may have lost the entry, and
-    // 'warehouse full' needs both the capacity and the stock read.
+    // star menu. Returns { amount, room, capacity, stock, star, entry, full,
+    // reason }: reason is null when a send may go out, and amount is 0
+    // whenever it is set. A failed read gives its read refusal; 'none in star'
+    // needs a complete menu, since a partial one may have lost the entry;
+    // ITEM_FULL (full is then the storeFull copy) comes from a bounce seen
+    // earlier; 'warehouse full' needs both the capacity and the stock read.
     function storePick(menu, name) {
         var R = S.kernel.read;
-        var out = { amount: 0, room: null, capacity: null, stock: null, star: null, entry: null, reason: null };
+        var out = { amount: 0, room: null, capacity: null, stock: null, star: null, entry: null, full: null, reason: null };
         if (typeof name !== 'string' || !name) {
             out.reason = 'no resource name';
             return out;
@@ -929,6 +1004,11 @@
         out.star = star;
         if (!(star.total > 0)) {
             out.reason = R.isOk(menu) ? 'none in star' : STAR_UNREADABLE;
+            return out;
+        }
+        out.full = storeFull(name);
+        if (out.full) {
+            out.reason = ITEM_FULL;
             return out;
         }
         var cap = S.core.resources.capacity();
@@ -974,6 +1054,7 @@
             capacity: p.capacity,
             stock:    p.stock,
             star:     p.star,
+            full:     p.full,
             reason:   p.reason
         };
     }
@@ -983,21 +1064,46 @@
         return stock(ADD_RESOURCE_TYPE, name);
     }
 
+    // Where one star-to-store send stands, from its base and the live reads:
+    // 'landed', 'bounced', 'unmoved' or 'wait'. low is the star stock after a
+    // clean send. memo (per attempt, or null for a reread) records that the
+    // stack was seen out of the star menu. The bounce check comes first and a
+    // store rise counts only after the settle time, because the same item can
+    // be produced into the store during the window: a small stack of a
+    // produced resource would otherwise verify and then bounce unseen.
+    function outcome(name, base, memo) {
+        if (!base || !(base.amount > 0) || !isNum(base.at)) return 'wait';
+        var low = base.star - base.amount;
+        var star = starStock(name);
+        var out = isNum(star) && isNum(base.star) && star <= low;
+        if (memo && out) memo.left = true;
+        if (memo && memo.left && isNum(star) && star > low) return 'bounced';
+        if (clock() - base.at < STORE_SETTLE_MS) return 'wait';
+        var held = S.core.resources.amount(name);
+        if (isNum(held) && isNum(base.stock) && held >= base.stock + base.amount) return 'landed';
+        if (!isNum(star) || !isNum(base.star)) return 'wait';
+        return out ? 'landed' : 'unmoved';
+    }
+
     // Star to store: one AddResource entry of a resource item sent to the
     // player grid in the amount storePick gives, only on the home island.
-    // Verified by the star stock dropping by that amount, which nothing else
-    // consumes meanwhile, or by the storehouse rising by it. No retry: a resend
-    // after an effect that was not seen could move a second stack. The star
-    // menu is read once, in the precheck, and the send uses that entry; with
-    // no usable entry nothing goes out (NOT_SENT). sent() is the amount that
-    // went out, 0 before the send.
+    // Landed (outcome) once it stayed out of the star menu or the store rose
+    // by it, after STORE_SETTLE_MS; a stack that left and came back is
+    // refuted and marks the item full. The check is held while another zone
+    // is viewed, since the store amount is the home island's. No retry: a
+    // resend after an effect that was not seen could move a second stack. The
+    // star menu is read once, in the precheck, and the send uses that entry;
+    // with no usable entry nothing goes out (NOT_SENT). sent() is the amount
+    // that went out, 0 before the send. A ledger reread builds a fresh def, so
+    // its failedProof never saw a departure and never marks an item full.
     function toStore(name, opts) {
         var found = null;
         var sentAmount = 0;
+        var memo = { left: false };
         return {
             label:     'star to store ' + name,
             category:  (opts && opts.category) || 'buffs',
-            timeoutMs: BUFF_TIMEOUT_MS,
+            timeoutMs: STORE_TIMEOUT_MS,
             retries:   0,
             precheck: function () {
                 found = null;
@@ -1010,10 +1116,12 @@
                 return null;
             },
             baseline: function () {
+                memo = { left: false };
                 return {
                     amount: found ? found.amount : 0,
                     star:   starStock(name),
-                    stock:  S.core.resources.amount(name)
+                    stock:  S.core.resources.amount(name),
+                    at:     clock()
                 };
             },
             send: function () {
@@ -1027,18 +1135,26 @@
                 if (ok) sentAmount = f.amount;
                 return ok;
             },
+            observable: function () { return S.core.zone.isHome() === true; },
             check: function (base) {
-                if (!base || !(base.amount > 0)) return false;
-                var n = starStock(name);
-                if (isNum(n) && isNum(base.star) && n <= base.star - base.amount) return true;
-                var held = S.core.resources.amount(name);
-                return isNum(held) && isNum(base.stock) && held >= base.stock + base.amount;
+                return outcome(name, base, memo) === 'landed';
+            },
+            refuted: function (base) {
+                if (outcome(name, base, memo) !== 'bounced') return '';
+                var back = Math.min(base.amount, starStock(name) - (base.star - base.amount));
+                markFull(name, back);
+                return 'came back to the star menu (' + back + ' of ' + base.amount + '); ' + name + ' is full';
+            },
+            failedProof: function (base) {
+                if (outcome(name, base, null) !== 'unmoved') return '';
+                return 'still in the star menu after ' + STORE_SETTLE_MS + ' ms';
             },
             describe: function (base) {
                 if (!base) return '';
                 return 'sent ' + sentAmount +
                     '; star ' + fmtStock(base.star) + ' -> ' + fmtStock(starStock(name)) +
-                    '; store ' + fmtStock(base.stock) + ' -> ' + fmtStock(S.core.resources.amount(name));
+                    '; store ' + fmtStock(base.stock) + ' -> ' + fmtStock(S.core.resources.amount(name)) +
+                    '; ' + outcome(name, base, memo);
             },
             sent: function () { return sentAmount; }
         };
@@ -1190,7 +1306,10 @@
         populationStock: populationStock,
         starResources: starResources,
         storeNext:     storeNext,
+        storeFull:     storeFull,
         toStore:       toStore,
+        ITEM_FULL:     ITEM_FULL,
+        STORE_SETTLE_MS: STORE_SETTLE_MS,
         map:           map,
         mapStock:      mapStock,
         mapReadRefusal: mapReadRefusal,

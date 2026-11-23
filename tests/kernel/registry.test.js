@@ -108,6 +108,14 @@ t.test('ui.tab production is accepted', function () {
     t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
 });
 
+t.test('ui.tab economy is accepted', function () {
+    var H = harness.boot({ sections: ['kernel'] });
+    t.assert.strictEqual(H.Steward.kernel.register(uiSpec('ec', 'economy')), true);
+    t.assert.ok(H.Steward.kernel.registry.get('ec').ui);
+    t.assert.strictEqual(H.Steward.kernel.registry.byTab('economy').length, 1);
+    t.assert.strictEqual(notKnownTabWarnings(H).length, 0);
+});
+
 t.test('ui.tab misc is accepted', function () {
     var H = harness.boot({ sections: ['kernel'] });
     var s = validSpec('m');

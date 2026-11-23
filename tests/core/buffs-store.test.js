@@ -1,10 +1,12 @@
 'use strict';
 
 // Star-to-store: the resource items of the star menu, the transfer rule
-// (one entry, never past the warehouse capacity) and the toStore def.
+// (one entry, never past the warehouse capacity), the toStore def with its
+// settle time and bounce rule, and the full memory of a bounced item.
 
 var t = require('../runner');
 var harness = require('../harness');
+var airfs = require('../stubs/airfs');
 var A = require('../stubs/army');
 var AC = require('../stubs/actions');
 
@@ -12,22 +14,46 @@ var assert = t.assert;
 
 function plain(v) { return JSON.parse(JSON.stringify(v)); }
 
+var T0 = 1700000000000;
+// How long a full mark is trusted (FULL_HOLD_MS in buffs.js).
+var HOLD_MS = 1800000;
+
 // A booted world with the star menu, the warehouse (store amounts and one
-// capacity) and the packet recorder. A buff packet moves its amount from the
-// entry it names into the store unless env.apply is false.
+// capacity), the packet recorder, a steward folder for the ledger and a
+// settable ledger clock (env.now). A buff packet moves its amount from the
+// entry it names into the store unless env.apply is false. env.bounce
+// ({ after, back }) takes the stack out of the entry on send and, after ms of
+// ledger clock, puts back (default all) of it into the entry again with the
+// store unchanged; env.partial ({ after, take }) lets the store take part at
+// once and returns the rest. env.later(ms, fn) runs fn once the clock got
+// there; run() advances the clock by one poll gap per queued step.
 function world(o) {
-    var H = harness.boot();
+    var disk = airfs.make();
+    var H = harness.boot({ host: { air: disk.air } });
     var buffs = o.buffs || [];
     A.install(H, { buffs: buffs });
     var sent = AC.wire(H);
     var S = H.Steward;
+    var events = [];
     var env = {
         home: true,
         apply: true,
         capacity: typeof o.capacity === 'number' || o.capacity === null ? o.capacity : 1000,
         store: o.store || {},
-        onSend: null
+        onSend: null,
+        bounce: null,
+        partial: null,
+        now: T0,
+        doneAt: null
     };
+    env.later = function (ms, fn) { events.push({ at: env.now + ms, fn: fn }); };
+    env.tick = function (ms) {
+        env.now += ms;
+        var due = events.filter(function (e) { return e.at <= env.now; });
+        events = events.filter(function (e) { return e.at > env.now; });
+        due.forEach(function (e) { e.fn(); });
+    };
+    S.core.ledger.clock = function () { return env.now; };
     H.host.game.getResources = function () {
         return {
             GetResourceAmount: function (name) {
@@ -41,14 +67,21 @@ function world(o) {
     gi.SendServerAction = function () {
         send.apply(this, arguments);
         var a = sent.actions[sent.actions.length - 1];
-        if (env.apply) {
-            var key = a.data.toKeyString();
-            for (var i = 0; i < buffs.length; i++) {
-                if ((buffs[i].uid || buffs[i].type) !== key) continue;
-                buffs[i].amount -= a.p3;
-                env.store[buffs[i].resource] = (env.store[buffs[i].resource] || 0) + a.p3;
+        var key = a.data.toKeyString();
+        buffs.forEach(function (b) {
+            if ((b.uid || b.type) !== key) return;
+            var ret = env.bounce || env.partial;
+            if (ret) {
+                var take = env.partial ? env.partial.take : 0;
+                var back = env.bounce && typeof env.bounce.back === 'number' ? env.bounce.back : a.p3 - take;
+                b.amount -= a.p3;
+                if (take) env.store[b.resource] = (env.store[b.resource] || 0) + take;
+                env.later(ret.after, function () { b.amount += back; });
+            } else if (env.apply) {
+                b.amount -= a.p3;
+                env.store[b.resource] = (env.store[b.resource] || 0) + a.p3;
             }
-        }
+        });
         if (env.onSend) env.onSend(a);
     };
     // The real zone view reads these: a numeric viewed zone id and a mounted
@@ -63,10 +96,15 @@ function item(resource, amount, uid) {
     return { type: 'AddResource', resource: resource, amount: amount, uid: uid };
 }
 
+function drain(w) {
+    var gap = w.S.kernel.TIMEOUTS.QUEUE_ACTION_GAP_MS;
+    AC.drive(w.H, { max: 400, onStep: function () { w.env.tick(gap); } });
+}
+
 function run(w, def) {
     var res = null;
-    w.S.core.actions.attempt(def, function (r) { res = r; });
-    AC.drive(w.H, { max: 200 });
+    w.S.core.actions.attempt(def, function (r) { res = r; w.env.doneAt = w.env.now; });
+    drain(w);
     return res;
 }
 
@@ -239,8 +277,8 @@ t.test('toStore describes the send and both stocks', function () {
     var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 10 } });
     var def = w.buffs.toStore('Wood');
     run(w, def);
-    var text = def.describe({ amount: 100, star: 100, stock: 10 });
-    assert.strictEqual(text, 'sent 100; star 100 -> 0; store 10 -> 110');
+    var text = def.describe({ amount: 100, star: 100, stock: 10, at: w.env.now - 20000 });
+    assert.strictEqual(text, 'sent 100; star 100 -> 0; store 10 -> 110; landed');
 });
 
 t.test('storeNext gives the same amount the def sends', function () {
@@ -297,4 +335,182 @@ t.test('toStore waits on an unreadable zone view instead of refusing as off home
     assert.strictEqual(res.reason, w.S.core.zone.UNREADABLE);
     assert.strictEqual(w.S.kernel.read.isReadRefusal(res.reason), true);
     assert.strictEqual(w.sent.actions.length, 0);
+});
+
+// ---- settle time, bounce and full memory --------------------------------------------
+
+var KEY = 'store|home|StarDust';
+
+// toStore through the send ledger for owner 'eco'.
+function viaLedger(w, name) {
+    var L = w.S.core.ledger;
+    L.register('eco', {
+        category: 'economy',
+        breaker: {
+            label: 'eco breaker', missText: 'store sends in a row were not seen',
+            pausedText: 'economy is paused', resumeText: 'economy resumes'
+        }
+    });
+    var res = null;
+    L.attempt(w.buffs.toStore(name, { category: 'economy' }), { key: KEY, owner: 'eco', name: name },
+        function (r) { res = r; w.env.doneAt = w.env.now; });
+    drain(w);
+    return res;
+}
+
+// StarDust marked full: store 180 of capacity 1000, a stack of 100 bounced.
+function marked() {
+    var w = world({ buffs: [item('StarDust', 100, 's1')], store: { StarDust: 180 } });
+    w.env.bounce = { after: 7000 };
+    var res = run(w, w.buffs.toStore('StarDust'));
+    assert.strictEqual(res.refuted, true);
+    return w;
+}
+
+t.test('toStore lands by a store rise only after the settle time', function () {
+    var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 0 } });
+    w.env.apply = false;
+    w.env.onSend = function (a) { w.env.later(3000, function () { w.env.store.Wood += a.p3; }); };
+    var res = run(w, w.buffs.toStore('Wood'));
+    assert.strictEqual(res.status, w.S.ActionResult.Verified);
+    assert.ok(w.env.doneAt - T0 >= w.buffs.STORE_SETTLE_MS, String(w.env.doneAt - T0));
+    assert.strictEqual(w.menu[0].amount, 100);
+});
+
+t.test('toStore lands by the star alone only after the settle time', function () {
+    var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 0 } });
+    w.env.apply = false;
+    w.env.onSend = function (a) { w.menu[0].amount -= a.p3; };
+    var res = run(w, w.buffs.toStore('Wood'));
+    assert.strictEqual(res.status, w.S.ActionResult.Verified);
+    assert.ok(w.env.doneAt - T0 >= w.buffs.STORE_SETTLE_MS, String(w.env.doneAt - T0));
+});
+
+t.test('a store rise from production plus a stack that came back is refuted, not verified', function () {
+    var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 0 } });
+    w.env.bounce = { after: 7000 };
+    w.env.onSend = function () { w.env.later(3000, function () { w.env.store.Wood += 150; }); };
+    var res = run(w, w.buffs.toStore('Wood'));
+    assert.strictEqual(res.status, w.S.ActionResult.Failed);
+    assert.strictEqual(res.refuted, true);
+    assert.strictEqual(w.buffs.storeFull('Wood').back, 100);
+});
+
+t.test('a stack back in the star menu at 7 s is refuted, frees the key and counts no miss', function () {
+    var w = world({ buffs: [item('StarDust', 100, 's1')], store: { StarDust: 50 } });
+    w.env.bounce = { after: 7000 };
+    var res = viaLedger(w, 'StarDust');
+    assert.strictEqual(res.status, w.S.ActionResult.Failed);
+    assert.strictEqual(res.refuted, true);
+    assert.strictEqual(res.unseen, undefined);
+    assert.strictEqual(res.reason, 'came back to the star menu (100 of 100); StarDust is full');
+    var took = w.env.doneAt - T0;
+    assert.ok(took >= 7000 && took < w.buffs.STORE_SETTLE_MS, String(took));
+    assert.strictEqual(w.sent.actions.length, 1);
+    assert.deepStrictEqual(plain(w.buffs.storeFull('StarDust')), { at: w.env.doneAt, back: 100, stock: 50 });
+    assert.strictEqual(w.S.core.ledger.blocked(KEY), null);
+    assert.strictEqual(w.S.core.ledger.breaker('eco').snapshot().run, 0);
+    var logs = w.H.logs().filter(function (l) {
+        return l.category === 'buffs' && /^StarDust is full: 100 came back to the star menu$/.test(l.args.join(' '));
+    });
+    assert.strictEqual(logs.length, 1);
+});
+
+t.test('a partial bounce marks the returned part', function () {
+    var w = world({ buffs: [item('StarShards', 100, 'x1')], store: { StarShards: 0 } });
+    w.env.partial = { after: 6000, take: 60 };
+    var res = run(w, w.buffs.toStore('StarShards'));
+    assert.strictEqual(res.refuted, true);
+    assert.strictEqual(res.reason, 'came back to the star menu (40 of 100); StarShards is full');
+    assert.strictEqual(w.buffs.storeFull('StarShards').back, 40);
+    assert.strictEqual(w.buffs.storeFull('StarShards').stock, 60);
+});
+
+t.test('storePick gives item full while marked, none in star first when the star is empty', function () {
+    var w = marked();
+    var n = w.buffs.storeNext('StarDust');
+    assert.strictEqual(n.reason, 'item full');
+    assert.strictEqual(n.reason, w.buffs.ITEM_FULL);
+    assert.strictEqual(n.amount, 0);
+    assert.strictEqual(n.full.back, 100);
+    assert.strictEqual(w.S.kernel.read.isReadRefusal('item full'), false);
+    assert.strictEqual(run(w, w.buffs.toStore('StarDust')).reason, 'item full');
+    assert.strictEqual(w.sent.actions.length, 1);
+    w.menu[0].amount = 0;
+    n = w.buffs.storeNext('StarDust');
+    assert.strictEqual(n.reason, 'none in star');
+    assert.strictEqual(n.full, null);
+    w.menu[0].amount = 100;
+    assert.strictEqual(w.buffs.storeNext('StarDust').reason, 'item full');
+    w.env.store.Wood = 0;
+    w.menu.push(item('Wood', 10, 'w1'));
+    assert.strictEqual(w.buffs.storeNext('Wood').reason, null);
+    assert.strictEqual(w.buffs.storeNext('Wood').full, null);
+});
+
+t.test('a full mark clears after 30 min', function () {
+    var w = marked();
+    var at = w.buffs.storeFull('StarDust').at;
+    w.env.now = at + HOLD_MS - 1;
+    assert.notStrictEqual(w.buffs.storeFull('StarDust'), null);
+    w.env.now = at + HOLD_MS;
+    assert.strictEqual(w.buffs.storeFull('StarDust'), null);
+    assert.strictEqual(w.buffs.storeNext('StarDust').reason, null);
+});
+
+t.test('a full mark clears when the store drops by the returned stack', function () {
+    var w = marked();
+    w.env.store.StarDust = 81;
+    assert.notStrictEqual(w.buffs.storeFull('StarDust'), null);
+    w.env.store.StarDust = 80;
+    assert.strictEqual(w.buffs.storeFull('StarDust'), null);
+    w.env.store.StarDust = 180;
+    assert.strictEqual(w.buffs.storeFull('StarDust'), null);
+});
+
+t.test('a full mark clears when the capacity rises', function () {
+    var w = marked();
+    w.env.capacity = 1000;
+    assert.notStrictEqual(w.buffs.storeFull('StarDust'), null);
+    w.env.capacity = 1001;
+    assert.strictEqual(w.buffs.storeFull('StarDust'), null);
+});
+
+t.test('unreadable reads never clear a full mark', function () {
+    var w = marked();
+    delete w.env.store.StarDust;
+    w.env.capacity = null;
+    assert.notStrictEqual(w.buffs.storeFull('StarDust'), null);
+    breakMenu(w);
+    assert.notStrictEqual(w.buffs.storeFull('StarDust'), null);
+    assert.strictEqual(w.buffs.storeFull(null), null);
+});
+
+t.test('failedProof names an unmoved stack after the settle time and nothing else', function () {
+    var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 0 } });
+    var def = w.buffs.toStore('Wood');
+    var base = { amount: 100, star: 100, stock: 0, at: w.env.now };
+    assert.strictEqual(def.failedProof(base), '');
+    w.env.now += w.buffs.STORE_SETTLE_MS;
+    assert.strictEqual(def.failedProof(base), 'still in the star menu after 15000 ms');
+    assert.strictEqual(w.buffs.storeFull('Wood'), null);
+    w.menu[0].amount = 0;
+    assert.strictEqual(def.failedProof(base), '');
+    w.menu[0].amount = 100;
+    w.env.store.Wood = 100;
+    assert.strictEqual(def.failedProof(base), '');
+    assert.strictEqual(def.failedProof(null), '');
+});
+
+t.test('toStore holds its check while off home', function () {
+    var w = world({ buffs: [item('Wood', 100, 'w1')], store: { Wood: 0 } });
+    w.env.onSend = function () {
+        w.env.home = false;
+        w.env.later(30000, function () { w.env.home = true; });
+    };
+    var res = run(w, w.buffs.toStore('Wood'));
+    assert.strictEqual(res.status, w.S.ActionResult.Verified);
+    assert.ok(w.env.doneAt - T0 >= 30000, String(w.env.doneAt - T0));
+    var held = w.H.logs().filter(function (l) { return /not observable, holding the check/.test(l.args.join(' ')); });
+    assert.strictEqual(held.length, 1);
 });

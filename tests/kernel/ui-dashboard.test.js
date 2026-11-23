@@ -91,6 +91,14 @@ t.test('the production tab comes after events in the bar', function () {
     assert.deepStrictEqual(tabIds(open(s)), ['overview', 'mining', 'events', 'production']);
 });
 
+t.test('the economy tab comes after production', function () {
+    var s = setup();
+    mod(s, 'eco', 'economy', {});
+    mod(s, 'prod', 'production', {});
+    mod(s, 'miner', 'mining', {});
+    assert.deepStrictEqual(tabIds(open(s)), ['overview', 'mining', 'production', 'economy']);
+});
+
 t.test('opening on a tab that is not shown falls back to Overview', function () {
     var s = setup();
     mod(s, 'miner', 'mining', {});
