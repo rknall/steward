@@ -71,11 +71,7 @@
         try {
             var defs = game.def('BuffSystem::cBuff');
             if (!defs || typeof defs.GetProduceableBuffDefinitions !== 'function') return null;
-            var vec = defs.GetProduceableBuffDefinitions(game.gi);
-            if (!vec || typeof vec.length !== 'number') return null;
-            var out = [];
-            for (var i = 0; i < vec.length; i++) out.push(vec[i]);
-            return out;
+            return S.kernel.hostRead.list(defs.GetProduceableBuffDefinitions(game.gi));
         } catch (e) {
             S.kernel.warn('production', 'GetProduceableBuffDefinitions threw:', e);
             return null;
