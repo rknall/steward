@@ -628,7 +628,7 @@
     function supplyStep(r, inv) {
         var sup = loadoutSupply(r);
         if (!sup) return;
-        var opts = { waitQueued: true, waitMaxMs: PRODUCTION_WAIT_MAX_MS, transit: pendingTransit(r) };
+        var opts = { waitQueued: true, waitMaxMs: PRODUCTION_WAIT_MAX_MS, transit: pendingTransit(r), untilIdle: true };
         if (st().finishedRuns() >= 1) {
             opts.onShort = function (message) { st().stop(message + '; ' + shortHint()); };
         }
