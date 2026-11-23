@@ -37,7 +37,20 @@
     <dd>The sampler takes a reading at a fixed interval for a fixed span; the card shows both next to the button. "Dump generals" and "Dump army" take a single snapshot instead.</dd>
   </dl>
 </div>
-<p>The probes are grouped in four cards: Specialists, This zone, Army, and Game data and steward. They only read; the module never sends anything to the game.</p>
+<div class="ug-story">
+  <p class="ug-want">You want to see what steward knows about your inbox, for a mail problem report.</p>
+  <dl>
+    <dt>Steps</dt>
+    <dd><ol>
+      <li>Open the Diagnostics group on the Settings screen.</li>
+      <li>In the "Game data and steward" card, press Run next to "Dump mail".</li>
+      <li>Wait about 10 seconds and press Run again.</li>
+    </ol></dd>
+    <dt>Result</dt>
+    <dd>Each press writes a JSON file named <code>mail-&lt;zone&gt;-&lt;time&gt;.json</code> into the <code>steward/dumps</code> folder. It lists whether the mail window is open, the mail service state, how many mails of each type the inbox holds and the state of the header request. The first press asks the game for the inbox headers, so the answer is in the second file. The dump holds counts and names only, never the text of a mail.</dd>
+  </dl>
+</div>
+<p>The probes are grouped in four cards: Specialists, This zone, Army, and Game data and steward. They only read. The one request they make is "Dump mail", which asks the game for the inbox headers; nothing else is sent.</p>
 <figure class="ug-shot" data-shot="diagnostics-group.png">
   <div class="ug-shot-box">Screenshot to come</div>
   <figcaption>The Diagnostics group of the Settings screen.</figcaption>
@@ -46,6 +59,6 @@
 <p>Diagnostics has no settings. Its probes run only when you press a button.</p>
 <h2>Notes</h2>
 <ul>
-  <li>The module does nothing on its own: it never queues work for the game and runs no automation.</li>
+  <li>The module does nothing on its own and runs no automation. Apart from the header request behind "Dump mail", it never queues work for the game.</li>
   <li>Dump files can be long and list game objects in detail. Check one before you share it.</li>
 </ul>
