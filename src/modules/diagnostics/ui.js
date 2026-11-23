@@ -578,6 +578,7 @@
                 tool('Dump active adventures', '', function () { army().dumpAdventures(); }),
                 tool('Dump adventure and buff definitions', '', function () { army().dumpDefinitions(); }),
                 tool('Dump storehouse', 'JSON file in steward/dumps', function () { S.modules.diagnostics.storehouse.dump(); }),
+                tool('Dump mail', 'inbox headers, mail window; asks for headers', function () { S.modules.diagnostics.mail.dump(); }),
                 tool('Dump host snapshot', '', dumpHostSnapshot),
                 tool('Dump kernel state', '', dumpKernelState)
             ])

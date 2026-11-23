@@ -5,8 +5,10 @@
  * section with one-shot probes: each row is a description + Run button
  * that dumps kernel/host/specialist state to the standard logger.
  *
- * Never enqueues queue work. Never calls SendServerAction. Safe to leave
- * registered in production.
+ * Never enqueues queue work, with one exception: the mail probe asks for
+ * the inbox headers (a read request, message 1175) through core mail.
+ * Nothing else enqueues or sends. Never calls SendServerAction. Safe to
+ * leave registered in production.
  *
  * Output goes to category 'diag' in the standard log file.
  */
