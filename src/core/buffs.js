@@ -24,7 +24,8 @@
     // sent like a speed buff (grid 0) and only when it is in stock. A new
     // entry here is all it takes to offer another buff.
     var START_BUFFS = [
-        { name: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', label: 'Black Vortex' }
+        { name: 'PropagationBuff_AdventureZoneTravelBoost_BlackTree', label: 'Black Vortex' },
+        { name: 'PropagationBuff_AdventureZoneTravelBoost_DoggyBag', label: 'Doggy Bag' }
     ];
 
     // Star-menu type of adventure maps; the entry's resource is the adventure
