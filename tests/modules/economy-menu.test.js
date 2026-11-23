@@ -97,17 +97,17 @@ t.test('economy menu: the switch label follows enabled', function () {
     assert.strictEqual(labels(none)[0], '✕ Economy', 'a never stored switch reads as off');
 });
 
-t.test('economy menu: a flip writes only enabled and runs applySettings once', function () {
+t.test('economy menu: a flip goes through the module setEnabled once and writes only enabled', function () {
     var states = [true, false];
     for (var i = 0; i < states.length; i++) {
         var w = setup({ enabled: states[i], items: { Wood: true } });
-        var apply = w.S.kernel.lifecycle.applySettings;
-        var real = apply.economy;
-        var calls = 0;
-        apply.economy = function () { calls++; return real.apply(this, arguments); };
+        var E = w.S.modules.economy;
+        var real = E.setEnabled;
+        var calls = [];
+        E.setEnabled = function (v) { calls.push(v); return real(v); };
         w.items()[0].onSelect();
         assert.deepStrictEqual(w.writes, [{ enabled: !states[i] }]);
-        assert.strictEqual(calls, 1);
+        assert.deepStrictEqual(calls, [!states[i]]);
         assert.deepStrictEqual(w.S.kernel.settings.read('economy').items, { Wood: true }, 'selection kept');
     }
 });
@@ -121,7 +121,7 @@ t.test('economy menu: off cancels the queued transfers, on cancels nothing', fun
     assert.deepStrictEqual(on.cancels, []);
 });
 
-t.test('economy menu: without applySettings a flip still writes and does not throw', function () {
+t.test('economy menu: without the lifecycle slot a flip still writes, cancels and does not throw', function () {
     var w = setup({ enabled: true });
     delete w.S.kernel.lifecycle.applySettings.economy;
     var errors = 0;
@@ -129,6 +129,7 @@ t.test('economy menu: without applySettings a flip still writes and does not thr
     w.S.kernel.error = function () { errors++; return err.apply(w.S.kernel, arguments); };
     w.items()[0].onSelect();
     assert.deepStrictEqual(w.writes, [{ enabled: false }]);
+    assert.deepStrictEqual(w.cancels, ['economy'], 'the module runs its own off path');
     assert.strictEqual(errors, 0);
 });
 
@@ -137,6 +138,8 @@ t.test('economy menu: the open row opens the economy window and writes nothing',
     w.items()[2].onSelect();
     assert.strictEqual(w.opens, 1);
     assert.strictEqual(w.writes.length, 0);
+    w.M.openWindow();
+    assert.strictEqual(w.opens, 2, 'the exported opener is the row one');
 });
 
 t.test('economy menu: the status row reads one snapshot per pass and shows statusLine', function () {

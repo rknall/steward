@@ -915,7 +915,7 @@
             if (unreadableAs(raw[i], ADD_RESOURCE_TYPE)) return null;
             if (raw[i].type !== ADD_RESOURCE_TYPE) continue;
             var r = raw[i].resource || '';
-            if (!r || r === pop || Object.prototype.hasOwnProperty.call(seen, r)) continue;
+            if (!r || r === pop || S.kernel.is.has(seen, r)) continue;
             seen[r] = true;
             names.push(r);
         }
@@ -955,7 +955,7 @@
     // when the store dropped enough to take the returned stack, or when the
     // warehouse capacity rose. An unreadable value never clears it early.
     function fullOf(name) {
-        if (!Object.prototype.hasOwnProperty.call(fullMarks, name)) return null;
+        if (!S.kernel.is.has(fullMarks, name)) return null;
         var m = fullMarks[name];
         var clear = clock() - m.at >= FULL_HOLD_MS;
         if (!clear && isNum(m.stock)) {

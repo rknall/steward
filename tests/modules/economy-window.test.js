@@ -39,7 +39,7 @@ function setup(stored) {
     var S = H.Steward;
     H.ctx.getImageTag = function (id) { return '<img ' + id + '>'; };
     S.kernel.ui.ensureStyle = function () {};
-    var w = { H: H, S: S, $: $, rig: rig, writes: [], applies: 0, resets: [], resolves: [],
+    var w = { H: H, S: S, $: $, rig: rig, writes: [], cancels: [], resets: [], resolves: [],
               st: status({}), gridNull: false, base: [] };
     H.ctx.Modal.prototype.show = function () {};
     H.ctx.Modal.prototype.hide = function () {};
@@ -59,8 +59,7 @@ function setup(stored) {
         }
         return write(id, merged);
     };
-    S.kernel.lifecycle.applySettings.economy = function () { w.applies++; };
-    S.kernel.queue.cancelByModule = function () { return 0; };
+    S.kernel.queue.cancelByModule = function (id) { w.cancels.push(id); return 0; };
     // Rows as the model shapes them; selected follows the stored settings.
     w.base = [
         { name: 'Wood',  label: 'Wood',  tab: 'WarehouseTab1', star: 100, fits: 100, state: 'ready' },
@@ -294,7 +293,7 @@ t.test('economy window: the Settings switch writes enabled at once', function ()
     $sw.prop('checked', false);
     $sw.trigger('change');
     assert.deepStrictEqual(w.writes, [{ enabled: false }]);
-    assert.strictEqual(w.applies, 1);
+    assert.deepStrictEqual(w.cancels, ['economy'], 'off cancels the queued transfers');
     assert.strictEqual(w.S.modules.economy.readSettings().items.Wood, true);
 });
 

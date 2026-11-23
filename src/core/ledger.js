@@ -555,7 +555,7 @@
             n++;
         }
         if (n > 0) {
-            S.kernel.debug(categoryOf(owner), 'released ' + n + ' send ledger key' + (n === 1 ? '' : 's') +
+            S.kernel.debug(categoryOf(owner), 'released ' + S.kernel.text.plural(n, 'send ledger key') +
                 ' of cancelled ' + owner + ' attempts');
         }
         return n;

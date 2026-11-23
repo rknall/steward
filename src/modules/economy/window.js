@@ -116,12 +116,6 @@
         return safe(function () { return M().menu.statusText(st); }, 'Economy status unavailable');
     }
 
-    function applyNow() {
-        var apply = S.kernel.lifecycle && S.kernel.lifecycle.applySettings
-            ? S.kernel.lifecycle.applySettings[OWNER] : null;
-        if (typeof apply === 'function') apply();
-    }
-
     // ---- Shell ----------------------------------------------------------------
 
     // One read pass per render: the status and the grid share the host
@@ -185,7 +179,7 @@
     // ---- Star to store tab ----------------------------------------------------
 
     function resetBreaker() {
-        try { S.core.ledger.breaker(M().OWNER).reset('the user'); }
+        try { M().resetBreaker(); }
         catch (e) { S.kernel.error(OWNER, 'breaker reset threw:', e); }
         render();
     }
@@ -296,9 +290,8 @@
             h.toggle({
                 checked: s.enabled === true,
                 write: function (v) {
-                    S.kernel.settings.write(OWNER, { enabled: v });
-                    S.kernel.log('ui', OWNER, 'enabled', '→', v);
-                    applyNow();
+                    try { M().setEnabled(v); }
+                    catch (e) { S.kernel.error(OWNER, 'switch of enabled threw:', e); }
                     render();
                 }
             })));

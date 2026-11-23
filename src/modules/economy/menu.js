@@ -16,11 +16,14 @@
  * rebuilt, because every native rebuild leaks objects in AIR, and a label
  * is written in place only when its text changed.
  *
- * A flip writes an object holding only `enabled`, at once and with no Save:
- * the host's settings store deep-merges, so the selection and every other
- * key keep their stored values. It then runs the module's applySettings,
- * the same off path a dashboard Save runs, so the module alone decides what
- * an off switch stops.
+ * A flip goes through the module's setEnabled, the one switch every economy
+ * surface calls: it writes an object holding only `enabled`, at once and
+ * with no Save (the host's settings store deep-merges, so the selection and
+ * every other key keep their stored values), then runs the module's off
+ * path, so the module alone decides what an off switch stops.
+ *
+ * openWindow is the one opener of the economy window; the dashboard tab and
+ * tile use it too.
  *
  * Status words. stateOf(st) names the one state of a status object
  * (model.snapshot() or model.emptyStatus(); null reads as off). The first
@@ -64,7 +67,7 @@
 
     function M() { return S.modules.economy; }
 
-    function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+    function num(v) { return S.kernel.is.finite(v) ? v : 0; }
 
     // The settings with their defaults applied, so a never stored `enabled`
     // reads as its default and flips from there. Falls back to the raw
@@ -144,12 +147,7 @@
 
     function flip() {
         try {
-            var value = current().enabled !== true;
-            S.kernel.settings.write(OWNER, { enabled: value });
-            S.kernel.log('ui', OWNER, 'enabled', '→', value);
-            var apply = S.kernel.lifecycle && S.kernel.lifecycle.applySettings
-                ? S.kernel.lifecycle.applySettings[OWNER] : null;
-            if (typeof apply === 'function') apply();
+            M().setEnabled(current().enabled !== true);
             // The labels follow the flag on the next status tick anyway;
             // refreshing now shows the flip at once.
             if (S.kernel.ui && S.kernel.ui.status && typeof S.kernel.ui.status.refresh === 'function') {
@@ -187,7 +185,8 @@
         items:      items,
         stateOf:    stateOf,
         statusText: statusText,
-        statusLine: statusLine
+        statusLine: statusLine,
+        openWindow: openWindow
     };
 
 }(Steward));

@@ -35,7 +35,7 @@ function setup(o) {
     var M = S.modules.economy;
     S.kernel.settings.write('economy', { enabled: o.enabled !== false, items: { Wood: true } });
     var w = { H: H, S: S, $: $, h: S.kernel.ui.helpers, st: status(o.status), moved: o.moved || [],
-              writes: [], applies: 0, resets: [], opened: 0, banners: [] };
+              writes: [], cancels: [], resets: [], opened: 0, banners: [] };
     var write = S.kernel.settings.write;
     S.kernel.settings.write = function (id, val) {
         if (id === 'economy') w.writes.push(plain(val));
@@ -46,7 +46,7 @@ function setup(o) {
         }
         return write(id, merged);
     };
-    S.kernel.lifecycle.applySettings.economy = function () { w.applies++; };
+    S.kernel.queue.cancelByModule = function (id) { w.cancels.push(id); return 0; };
     M.model.snapshot = function () { return w.st; };
     M.model.status = function () { throw new Error('status must not be read'); };
     M.model.grid = function () { throw new Error('grid must not be read'); };
@@ -211,7 +211,7 @@ t.test('economy ui: Moved lately newest first, at most 5, empty text', function 
     ]);
 });
 
-t.test('economy ui: the side switch writes only enabled and applies at once', function () {
+t.test('economy ui: the side switch writes only enabled and runs the off path at once', function () {
     var w = setup();
     var $main = draw(w, 'render');
     var $side = draw(w, 'side');
@@ -220,14 +220,14 @@ t.test('economy ui: the side switch writes only enabled and applies at once', fu
     $sw.prop('checked', false);
     $sw.trigger('change');
     assert.deepStrictEqual(w.writes, [{ enabled: false }]);
-    assert.strictEqual(w.applies, 1);
+    assert.deepStrictEqual(w.cancels, ['economy'], 'off cancels the queued transfers');
     assert.strictEqual(w.S.kernel.settings.read('economy').items.Wood, true, 'the selection is kept');
     w.st = status({ enabled: false, selected: 1 });
     // The model reads the switch; the fixture stands in for it here.
     $sw.prop('checked', true);
     $sw.trigger('change');
     assert.deepStrictEqual(w.writes, [{ enabled: false }, { enabled: true }]);
-    assert.strictEqual(w.applies, 2);
+    assert.deepStrictEqual(w.cancels, ['economy'], 'on cancels nothing');
     assert.ok($main.find('.steward-card-h').length > 0, 'the main column is redrawn in place');
 });
 

@@ -15,10 +15,12 @@
  *   summary   the one-line strip.
  *   tiles     the Overview tile, its badge by state (table below).
  *
- * The switch writes `enabled` at once, with no Save, as the submenu and the
- * window do: the host's settings store deep-merges, so the selection keeps
- * its stored value. It then runs the module's applySettings, the one off
- * path, so turning the module off here stops the same work as anywhere else.
+ * The switch calls the module's setEnabled, as the submenu and the window
+ * do: it writes `enabled` at once, with no Save (the host's settings store
+ * deep-merges, so the selection keeps its stored value), and runs the one
+ * off path, so turning the module off here stops the same work as anywhere
+ * else. The manager buttons use the submenu's openWindow and Reset the
+ * module's resetBreaker.
  *
  * Every count comes from the model's status snapshot
  * (S.modules.economy.model.snapshot(), else its emptyStatus()), so the card,
@@ -80,7 +82,7 @@
         }
     }
 
-    function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+    function num(v) { return S.kernel.is.finite(v) ? v : 0; }
 
     // The model's snapshot, else its empty status, so a draw never shows a
     // hand-kept copy of the status shape that could drift from the builder.
@@ -111,20 +113,11 @@
         return typeof ms === 'number' ? h.clock(new Date(ms)) : '';
     }
 
+    // The submenu's opener, so every economy surface opens the window the
+    // same way and says the same when it is missing.
     function openManager() {
-        var w = M().window;
-        if (w && typeof w.open === 'function') {
-            try { w.open(); }
-            catch (e) { S.kernel.error(OWNER, 'window.open threw:', e); }
-        } else {
-            S.kernel.warn(OWNER, 'economy window is not loaded');
-        }
-    }
-
-    function applyNow() {
-        var apply = S.kernel.lifecycle && S.kernel.lifecycle.applySettings
-            ? S.kernel.lifecycle.applySettings[OWNER] : null;
-        if (typeof apply === 'function') apply();
+        try { M().menu.openWindow(); }
+        catch (e) { S.kernel.error(OWNER, 'open economy manager threw:', e); }
     }
 
     // The main column last drawn, so a Reset or a switch flip redraws it in
@@ -146,7 +139,7 @@
     }
 
     function resetBreaker() {
-        try { S.core.ledger.breaker(M().OWNER).reset('the user'); }
+        try { M().resetBreaker(); }
         catch (e) { S.kernel.error(OWNER, 'breaker reset threw:', e); }
         redrawMain();
     }
@@ -164,9 +157,8 @@
                 checked: s.enabled === true,
                 label: 'Economy',
                 write: function (v) {
-                    S.kernel.settings.write(OWNER, { enabled: v });
-                    S.kernel.log('ui', OWNER, 'enabled', '→', v);
-                    applyNow();
+                    try { M().setEnabled(v); }
+                    catch (e) { S.kernel.error(OWNER, 'switch of enabled threw:', e); }
                     $line.text(statusText(status()));
                     redrawMain();
                 }

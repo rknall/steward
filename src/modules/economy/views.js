@@ -81,10 +81,10 @@
         return $e.text(text);
     }
 
-    function isNum(n) { return typeof n === 'number' && isFinite(n); }
+    function isNum(n) { return S.kernel.is.finite(n); }
 
     function note(h, state) {
-        if (!Object.prototype.hasOwnProperty.call(NOTES, state)) return null;
+        if (!S.kernel.is.has(NOTES, state)) return null;
         return textEl('div', 'steward-muted', NOTES[state]);
     }
 
@@ -138,13 +138,13 @@
     function classesOf(row) {
         var cls = 'steward-store-item';
         if (row.selected === true) cls += ' is-on';
-        if (Object.prototype.hasOwnProperty.call(STATE_CLASS, row.state)) cls += ' is-' + row.state;
+        if (S.kernel.is.has(STATE_CLASS, row.state)) cls += ' is-' + row.state;
         return cls;
     }
 
     function badgeOf(row) {
         if (row.state === 'ready' && row.selected !== true) return null;
-        return Object.prototype.hasOwnProperty.call(BADGE, row.state) ? BADGE[row.state] : null;
+        return S.kernel.is.has(BADGE, row.state) ? BADGE[row.state] : null;
     }
 
     function fill(h, row, pass, $t) {

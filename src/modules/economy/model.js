@@ -104,7 +104,7 @@
     function fitsOf(state, p) {
         if (state === 'full' || state === 'warehouse') return 0;
         if (state === 'none') return null;
-        if (!p.star || typeof p.star.total !== 'number' || typeof p.room !== 'number' || !(p.room > 0)) return null;
+        if (!p.star || !S.kernel.is.num(p.star.total) || !S.kernel.is.num(p.room) || !(p.room > 0)) return null;
         return Math.floor(Math.min(p.star.total, p.room));
     }
 
@@ -158,7 +158,7 @@
             }
             var picked = 0;
             for (var n in s.items) {
-                if (!Object.prototype.hasOwnProperty.call(s.items, n) || s.items[n] !== true) continue;
+                if (!S.kernel.is.has(s.items, n) || s.items[n] !== true) continue;
                 if (n === pop) continue;
                 picked++;
                 if (seen[n]) continue;
@@ -188,7 +188,7 @@
             var other = [];
             for (i = 0; i < rows.length; i++) {
                 var t = rows[i].tab;
-                if (typeof t === 'string' && Object.prototype.hasOwnProperty.call(slot, t)) slot[t].rows.push(rows[i]);
+                if (typeof t === 'string' && S.kernel.is.has(slot, t)) slot[t].rows.push(rows[i]);
                 else other.push(rows[i]);
             }
             var kept = [];

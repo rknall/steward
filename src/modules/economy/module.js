@@ -86,7 +86,7 @@
         var items = {};
         var src = stored.items && typeof stored.items === 'object' ? stored.items : {};
         for (key in src) {
-            if (Object.prototype.hasOwnProperty.call(src, key)) items[key] = src[key] === true;
+            if (S.kernel.is.has(src, key)) items[key] = src[key] === true;
         }
         merged.items = items;
         merged.enabled = merged.enabled === true;
@@ -97,7 +97,7 @@
     function selectedNames(s) {
         var out = [];
         for (var n in s.items) {
-            if (Object.prototype.hasOwnProperty.call(s.items, n) && s.items[n] === true) out.push(n);
+            if (S.kernel.is.has(s.items, n) && s.items[n] === true) out.push(n);
         }
         out.sort();
         return out;
@@ -122,7 +122,7 @@
     function forgetSaid(name) {
         var p = name + '|';
         for (var k in said) {
-            if (Object.prototype.hasOwnProperty.call(said, k) && k.indexOf(p) === 0) delete said[k];
+            if (S.kernel.is.has(said, k) && k.indexOf(p) === 0) delete said[k];
         }
     }
 
@@ -264,10 +264,30 @@
         return on;
     }
 
+    // The one module switch every surface (submenu, dashboard tab, window)
+    // calls. Writes only `enabled`, so the host's deep-merging store keeps
+    // the selection, and runs the off path at once (no draft).
+    function setEnabled(v) {
+        var on = v === true;
+        S.kernel.settings.write(OWNER, { enabled: on });
+        S.kernel.log('ui', OWNER, 'enabled', '→', on);
+        applySettings();
+        return on;
+    }
+
+    // The user's breaker reset, shared by the dashboard banner and the
+    // window; each caller redraws its own surface afterwards.
+    function resetBreaker() {
+        try { S.core.ledger.breaker(OWNER).reset('the user'); }
+        catch (e) { S.kernel.error(OWNER, 'breaker reset threw:', e); }
+    }
+
     var E = S.modules.economy;
     E.OWNER        = OWNER;
     E.readSettings = readSettings;
     E.toggle       = toggle;
+    E.setEnabled   = setEnabled;
+    E.resetBreaker = resetBreaker;
     E.key          = key;
     E.moved        = function () { return moved.slice(); };
     E.lastPass     = function () { return lastPass; };
