@@ -4,7 +4,7 @@ Steward is a userscript for the Adobe AIR–based TSO client. It is structured a
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  modules/   ← opt-in automation (collect, mining, …)        │
+│  modules/   ← opt-in automation (collect, mining, …)       │
 │      ▲                                                      │
 │      │ depends on                                           │
 │      ▼                                                      │
