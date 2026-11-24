@@ -814,17 +814,20 @@
                 var file = typeof entry === 'string';
                 var last = draft.waves.length - 1;
                 var $li = $('<li>', { 'data-idx': String(idx) });
-                if (state.moved === idx) $li.addClass('steward-moved');
-                if (sortable) $li.append(textEl('span', 'steward-handle', '⋮⋮'));
+                var $left = $('<div>', { 'class': 'steward-waves-left' });
+                var $right = $('<div>', { 'class': 'steward-waves-right' });
+                $li.append($left).append($right)
+                if (state.moved === idx) $left.addClass('steward-moved');
+                if (sortable) $left.append(textEl('span', 'steward-handle', '⋮⋮'));
                 var $n = textEl('span', 'steward-wave-n', file ? String(waveNo(draft.waves, idx)) : '•');
-                $li.append($n);
+                $left.append($n);
                 if (file) {
                     var counts = waveCounts(entry);
                     var $f = $('<span>', { 'class': 'steward-wave-f', title: entry }).text(T().fileName(entry));
                     $f.append(counts === null ? textEl('small', 'steward-bad', 'unreadable') : textEl('small', null, counts));
-                    $li.append($f);
+                    $left.append($f);
                 } else {
-                    $li.append(itemSlot(entry, idx, names));
+                    $left.append(itemSlot(entry, idx, names));
                 }
                 var $up = iconBtn('↑', 'Move up', idx === 0, function () { moveWave(at($li), -1); });
                 var $down = iconBtn('↓', 'Move down', idx === last, function () { moveWave(at($li), 1); });
@@ -835,7 +838,7 @@
                     state.moved = -1;
                     render();
                 });
-                $li.append($up).append($down).append($rm);
+                $right.append($up).append($down).append($rm);
                 rows.push({ $li: $li, $n: $n, $up: $up, $down: $down });
                 $ol.append($li);
             }(i));

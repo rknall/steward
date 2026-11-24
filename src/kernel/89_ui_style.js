@@ -500,11 +500,15 @@
             '.steward-waves li{display:table;width:100%;padding:6px 12px;border-top:' + line + ';}',
             '.steward-waves li:first-child{border-top:0;}',
             '.steward-waves li.steward-moved{background:' + t.brassTint + ';}',
+            '.steward-waves-left {display:table-cell;vertical-align: middle;text-align: left;width:70%;white-space: nowrap;}',
+            '.steward-waves-left spam{display:inline-block;vertical-align: middle;text-align: left;}',
+            '.steward-waves-right {display:table-cell;vertical-align: middle;text-align: right;white-space: nowrap;width:30%;}',
+            '.steward-waves-right button{display:inline-block;vertical-align: middle;text-align: center;}',
             '.steward-wave-n{display:inline-block;width:26px;height:22px;margin-right:10px;' +
                 'border-radius:11px;background:' + t.band + ';color:' + t.ink + ';' +
                 'font-size:' + px(t.fontSm) + ';font-weight:700;line-height:22px;text-align:center;' +
                 'vertical-align:middle;}',
-            '.steward-wave-f{display:table-cell;width:100%;padding-right:10px;vertical-align:middle;}',
+            '.steward-wave-f{display:inline-block;width:100%;padding-right:10px;vertical-align:middle;}',
             '.steward-wave-f small{display:block;color:' + t.muted + ';font-size:' + px(t.fontSm) + ';}',
             '.steward-handle{display:inline-block;margin-right:10px;color:' + t.disabledInk + ';' +
                 'cursor:move;font-size:' + px(t.fontBase) + ';letter-spacing:-2px;vertical-align:middle;}',
