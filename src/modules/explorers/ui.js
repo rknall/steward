@@ -238,14 +238,14 @@
                 var current = null;
                 if (!isIdle && !isUnknown && c.currentTask) {
                     var ct = c.currentTask(spec);
-                    if (ct) current = c.taskLabel(ct);
+                    if (ct) { var text = c.taskLabel(ct); current = $('<span>').text(text).attr('title', text).attr('data-toggle', "tooltip").attr("data-placement", "top"); }
                 }
                 var next = '?';
                 try {
                     var nt = c.pickTask(spec);
                     if (nt) next = c.taskLabel(nt);
                 } catch (ePick) { /* keep '?' */ }
-                var $next = $('<span>').text(next).attr('title', next);
+                var $next = $('<span>').text(next).attr('title', next).attr('data-toggle', "tooltip").attr("data-placement", "top");
                 if (hasOv) $next.append(' ').append(h.badge('tag', 'override'));
 
                 rows.push([

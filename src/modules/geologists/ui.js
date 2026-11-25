@@ -601,7 +601,7 @@
         if (!g.best.trait) return { text: 'no trait', cls: 'steward-muted' };
         var label = S.core.locale.res(g.best.name);
         var detail = ' · amount ×' + fmtFactor(g.best.cap) + ' · time ×' + fmtFactor(g.best.time);
-        var $c = $('<span>').text(label)
+        var $c = $('<span>').text(label).attr("title", label + detail).attr("data-toggle", "tooltip").attr("data-placement", "top")
             .append($('<span>', { 'class': 'steward-muted' }).text(detail));
         return { $: $c, title: label + detail };
     }

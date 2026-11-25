@@ -74,6 +74,11 @@
     // Redraws of the open tab that were scheduled because a read had not settled.
     var readRedraws = 0;
 
+    // Attaches a single bootstrap tooltip listener to the body rather than individual listeners to every element
+    $('body').tooltip({
+        selector: '[data-toggle="tooltip"]'
+    });
+
     // -----------------------------------------------------------------
     // Small reads
     // -----------------------------------------------------------------

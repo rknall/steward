@@ -267,6 +267,9 @@
         if (opts.sub)      $f.addClass('steward-sub');
         if (opts.disabled) $f.addClass('steward-dis');
         if (opts.wrap)     $f.addClass('steward-wrap');
+        if (opts["data-toggle"]) $f.attr('data-toggle', opts["data-toggle"]);
+        if (opts["data-placement"]) $f.attr('data-placement', opts["data-placement"]);
+        if (opts["data-original-title"]) $f.attr('data-original-title', opts["data-original-title"]);
 
         var $lbl = $('<span>', { 'class': 'steward-field-lbl' });
         $lbl.append($('<b>', { 'class': 'steward-field-name' }).text(label || ''));
@@ -447,6 +450,9 @@
         if (opts.primary) $b.addClass('steward-primary');
         if (opts.disabled) $b.attr('disabled', 'disabled');
         if (opts.title) $b.attr('title', opts.title);
+        if (opts["data-toggle"]) $b.attr('data-toggle', opts["data-toggle"]);
+        if (opts["data-placement"]) $b.attr('data-placement', opts["data-placement"]);
+        if (opts["data-original-title"]) $b.attr('data-original-title', opts["data-original-title"]);
         if (typeof opts.onClick === 'function') {
             $b.on('click', function (e) {
                 e.preventDefault();
