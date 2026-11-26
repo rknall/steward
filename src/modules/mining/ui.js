@@ -346,7 +346,7 @@
         var options = [{ label: 'None', value: '' }];
         var offered = false;
         for (var i = 0; i < list.length; i++) {
-            options.push({ label: list[i].label + ' (' + (typeof list[i].amount === 'number' ? list[i].amount : '?') + ')', value: list[i].name });
+            options.push({ label: list[i].label + ' (' + (typeof list[i].amount === 'number' ? list[i].amount : '?') + ')' + ': ' + list[i].effect, value: list[i].name });
             if (list[i].name === chosen) offered = true;
         }
         // Kept selectable so showing the row never rewrites the stored choice.
