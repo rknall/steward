@@ -147,7 +147,7 @@
     // Panel and column dimensions. compactMaxHeight, minPanel and chrome
     // are read by the shell when it sizes a compact screen, not by the CSS.
     var layout = {
-        modal:            1000,
+        modal:            1100,
         panel:            480,
         settingsPanel:    524,
         side:             318,

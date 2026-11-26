@@ -280,10 +280,10 @@
             $card.append(h.table({
                 fill: true,
                 cols: [
-                    { label: 'Explorer',     width: '34%' },
-                    { label: 'Status',       width: '20%' },
-                    { label: 'Current task', width: '22%' },
-                    { label: 'Next task',    width: '24%' }
+                    { label: 'Explorer',     width: '25%' },
+                    { label: 'Status',       width: '18%' },
+                    { label: 'Current task', width: '29%' },
+                    { label: 'Next task',    width: '29%' }
                 ],
                 rows: rows,
                 emptyText: explorers.length ? 'No explorers match this filter.' : 'No explorers found.'
